@@ -1,8 +1,12 @@
+# Publie les binaires précompilés dès qu'une étiquette « v… » est poussée.
 name: release
+
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+
 permissions:
   contents: write
   id-token: write
@@ -12,8 +16,19 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Tests
+        run: go test ./...
+
+      # Le script produit linux, darwin et windows, en amd64 comme en arm64,
+      # afin que « gh extension install » fonctionne partout.
       - uses: cli/gh-extension-precompile@v2
         with:
-          generate_attestations: true
           go_version_file: go.mod
+          build_script_override: script/build.sh
+          generate_attestations: true

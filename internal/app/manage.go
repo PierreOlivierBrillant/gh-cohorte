@@ -1,0 +1,1007 @@
+package app
+
+import (
+	"encoding/csv"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/clone"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+)
+
+// Menu du mode gestion.
+var manageMenu = ui.Options(
+	"ajouter", "Ajouter des dépôts au groupe",
+	"acces", "Afficher les accès de tous les dépôts",
+	"urls", "Afficher les URL des dépôts",
+	"collaborateurs", "Gérer les collaborateurs d'un dépôt",
+	"cloner", "Cloner des dépôts en local",
+	"pull", "Mettre à jour des clones existants",
+	"supprimer", "Supprimer un dépôt",
+	"rafraichir", "Recharger la liste",
+	"changer", "Changer de groupe",
+	"quitter", "Quitter",
+)
+
+// manageSession pilote le mode « gérer un groupe existant ».
+type manageSession struct {
+	session       *Session
+	org           string
+	initialPrefix string
+	resolver      *identity.Resolver
+	repos         []groups.RepoInfo
+	loaded        bool
+}
+
+func newManageSession(session *Session, initialPrefix string) *manageSession {
+	reportDir, err := roster.ExpandPath(session.Options.ReportDir)
+	if err != nil {
+		reportDir = session.Options.ReportDir
+	}
+	return &manageSession{
+		session:       session,
+		org:           session.Settings.Org,
+		initialPrefix: initialPrefix,
+		resolver: identity.New(session.Client, session.Cache, reportDir,
+			session.Options.Jobs),
+	}
+}
+
+// forget oublie l'inventaire retenu en mémoire, après une purge du cache.
+func (m *manageSession) forget() {
+	m.repos, m.loaded = nil, false
+}
+
+// ------------------------------------------------------------------ inventaire
+
+// loadRepos charge les dépôts de l'organisation : mémoire, puis cache, puis API.
+func (m *manageSession) loadRepos(force bool) ([]groups.RepoInfo, error) {
+	console := m.session.Console
+	if m.loaded && !force {
+		return m.repos, nil
+	}
+
+	key := cache.ReposKey(m.org)
+	if !force {
+		var cached []groups.RepoInfo
+		if m.session.Cache.Get(key, cache.ReposTTL, &cached) && len(cached) > 0 {
+			m.repos, m.loaded = cached, true
+			console.Printf("  %s dépôt(s) %s", console.OK(itoa(len(cached))),
+				console.Dim("(cache : "+m.session.Cache.Describe()+")"))
+			return cached, nil
+		}
+	}
+
+	progress := ui.NewProgress(console, "Dépôts", 0)
+	repos, err := m.session.Client.ListOrgRepos(m.org, func(total int) {
+		progress.Line("Chargement des dépôts de " + m.org + "… " + itoa(total))
+	})
+	progress.Clear()
+	if err != nil {
+		return nil, err
+	}
+	console.Printf("  %s dépôt(s) dans l'organisation.", console.OK(itoa(len(repos))))
+	m.session.Cache.Set(key, repos)
+	m.repos, m.loaded = repos, true
+	return repos, nil
+}
+
+// chooseGroup propose les groupes détectés et retient celui demandé.
+func (m *manageSession) chooseGroup() (*groups.Group, error) {
+	console := m.session.Console
+	repos, err := m.loadRepos(false)
+	if err != nil {
+		return nil, err
+	}
+
+	if m.initialPrefix != "" {
+		// Préfixe fourni en ligne de commande : il ne sert qu'une fois.
+		prefix := m.initialPrefix
+		m.initialPrefix = ""
+		group := groups.Build(prefix, repos)
+		if group.Len() > 0 {
+			return &group, nil
+		}
+		console.Failure("Aucun dépôt ne commence par « %s- ».", prefix)
+		if !m.session.Interactive() {
+			return nil, valid.Errorf("Groupe « %s » introuvable dans « %s ».", prefix, m.org)
+		}
+	}
+	if len(repos) == 0 {
+		console.Warning("Aucun dépôt dans cette organisation.")
+		return nil, nil
+	}
+	if !m.session.Interactive() {
+		return nil, valid.Errorf("Le mode gestion attend un préfixe : passez --manage PREFIXE.")
+	}
+
+	names := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		names = append(names, repo.Name)
+	}
+	detected := groups.Detect(names, 2)
+
+	console.Heading("Groupes existants")
+	if len(detected) == 0 {
+		console.Note("Aucun groupe détecté automatiquement.")
+	} else {
+		rows := make([][]string, 0, len(detected))
+		for index, item := range detected {
+			rows = append(rows, []string{itoa(index + 1), item.Prefix, itoa(item.Count) + " dépôt(s)"})
+		}
+		console.Table([]string{"#", "Préfixe", "Taille"}, rows, 20)
+	}
+
+	for {
+		options := make([]ui.Option, 0, len(detected)+2)
+		for _, item := range detected {
+			options = append(options, ui.Option{
+				Value: "prefixe:" + item.Prefix,
+				Label: item.Prefix + "  (" + itoa(item.Count) + " dépôt(s))",
+			})
+		}
+		options = append(options,
+			ui.Option{Value: "saisir", Label: "Saisir un autre préfixe…"},
+			ui.Option{Value: "revenir", Label: "Revenir"})
+
+		defaultChoice := "saisir"
+		if len(detected) > 0 {
+			defaultChoice = "prefixe:" + detected[0].Prefix
+		}
+		choice, err := m.session.Prompt.Choose("Groupe à ouvrir", options, defaultChoice)
+		if err != nil {
+			return nil, err
+		}
+		if choice == "revenir" {
+			return nil, nil
+		}
+
+		prefix := strings.TrimPrefix(choice, "prefixe:")
+		if choice == "saisir" {
+			answer, err := m.session.Prompt.Ask(ui.Question{
+				Title:      "Préfixe du groupe (vide pour revenir)",
+				AllowEmpty: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(answer) == "" {
+				return nil, nil
+			}
+			cleaned, err := valid.SlugFragment(answer, "Préfixe")
+			if err != nil {
+				console.Failure("%v", err)
+				continue
+			}
+			prefix = cleaned
+		}
+
+		group := groups.Build(prefix, repos)
+		if group.Len() == 0 {
+			console.Failure("Aucun dépôt ne commence par « %s- ».", prefix)
+			continue
+		}
+		return &group, nil
+	}
+}
+
+// names retrouve le nom complet de chaque dépôt du groupe.
+func (m *manageSession) names(group *groups.Group) map[string]string {
+	pairs := make([]identity.Pair, 0, group.Len())
+	for _, repo := range group.Repos {
+		pairs = append(pairs, identity.Pair{Repo: repo.Name, Login: repo.Suffix})
+	}
+	missing := m.resolver.Missing(pairs)
+	if len(missing) == 0 {
+		return m.resolver.Resolve(pairs, false, nil)
+	}
+	progress := ui.NewProgress(m.session.Console, "Noms complets", len(missing))
+	names := m.resolver.Resolve(pairs, true, func(done, total int, repo string) {
+		progress.Update(done, repo)
+	})
+	progress.Finish("")
+	return names
+}
+
+// show affiche le groupe : dépôt, nom complet, visibilité, dernier envoi.
+func (m *manageSession) show(group *groups.Group) {
+	console := m.session.Console
+	console.Heading("Groupe « " + group.Prefix + " » — " + itoa(group.Len()) + " dépôt(s)")
+	names := m.names(group)
+
+	rows := make([][]string, 0, group.Len())
+	for index, repo := range group.Repos {
+		fullName := names[repo.Name]
+		if fullName == "" {
+			fullName = console.Dim(repo.Suffix)
+		}
+		pushed := repo.PushedAt
+		if pushed == "" {
+			pushed = console.Dim("jamais")
+		}
+		rows = append(rows, []string{itoa(index + 1), repo.Name, fullName, repo.Visibility(), pushed})
+	}
+	console.Table([]string{"#", "Dépôt", "Nom complet", "Visibilité", "Dernier envoi"}, rows, 40)
+}
+
+// ---------------------------------------------------------------- sélections
+
+// pickRepo choisit un dépôt du groupe.
+func (m *manageSession) pickRepo(group *groups.Group, question string) (*groups.Repo, error) {
+	names := m.names(group)
+	options := make([]ui.Option, 0, group.Len()+1)
+	for _, repo := range group.Repos {
+		label := repo.Name
+		if fullName := names[repo.Name]; fullName != "" {
+			label += "  —  " + fullName
+		}
+		options = append(options, ui.Option{Value: repo.Name, Label: label})
+	}
+	options = append(options, ui.Option{Value: "annuler", Label: "Annuler"})
+
+	choice, err := m.session.Prompt.Choose(question, options, "annuler")
+	if err != nil {
+		return nil, err
+	}
+	if choice == "annuler" {
+		return nil, nil
+	}
+	repo, _, found := group.Find(choice)
+	if !found {
+		m.session.Console.Failure("« %s » ne correspond à aucun dépôt du groupe.", choice)
+		return nil, nil
+	}
+	return &repo, nil
+}
+
+// pickMany choisit plusieurs dépôts, par cases à cocher ou par expression.
+func (m *manageSession) pickMany(group *groups.Group, question string) ([]groups.Repo, error) {
+	options := make([]ui.Option, 0, group.Len())
+	selected := make([]bool, group.Len())
+	for index, repo := range group.Repos {
+		options = append(options, ui.Option{Value: repo.Name, Label: repo.Name})
+		selected[index] = true
+	}
+	indices, err := m.session.Prompt.MultiSelect(question, options, selected)
+	if err != nil {
+		return nil, err
+	}
+	chosen := make([]groups.Repo, 0, len(indices))
+	for _, index := range indices {
+		if index >= 0 && index < group.Len() {
+			chosen = append(chosen, group.Repos[index])
+		}
+	}
+	return chosen, nil
+}
+
+// ------------------------------------------------------------------- actions
+
+// detectTemplate retrouve le dépôt modèle utilisé par le groupe.
+func (m *manageSession) detectTemplate(group *groups.Group) string {
+	if group.Len() == 0 {
+		return ""
+	}
+	data, err := m.session.Client.GetRepo(m.org, group.Repos[0].Name)
+	if err != nil || data == nil || data.TemplateRepository == nil {
+		return ""
+	}
+	return data.TemplateRepository.FullName
+}
+
+// addRepos ajoute des dépôts au groupe, pour les personnes non encore servies.
+func (m *manageSession) addRepos(group *groups.Group) error {
+	session, console := m.session, m.session.Console
+	console.Heading("Ajouter des dépôts à « " + group.Prefix + " »")
+	session.Settings.Assignment = group.Prefix
+
+	template := m.detectTemplate(group)
+	session.Settings.Template = template
+	if template != "" {
+		console.Printf("  Modèle réutilisé : %s %s", console.OK(template),
+			console.Dim("(détecté sur les dépôts existants)"))
+	} else {
+		console.Note("Aucun dépôt modèle détecté : les dépôts seront créés neufs.")
+	}
+
+	pattern, err := session.Prompt.Ask(ui.Question{
+		Title:   "Gabarit de nom (doit reproduire celui du groupe)",
+		Default: session.Settings.NamePattern,
+		Validate: func(value string) (string, error) {
+			return plan.ValidatePattern(value, "Gabarit de nom", true)
+		},
+	})
+	if err != nil {
+		return err
+	}
+	session.Settings.NamePattern = pattern
+
+	if template == "" {
+		if err := m.askStarter(); err != nil {
+			return err
+		}
+	}
+
+	people, err := session.collectPeople()
+	if err != nil {
+		return err
+	}
+	people, err = session.verifyAccounts(people)
+	if err != nil {
+		return err
+	}
+
+	// Les personnes déjà servies sont écartées : leur dépôt existe déjà.
+	taken := group.Suffixes()
+	var fresh []roster.Person
+	var skipped []roster.Person
+	for _, person := range people {
+		if taken[strings.ToLower(person.Username)] {
+			skipped = append(skipped, person)
+			continue
+		}
+		fresh = append(fresh, person)
+	}
+	if len(skipped) > 0 {
+		console.Warning("%d personne(s) déjà présente(s) dans le groupe :", len(skipped))
+		for index, person := range skipped {
+			if index == 10 {
+				break
+			}
+			console.Printf("    %s %s (@%s)", console.Dim("•"), person.FullName, person.Username)
+		}
+	}
+	if len(fresh) == 0 {
+		console.Print("  " + console.Info("Rien à ajouter."))
+		return nil
+	}
+
+	items, err := plan.Build(fresh, session.Settings)
+	if err != nil {
+		return err
+	}
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, []string{item.Name, item.Person.FullName, "@" + item.Person.Username})
+	}
+	console.Table([]string{"Dépôt", "Personne", "Compte"}, rows, 20)
+
+	confirmed, err := session.Prompt.Confirm(
+		plural("Créer %d dépôt(s) dans « "+m.org+" » ?", len(items)), false)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		console.Warning("Annulé.")
+		return nil
+	}
+
+	width := 10
+	for _, item := range items {
+		if len(item.Name) > width {
+			width = len(item.Name)
+		}
+	}
+	executor := runner.New(session.Client, session.Settings, session.Starter).
+		WithClock(session.Sleep, session.Now)
+	report, err := executor.Run(items, runner.Options{
+		ForceStarter: session.Options.ForceStarter,
+		OnProgress: func(index, total int, result runner.Result) {
+			session.printProgress(index, total, result, width)
+		},
+	})
+	if err != nil {
+		return err
+	}
+	console.Printf("  %s créé(s) · %s déjà présent(s) · %s en échec",
+		console.OK(itoa(report.Count(runner.Created))),
+		console.Info(itoa(report.Count(runner.Existing))),
+		console.Err(itoa(len(report.Failures()))))
+
+	reportDir, err := roster.ExpandPath(session.Options.ReportDir)
+	if err == nil {
+		if jsonPath, _, err := report.Save(reportDir); err == nil {
+			console.Note("Bilan : %s", jsonPath)
+		}
+	}
+	_, err = m.loadRepos(true)
+	return err
+}
+
+// askStarter propose de déposer des fichiers de départ dans les nouveaux dépôts.
+func (m *manageSession) askStarter() error {
+	session := m.session
+	answer, err := session.Prompt.Ask(ui.Question{
+		Title:      "Dossier de fichiers de départ (vide = aucun)",
+		Default:    session.Settings.StarterDir,
+		AllowEmpty: true,
+	})
+	if err != nil {
+		return err
+	}
+	raw := strings.TrimSpace(answer)
+	if raw == "" || clearKeywords[strings.ToLower(raw)] {
+		session.Starter = nil
+		return nil
+	}
+	bundle, err := starterLoad(raw)
+	if err != nil {
+		session.Console.Failure("%v", err)
+		session.Starter = nil
+		return nil
+	}
+	session.Starter = bundle
+	session.Settings.StarterDir = bundle.Root
+	session.Console.Printf("  Fichiers de départ : %s", session.Console.OK(bundle.Describe()))
+	return nil
+}
+
+// accessOf renvoie les collaborateurs directs et les invitations en attente.
+func (m *manageSession) accessOf(repo groups.Repo) ([]string, []ghapi.Invitation, error) {
+	collaborators, err := m.session.Client.ListCollaborators(m.org, repo.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+	logins := make([]string, 0, len(collaborators))
+	for _, item := range collaborators {
+		logins = append(logins, item.Login)
+	}
+	invitations, err := m.session.Client.ListInvitations(m.org, repo.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return logins, invitations, nil
+}
+
+// showAccess affiche les accès de tous les dépôts du groupe.
+func (m *manageSession) showAccess(group *groups.Group) error {
+	console := m.session.Console
+	console.Heading("Accès des dépôts de « " + group.Prefix + " »")
+	progress := ui.NewProgress(console, "Dépôts", group.Len())
+
+	rows := make([][]string, 0, group.Len())
+	for index, repo := range group.Repos {
+		collaborators, invitations, err := m.accessOf(repo)
+		progress.Update(index+1, repo.Name)
+		if err != nil {
+			progress.Clear()
+			console.Warning("Lecture interrompue : %v", err)
+			return nil
+		}
+		pending := make([]string, 0, len(invitations))
+		for _, item := range invitations {
+			if item.Invitee.Login != "" {
+				pending = append(pending, item.Invitee.Login+" (invité)")
+			}
+		}
+		rows = append(rows, []string{
+			repo.Name,
+			orDim(console, strings.Join(collaborators, ", "), "aucun"),
+			orDim(console, strings.Join(pending, ", "), "—"),
+		})
+	}
+	progress.Finish("")
+	console.Success("%d dépôt(s) inspecté(s).", group.Len())
+	console.Table([]string{"Dépôt", "Collaborateurs", "En attente"}, rows, 40)
+	return nil
+}
+
+// manageCollaborators ajoute ou retire un accès sur un dépôt.
+func (m *manageSession) manageCollaborators(group *groups.Group) error {
+	repo, err := m.pickRepo(group, "Dépôt à gérer")
+	if err != nil || repo == nil {
+		return err
+	}
+	console := m.session.Console
+
+	for {
+		console.Heading("Accès de « " + repo.Name + " »")
+		collaborators, invitations, err := m.accessOf(*repo)
+		if err != nil {
+			console.Failure("%v", err)
+			return nil
+		}
+		if len(collaborators) > 0 {
+			coloured := make([]string, 0, len(collaborators))
+			for _, login := range collaborators {
+				coloured = append(coloured, console.OK(login))
+			}
+			console.Print("  Collaborateurs : " + strings.Join(coloured, ", "))
+		} else {
+			console.Note("Aucun collaborateur direct.")
+		}
+		for _, item := range invitations {
+			console.Note("Invitation en attente : @%s", item.Invitee.Login)
+		}
+
+		action, err := m.session.Prompt.Choose("Action", ui.Options(
+			"ajouter", "Ajouter un collaborateur",
+			"retirer", "Retirer un collaborateur ou annuler une invitation",
+			"revenir", "Revenir au menu",
+		), "revenir")
+		if err != nil {
+			return err
+		}
+		switch action {
+		case "revenir":
+			return nil
+		case "ajouter":
+			if err := m.addCollaborator(*repo); err != nil {
+				return err
+			}
+		default:
+			if err := m.removeCollaborator(*repo, collaborators, invitations); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (m *manageSession) addCollaborator(repo groups.Repo) error {
+	console := m.session.Console
+	username, err := m.session.Prompt.Ask(ui.Question{
+		Title:      "Compte GitHub à inviter (vide pour annuler)",
+		AllowEmpty: true,
+		Validate:   func(value string) (string, error) { return valid.Login(value, "") },
+	})
+	if err != nil || username == "" {
+		return err
+	}
+	if exists, err := m.session.Client.UserExists(username); err != nil {
+		console.Warning("Vérification impossible : %v", err)
+	} else if !exists {
+		console.Failure("Le compte « %s » n'existe pas sur GitHub.", username)
+		return nil
+	}
+
+	choices := make([]ui.Option, 0, len(config.Permissions))
+	for _, value := range config.Permissions {
+		choices = append(choices, ui.Option{Value: value, Label: config.PermissionLabels[value]})
+	}
+	permission, err := m.session.Prompt.Choose("Droit accordé", choices, m.session.Settings.Permission)
+	if err != nil {
+		return err
+	}
+	state, err := m.session.Client.AddCollaborator(m.org, repo.Name, username, permission)
+	if err != nil {
+		console.Failure("Invitation impossible : %v", err)
+		return nil
+	}
+	label := "accès accordé"
+	if state == ghapi.CollaboratorInvited {
+		label = "invitation envoyée"
+	}
+	console.Success("@%s : %s (%s).", username, label, permission)
+	return nil
+}
+
+func (m *manageSession) removeCollaborator(repo groups.Repo, collaborators []string,
+	invitations []ghapi.Invitation) error {
+	console := m.session.Console
+	options := make([]ui.Option, 0, len(collaborators)+len(invitations)+1)
+	for _, login := range collaborators {
+		options = append(options, ui.Option{Value: "collaborateur:" + login, Label: login + " — collaborateur"})
+	}
+	for _, item := range invitations {
+		if item.Invitee.Login == "" {
+			continue
+		}
+		options = append(options, ui.Option{
+			Value: "invitation:" + strconv.FormatInt(item.ID, 10),
+			Label: item.Invitee.Login + " — invitation en attente",
+		})
+	}
+	if len(options) == 0 {
+		console.Note("Personne à retirer.")
+		return nil
+	}
+	options = append(options, ui.Option{Value: "revenir", Label: "Revenir"})
+
+	choice, err := m.session.Prompt.Choose("Qui retirer ?", options, "revenir")
+	if err != nil || choice == "revenir" {
+		return err
+	}
+
+	if strings.HasPrefix(choice, "invitation:") {
+		identifier, _ := strconv.ParseInt(strings.TrimPrefix(choice, "invitation:"), 10, 64)
+		confirmed, err := m.session.Prompt.Confirm("Annuler cette invitation ?", false)
+		if err != nil || !confirmed {
+			return err
+		}
+		if err := m.session.Client.CancelInvitation(m.org, repo.Name, identifier); err != nil {
+			console.Failure("%v", err)
+			return nil
+		}
+		console.Success("Invitation annulée.")
+		return nil
+	}
+
+	login := strings.TrimPrefix(choice, "collaborateur:")
+	confirmed, err := m.session.Prompt.Confirm(
+		"Retirer l'accès de @"+login+" à « "+repo.Name+" » ?", false)
+	if err != nil || !confirmed {
+		return err
+	}
+	if err := m.session.Client.RemoveCollaborator(m.org, repo.Name, login); err != nil {
+		console.Failure("%v", err)
+		return nil
+	}
+	console.Success("@%s n'a plus accès à « %s ».", login, repo.Name)
+	return nil
+}
+
+// urls affiche les adresses des dépôts, prêtes à être copiées.
+func (m *manageSession) urls(group *groups.Group) error {
+	console := m.session.Console
+	console.Heading("URL des dépôts de « " + group.Prefix + " »")
+	chosen, err := m.pickMany(group, "Dépôts à lister")
+	if err != nil {
+		return err
+	}
+	if len(chosen) == 0 {
+		console.Warning("Aucun dépôt sélectionné.")
+		return nil
+	}
+
+	// Sans décor ni indentation : la liste doit se copier telle quelle.
+	console.Blank()
+	for _, repo := range chosen {
+		console.Print(m.session.urlOf(repo.Name, repo.URL))
+	}
+	console.Blank()
+
+	save, err := m.session.Prompt.Confirm("Enregistrer cette liste dans un fichier ?", false)
+	if err != nil || !save {
+		return err
+	}
+	target, err := m.session.Prompt.Ask(ui.Question{
+		Title:   "Chemin du fichier",
+		Default: group.Prefix + "-urls.csv",
+	})
+	if err != nil {
+		return err
+	}
+	path, err := roster.ExpandPath(target)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		console.Failure("Enregistrement impossible : %v", err)
+		return nil
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		console.Failure("Enregistrement impossible : %v", err)
+		return nil
+	}
+	defer file.Close()
+
+	names := m.names(group)
+	writer := csv.NewWriter(file)
+	records := [][]string{{"nom_complet", "depot", "url"}}
+	for _, repo := range chosen {
+		records = append(records, []string{names[repo.Name], repo.Name, m.session.urlOf(repo.Name, repo.URL)})
+	}
+	if err := writer.WriteAll(records); err != nil {
+		console.Failure("Enregistrement impossible : %v", err)
+		return nil
+	}
+	console.Success("%d URL enregistrée(s) dans %s", len(chosen), path)
+	return nil
+}
+
+// cloneRepos récupère tout ou partie du groupe dans un dossier local.
+func (m *manageSession) cloneRepos(group *groups.Group) error {
+	session, console := m.session, m.session.Console
+	console.Heading("Cloner des dépôts de « " + group.Prefix + " »")
+	chosen, err := m.pickMany(group, "Dépôts à cloner")
+	if err != nil {
+		return err
+	}
+	if len(chosen) == 0 {
+		console.Warning("Aucun dépôt sélectionné.")
+		return nil
+	}
+
+	parent := session.Settings.CloneDir
+	if parent == "" {
+		parent = "."
+	}
+	answer, err := session.Prompt.Ask(ui.Question{
+		Title:      "Dossier de destination (« - » pour annuler)",
+		Default:    filepath.Join(parent, group.Prefix),
+		AllowEmpty: true,
+	})
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(answer) == "" || clearKeywords[strings.ToLower(strings.TrimSpace(answer))] {
+		console.Warning("Annulé.")
+		return nil
+	}
+	destination, err := clone.PrepareDestination(answer)
+	if err != nil {
+		return err
+	}
+
+	console.Printf("  %s dépôt(s) vers %s%s", console.Bold(itoa(len(chosen))),
+		console.Info(destination), console.Dim(" · "+itoa(session.Options.Jobs)+" en parallèle"))
+	confirmed, err := session.Prompt.Confirm("Lancer le clonage ?", true)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		console.Warning("Annulé.")
+		return nil
+	}
+
+	targets := make([]clone.Target, 0, len(chosen))
+	for _, repo := range chosen {
+		targets = append(targets, clone.Target{Name: repo.Name, URL: session.urlOf(repo.Name, repo.URL)})
+	}
+	progress := ui.NewProgress(console, "Clonage", len(targets))
+	results, err := clone.New(session.Options.Jobs, session.Options.Depth).
+		Run(targets, destination, func(done, total int, result clone.Result) {
+			progress.Update(done, result.Name)
+		})
+	progress.Finish("")
+	if err != nil {
+		return err
+	}
+
+	counts := map[string]int{}
+	for _, result := range results {
+		counts[result.Status]++
+	}
+	console.Printf("  %s cloné(s) · %s mis à jour · %s ignoré(s) · %s en échec",
+		console.OK(itoa(counts[clone.Cloned])), console.Info(itoa(counts[clone.Updated])),
+		console.Dim(itoa(counts[clone.Skipped])), console.Err(itoa(counts[clone.Failed])))
+	for _, result := range results {
+		if result.Status == clone.Failed || result.Status == clone.Skipped {
+			icon := console.Warn("·")
+			if result.IsFailed() {
+				icon = console.Err("✗")
+			}
+			console.Printf("    %s %s : %s", icon, result.Name, result.Error)
+		}
+	}
+	console.Printf("  Dossier : %s", console.Dim(destination))
+	session.Settings.CloneDir = filepath.Dir(destination)
+	return nil
+}
+
+// pullClones met à jour des clones existants, sans jamais écraser un travail local.
+func (m *manageSession) pullClones(group *groups.Group) error {
+	session, console := m.session, m.session.Console
+	console.Heading("Mettre à jour des clones existants")
+
+	parent := session.Settings.CloneDir
+	if parent == "" {
+		parent = "."
+	}
+	var clones []clone.Clone
+	var folder string
+	for {
+		answer, err := session.Prompt.Ask(ui.Question{
+			Title:      "Dossier contenant les clones (« - » pour annuler)",
+			Default:    filepath.Join(parent, group.Prefix),
+			AllowEmpty: true,
+		})
+		if err != nil {
+			return err
+		}
+		trimmed := strings.TrimSpace(answer)
+		if trimmed == "" || clearKeywords[strings.ToLower(trimmed)] {
+			console.Warning("Annulé.")
+			return nil
+		}
+		found, err := clone.FindClones(trimmed)
+		if err != nil {
+			console.Failure("%v", err)
+			continue
+		}
+		if len(found) == 0 {
+			console.Failure("Aucun dépôt git directement sous « %s ».", trimmed)
+			continue
+		}
+		clones, folder = found, trimmed
+		break
+	}
+
+	// Les clones étrangers au groupe restent visibles, mais signalés.
+	options := make([]ui.Option, 0, len(clones))
+	selected := make([]bool, len(clones))
+	for index, item := range clones {
+		label := item.Name
+		if _, _, found := group.Find(item.Name); !found {
+			label += "   (hors groupe)"
+		}
+		options = append(options, ui.Option{Value: item.Name, Label: label})
+		selected[index] = true
+	}
+	indices, err := session.Prompt.MultiSelect("Clones à mettre à jour", options, selected)
+	if err != nil {
+		return err
+	}
+	chosen := make([]clone.Clone, 0, len(indices))
+	for _, index := range indices {
+		chosen = append(chosen, clones[index])
+	}
+	if len(chosen) == 0 {
+		console.Warning("Aucun clone sélectionné.")
+		return nil
+	}
+	confirmed, err := session.Prompt.Confirm(plural("Mettre à jour %d clone(s) ?", len(chosen)), true)
+	if err != nil || !confirmed {
+		if err == nil {
+			console.Warning("Annulé.")
+		}
+		return err
+	}
+
+	progress := ui.NewProgress(console, "Mise à jour", len(chosen))
+	results, err := clone.New(session.Options.Jobs, 0).
+		Update(chosen, func(done, total int, result clone.Result) {
+			progress.Update(done, result.Name)
+		})
+	progress.Finish("")
+	if err != nil {
+		return err
+	}
+
+	updated := 0
+	var failed []clone.Result
+	for _, result := range results {
+		if result.Status == clone.Updated {
+			updated++
+			continue
+		}
+		failed = append(failed, result)
+	}
+	console.Printf("  %s mis à jour · %s en échec",
+		console.OK(itoa(updated)), console.Err(itoa(len(failed))))
+	for _, result := range failed {
+		console.Printf("    %s %s : %s", console.Err("✗"), result.Name, result.Error)
+	}
+	if absolute, err := filepath.Abs(folder); err == nil {
+		session.Settings.CloneDir = filepath.Dir(absolute)
+	}
+	return nil
+}
+
+// deleteRepo supprime définitivement un dépôt, après confirmation renforcée.
+func (m *manageSession) deleteRepo(group *groups.Group) error {
+	console := m.session.Console
+	repo, err := m.pickRepo(group, "Dépôt à supprimer")
+	if err != nil || repo == nil {
+		return err
+	}
+
+	// L'absence de la portée « delete_repo » est signalée avant la tentative.
+	if present, known := m.session.Client.HasScope("delete_repo"); known && !present {
+		console.Warning("Le jeton n'a pas la portée « delete_repo » : la suppression échouera. " +
+			"Corrigez avec « gh auth refresh -s delete_repo ».")
+	}
+
+	console.Print("  " + console.Err("⚠ Suppression définitive de "+m.org+"/"+repo.Name))
+	console.Note("   Le contenu, les tickets et l'historique seront perdus.")
+	if repo.URL != "" {
+		console.Note("   %s", repo.URL)
+	}
+
+	// Aucune option ne court-circuite cette confirmation : le nom exact du
+	// dépôt doit être retapé.
+	typed, err := m.session.Prompt.Ask(ui.Question{
+		Title:      "Retapez « " + repo.Name + " » pour confirmer (vide pour annuler)",
+		AllowEmpty: true,
+	})
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(typed) != repo.Name {
+		console.Warning("Annulé : rien n'a été supprimé.")
+		return nil
+	}
+	if err := m.session.Client.DeleteRepo(m.org, repo.Name); err != nil {
+		console.Failure("Suppression impossible : %v", err)
+		return nil
+	}
+	console.Success("« %s » supprimé.", repo.Name)
+	_, err = m.loadRepos(true)
+	return err
+}
+
+// ------------------------------------------------------------------- pilote
+
+// run enchaîne les actions de gestion jusqu'à la sortie.
+func (m *manageSession) run() (int, error) {
+	for {
+		group, err := m.chooseGroup()
+		if err != nil {
+			return ExitOK, err
+		}
+		if group == nil {
+			return ExitOK, nil
+		}
+
+		showList := true
+		for {
+			// La liste n'est redonnée que si elle a changé : sinon elle chasserait
+			// de l'écran le résultat de l'action qu'on vient de lancer.
+			if showList {
+				m.show(group)
+			}
+			action, err := m.session.Prompt.Choose("Que faire ?", manageMenu, "quitter")
+			if err != nil {
+				return ExitOK, err
+			}
+			if action == "quitter" {
+				return ExitOK, nil
+			}
+			if action == "changer" {
+				break
+			}
+
+			if err := m.dispatch(action, group); err != nil {
+				if valid.IsValidation(err) || ghapi.IsGitHub(err) {
+					m.session.Console.Failure("%v", err)
+				} else {
+					return ExitOK, err
+				}
+			}
+
+			showList = action == "ajouter" || action == "supprimer" || action == "rafraichir"
+			if showList {
+				repos, err := m.loadRepos(false)
+				if err != nil {
+					return ExitOK, err
+				}
+				refreshed := groups.Build(group.Prefix, repos)
+				if refreshed.Len() > 0 {
+					group = &refreshed
+				}
+			}
+		}
+	}
+}
+
+func (m *manageSession) dispatch(action string, group *groups.Group) error {
+	switch action {
+	case "ajouter":
+		return m.addRepos(group)
+	case "acces":
+		return m.showAccess(group)
+	case "collaborateurs":
+		return m.manageCollaborators(group)
+	case "urls":
+		return m.urls(group)
+	case "cloner":
+		return m.cloneRepos(group)
+	case "pull":
+		return m.pullClones(group)
+	case "supprimer":
+		return m.deleteRepo(group)
+	case "rafraichir":
+		_, err := m.loadRepos(true)
+		return err
+	}
+	return nil
+}
+
+func orDim(console *ui.Console, value, fallback string) string {
+	if value == "" {
+		return console.Dim(fallback)
+	}
+	return value
+}

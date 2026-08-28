@@ -1,2 +1,10 @@
+# Binaire compilé
 /gh-cohorte
 /gh-cohorte.exe
+/dist/
+
+# Données d'étudiants : ni bilans, ni listes, ni clones ne doivent être versionnés.
+/rapports/
+*.csv
+!examples/*.csv
+/clones/
