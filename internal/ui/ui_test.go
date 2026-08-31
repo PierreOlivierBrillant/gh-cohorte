@@ -2,9 +2,12 @@ package ui_test
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 )
 
@@ -294,5 +297,171 @@ func TestLinePrompterFinDeFlux(t *testing.T) {
 	p := ui.NewLinePrompter(c, strings.NewReader(""))
 	if _, err := p.Ask(ui.Question{Title: "Organisation"}); err != ui.ErrAborted {
 		t.Errorf("erreur = %v", err)
+	}
+}
+
+// dossierDEssai prépare une arborescence pour les tests de complétion.
+func dossierDEssai(t *testing.T) string {
+	t.Helper()
+	racine := t.TempDir()
+	for _, nom := range []string{"cohorte.csv", "cohorte-hiver.csv"} {
+		if err := os.WriteFile(filepath.Join(racine, nom), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(racine, "depart"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	complete.Forget()
+	return racine
+}
+
+func TestLinePrompterCompletionUneSeuleCorrespondance(t *testing.T) {
+	racine := dossierDEssai(t)
+	c, _ := console()
+	// La tabulation demande la complétion, la ligne suivante accepte le résultat.
+	entree := filepath.Join(racine, "dep") + "\t\n\n"
+	p := ui.NewLinePrompter(c, strings.NewReader(entree))
+
+	valeur, err := p.Ask(ui.Question{Title: "Dossier de départ", Complete: complete.Dir})
+	if err != nil {
+		t.Fatalf("Ask : %v", err)
+	}
+	if valeur != filepath.Join(racine, "depart")+"/" {
+		t.Errorf("valeur = %q", valeur)
+	}
+}
+
+func TestLinePrompterCompletionPlusieursCorrespondances(t *testing.T) {
+	racine := dossierDEssai(t)
+	c, tampon := console()
+	entree := filepath.Join(racine, "coh") + "\t\n\n"
+	p := ui.NewLinePrompter(c, strings.NewReader(entree))
+
+	valeur, err := p.Ask(ui.Question{Title: "Fichier CSV", Complete: complete.Path})
+	if err != nil {
+		t.Fatalf("Ask : %v", err)
+	}
+	// Une seule tabulation acquiert la partie commune, sans encore rien lister.
+	if valeur != filepath.Join(racine, "cohorte") {
+		t.Errorf("valeur = %q", valeur)
+	}
+	if strings.Contains(tampon.String(), "cohorte-hiver.csv") {
+		t.Errorf("la liste doit attendre la tabulation suivante :\n%s", tampon.String())
+	}
+}
+
+func TestLinePrompterDoubleTabulationListe(t *testing.T) {
+	racine := dossierDEssai(t)
+	c, tampon := console()
+	// Deux tabulations dans la même saisie : les possibilités s'affichent.
+	entree := filepath.Join(racine, "coh") + "\t\t\n\n"
+	p := ui.NewLinePrompter(c, strings.NewReader(entree))
+
+	if _, err := p.Ask(ui.Question{Title: "Fichier CSV", Complete: complete.Path}); err != nil {
+		t.Fatalf("Ask : %v", err)
+	}
+	sortie := tampon.String()
+	if !strings.Contains(sortie, "cohorte.csv") || !strings.Contains(sortie, "cohorte-hiver.csv") {
+		t.Errorf("les possibilités doivent être listées :\n%s", sortie)
+	}
+}
+
+func TestLinePrompterDoubleTabulationListeLeRepertoireCourant(t *testing.T) {
+	racine := dossierDEssai(t)
+	precedent, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(racine); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(precedent)
+	complete.Forget()
+
+	c, tampon := console()
+	p := ui.NewLinePrompter(c, strings.NewReader("\t\t\ncohorte.csv\n"))
+	if _, err := p.Ask(ui.Question{Title: "Fichier CSV", Complete: complete.Path}); err != nil {
+		t.Fatalf("Ask : %v", err)
+	}
+	sortie := tampon.String()
+	for _, attendu := range []string{"cohorte.csv", "depart/"} {
+		if !strings.Contains(sortie, attendu) {
+			t.Errorf("« %s » absent :\n%s", attendu, sortie)
+		}
+	}
+}
+
+func TestLinePrompterCompletionSansCorrespondance(t *testing.T) {
+	racine := dossierDEssai(t)
+	c, tampon := console()
+	entree := filepath.Join(racine, "zzz") + "\t\n" + filepath.Join(racine, "cohorte.csv") + "\n"
+	p := ui.NewLinePrompter(c, strings.NewReader(entree))
+
+	valeur, err := p.Ask(ui.Question{Title: "Fichier CSV", Complete: complete.Path})
+	if err != nil {
+		t.Fatalf("Ask : %v", err)
+	}
+	if valeur != filepath.Join(racine, "cohorte.csv") {
+		t.Errorf("valeur = %q", valeur)
+	}
+	if !strings.Contains(tampon.String(), "Aucune correspondance") {
+		t.Errorf("sortie = %s", tampon.String())
+	}
+}
+
+func TestLinePrompterTabulationIgnoreeSansCompletion(t *testing.T) {
+	c, _ := console()
+	p := ui.NewLinePrompter(c, strings.NewReader("valeur\tavec tabulation\n"))
+	valeur, err := p.Ask(ui.Question{Title: "Question ordinaire"})
+	if err != nil {
+		t.Fatalf("Ask : %v", err)
+	}
+	if valeur != "valeur\tavec tabulation" {
+		t.Errorf("valeur = %q", valeur)
+	}
+}
+
+func TestLinePrompterCompletionDepuisLeDefaut(t *testing.T) {
+	racine := dossierDEssai(t)
+	c, _ := console()
+	// Une tabulation seule complète à partir de la valeur proposée par défaut.
+	p := ui.NewLinePrompter(c, strings.NewReader("\t\n\n"))
+	valeur, err := p.Ask(ui.Question{
+		Title:    "Dossier de départ",
+		Default:  filepath.Join(racine, "dep"),
+		Complete: complete.Dir,
+	})
+	if err != nil {
+		t.Fatalf("Ask : %v", err)
+	}
+	if valeur != filepath.Join(racine, "depart")+"/" {
+		t.Errorf("valeur = %q", valeur)
+	}
+}
+
+func TestLinePrompterTabulationApresAvoirAtteintUnDossier(t *testing.T) {
+	racine := dossierDEssai(t)
+	// Le dossier atteint doit contenir de quoi lister.
+	for _, nom := range []string{"seance-1.md", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(racine, "depart", nom), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	complete.Forget()
+
+	c, tampon := console()
+	// Une tabulation atteint le dossier, la suivante liste son contenu.
+	entree := filepath.Join(racine, "dep") + "\t\n\t\n\n"
+	p := ui.NewLinePrompter(c, strings.NewReader(entree))
+
+	if _, err := p.Ask(ui.Question{Title: "Dossier", Complete: complete.Path}); err != nil {
+		t.Fatalf("Ask : %v", err)
+	}
+	sortie := tampon.String()
+	for _, attendu := range []string{"seance-1.md", "notes.txt"} {
+		if !strings.Contains(sortie, attendu) {
+			t.Errorf("« %s » absent :\n%s", attendu, sortie)
+		}
 	}
 }

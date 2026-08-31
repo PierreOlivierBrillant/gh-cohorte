@@ -40,7 +40,11 @@ type Session struct {
 	Sleep      func(time.Duration)
 	Now        func() time.Time
 
-	manager *manageSession
+	// saved est l'état des réglages au chargement : il dit ce qui a changé.
+	saved       config.Settings
+	forgotten   bool        // les réglages ont été oubliés à la demande
+	orgAccesses []orgAccess // organisations du compte, une fois établies
+	manager     *manageSession
 }
 
 // New prépare une session à partir des drapeaux analysés.
@@ -53,11 +57,13 @@ func New(options *Options, console *ui.Console, prompter ui.Prompter) *Session {
 	if options.CacheDir != "" {
 		store = cache.NewIn(options.CacheDir, !options.NoCache)
 	}
+	settings := config.Load(configFile)
 	return &Session{
 		Options:    options,
 		Console:    console,
 		Prompt:     prompter,
-		Settings:   config.Load(configFile),
+		Settings:   settings,
+		saved:      settings,
 		Cache:      store,
 		ConfigFile: configFile,
 		Sleep:      time.Sleep,
@@ -81,6 +87,9 @@ func (s *Session) Run() int {
 	s.Console.Banner("gh cohorte "+Version, "Un dépôt GitHub par personne, pour une cohorte")
 
 	code, err := s.run()
+	// Les réglages sont mémorisés quoi qu'il arrive : une organisation choisie
+	// reste connue même si la session est interrompue ou annulée ensuite.
+	s.persist()
 	if err == nil {
 		return code
 	}
@@ -102,6 +111,8 @@ func (s *Session) Run() int {
 }
 
 func (s *Session) run() (int, error) {
+	s.adoptLegacyCache()
+
 	if s.Options.ClearCache {
 		// Purge demandée en ligne de commande : ni jeton ni réseau nécessaires.
 		removed := s.Cache.Clear()
@@ -126,11 +137,21 @@ func (s *Session) run() (int, error) {
 
 	if mode == "gerer" {
 		s.manager = newManageSession(s, s.Options.Manage)
-		code, err := s.manager.run()
-		s.persist() // dossier de clonage, gabarit, modèle détecté…
-		return code, err
+		return s.manager.run()
 	}
 	return s.create()
+}
+
+// adoptLegacyCache reprend, une seule fois, le cache de la version précédente
+// de l'outil : les inventaires et les noms déjà connus restent valables.
+func (s *Session) adoptLegacyCache() {
+	legacy := cache.LegacyPath()
+	if legacy == "" {
+		return
+	}
+	if adopted := s.Cache.Adopt(legacy); adopted > 0 {
+		s.Console.Note("%d entrée(s) reprises du cache de « classroom » (%s).", adopted, legacy)
+	}
 }
 
 // chooseMode décide du mode : création, gestion d'un groupe, options avancées.
@@ -242,13 +263,9 @@ func (s *Session) chooseOrg() error {
 					return err
 				}
 			}
-			answer, err := s.Prompt.Ask(ui.Question{
-				Title:   "Organisation GitHub",
-				Default: s.Settings.Org,
-				Validate: func(value string) (string, error) {
-					return valid.Login(value, "Organisation")
-				},
-			})
+			// Le choix se fait parmi les organisations du compte, avec ce qu'on
+			// peut y faire ; un nom peut toujours être saisi à la place.
+			answer, err := s.pickOrg()
 			if err != nil {
 				return err
 			}
@@ -286,6 +303,20 @@ func (s *Session) chooseOrg() error {
 
 // warnIfNotAdmin signale, sans bloquer, un rôle insuffisant pour créer des dépôts.
 func (s *Session) warnIfNotAdmin(org string) {
+	// Ce que l'on sait déjà de l'organisation évite un appel de plus.
+	if access, found := s.accessFor(org); found {
+		switch {
+		case access.Role == "admin" || access.CanCreate:
+		case access.Known:
+			s.Console.Warning("Vous êtes « %s » et la création de dépôts est réservée "+
+				"aux propriétaires de cette organisation.", access.Role)
+		default:
+			s.Console.Warning("Vous êtes « %s » : la création de dépôts doit être autorisée "+
+				"aux membres dans les réglages de l'organisation.", access.Role)
+		}
+		return
+	}
+
 	role, err := s.Client.OrgMembership(org, s.Viewer)
 	if err != nil {
 		return
@@ -302,21 +333,25 @@ func (s *Session) warnIfNotAdmin(org string) {
 }
 
 // persist enregistre les réglages réutilisables ; le jeton n'y figure jamais.
+// Rien n'est écrit si rien n'a changé, ni après un oubli volontaire.
 func (s *Session) persist() {
-	if s.Options.NoSaveConfig {
+	if s.Options.NoSaveConfig || s.forgotten || s.Settings == s.saved {
 		return
 	}
 	if err := s.Settings.Save(s.ConfigFile); err != nil {
 		s.Console.Warning("Réglages non enregistrés : %v", err)
 		return
 	}
+	s.saved = s.Settings
 	s.Console.Note("Réglages mémorisés dans %s", s.ConfigFile)
 }
 
-// resetSettings repart des réglages par défaut après un oubli volontaire.
+// resetSettings repart des réglages par défaut après un oubli volontaire :
+// plus rien ne sera réécrit d'ici la fin de la session.
 func (s *Session) resetSettings() {
 	s.Settings = config.Default()
 	s.Settings.Org = s.Options.Org
+	s.forgotten = true
 }
 
 // invalidateCaches oublie ce qui a été retenu en mémoire pendant la session.

@@ -12,9 +12,28 @@ import (
 // Scripted rejoue une suite de réponses préparées à l'avance. Il sert aux tests
 // à dérouler un parcours interactif complet sans terminal.
 type Scripted struct {
-	Answers []string // réponses consommées dans l'ordre
-	Asked   []string // journal des questions posées
-	index   int
+	Answers   []string   // réponses consommées dans l'ordre
+	Asked     []string   // journal des questions posées
+	Questions []Question // saisies libres, telles qu'elles ont été posées
+	Menus     []Menu     // listes proposées, telles qu'elles ont été posées
+	index     int
+}
+
+// Menu retient une liste proposée au choix, pour que les tests puissent la
+// vérifier.
+type Menu struct {
+	Title   string
+	Options []Option
+	Default string
+}
+
+// Labels renvoie les libellés proposés.
+func (m Menu) Labels() []string {
+	labels := make([]string, 0, len(m.Options))
+	for _, option := range m.Options {
+		labels = append(labels, option.Label)
+	}
+	return labels
 }
 
 // NewScripted construit un questionneur scripté.
@@ -36,8 +55,29 @@ func (s *Scripted) next(question string) (string, error) {
 	return answer, nil
 }
 
+// AskedFor retrouve une question posée dont le titre contient le fragment donné.
+func (s *Scripted) AskedFor(fragment string) (Question, bool) {
+	for _, question := range s.Questions {
+		if strings.Contains(question.Title, fragment) {
+			return question, true
+		}
+	}
+	return Question{}, false
+}
+
+// MenuFor retrouve un menu proposé dont le titre contient le fragment donné.
+func (s *Scripted) MenuFor(fragment string) (Menu, bool) {
+	for _, menu := range s.Menus {
+		if strings.Contains(menu.Title, fragment) {
+			return menu, true
+		}
+	}
+	return Menu{}, false
+}
+
 // Ask renvoie la prochaine réponse, après validation.
 func (s *Scripted) Ask(question Question) (string, error) {
+	s.Questions = append(s.Questions, question)
 	raw, err := s.next(question.Title)
 	if err != nil {
 		return "", err
@@ -83,6 +123,7 @@ func (s *Scripted) Confirm(title string, defaultValue bool) (bool, error) {
 
 // Choose accepte la valeur d'une option, son numéro ou un fragment de libellé.
 func (s *Scripted) Choose(title string, options []Option, defaultValue string) (string, error) {
+	s.Menus = append(s.Menus, Menu{Title: title, Options: options, Default: defaultValue})
 	raw, err := s.next(title)
 	if err != nil {
 		return "", err

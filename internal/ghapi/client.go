@@ -188,10 +188,21 @@ type User struct {
 	Name  string `json:"name"`
 }
 
-// Org décrit une organisation.
+// Org décrit une organisation. Le droit accordé aux membres de créer des dépôts
+// n'est visible que des propriétaires : un pointeur nul signifie « on ne sait pas ».
 type Org struct {
-	Login string `json:"login"`
-	Name  string `json:"name"`
+	Login                        string `json:"login"`
+	Name                         string `json:"name"`
+	MembersCanCreateRepositories *bool  `json:"members_can_create_repositories"`
+}
+
+// Membership décrit l'appartenance du compte connecté à une organisation.
+type Membership struct {
+	State        string `json:"state"`
+	Role         string `json:"role"`
+	Organization struct {
+		Login string `json:"login"`
+	} `json:"organization"`
 }
 
 // Repo décrit un dépôt.
@@ -236,6 +247,20 @@ func (c *Client) GetOrg(org string) (*Org, error) {
 	response, err := c.do(http.MethodGet, "orgs/"+url.PathEscape(org), nil)
 	if err != nil {
 		return nil, err
+	}
+	value := &Org{}
+	return value, response.JSON(value)
+}
+
+// GetRepoOwnerOrg renvoie l'organisation, ou nil si elle est invisible.
+func (c *Client) GetRepoOwnerOrg(org string) (*Org, error) {
+	response, err := c.do(http.MethodGet, "orgs/"+url.PathEscape(org), nil,
+		http.StatusNotFound, http.StatusForbidden)
+	if err != nil {
+		return nil, err
+	}
+	if response.Status != http.StatusOK {
+		return nil, nil
 	}
 	value := &Org{}
 	return value, response.JSON(value)
@@ -425,6 +450,26 @@ func (c *Client) ListOrgRepos(org string, onPage func(total int)) ([]groups.Repo
 			return 0, err
 		}
 		all = append(all, page...)
+		return len(page), nil
+	})
+	return all, err
+}
+
+// ListOrgMemberships renvoie les organisations du compte connecté et le rôle
+// qu'il y tient, en un seul parcours. La portée « read:org » est nécessaire.
+func (c *Client) ListOrgMemberships(onPage func(total int)) ([]Membership, error) {
+	var all []Membership
+	err := c.paginate("user/memberships/orgs", onPage, func(content []byte) (int, error) {
+		var page []Membership
+		if err := json.Unmarshal(content, &page); err != nil {
+			return 0, err
+		}
+		for _, item := range page {
+			// Une invitation encore en attente ne donne aucun droit.
+			if item.State == "active" {
+				all = append(all, item)
+			}
+		}
 		return len(page), nil
 	})
 	return all, err

@@ -54,10 +54,15 @@ type State struct {
 	MembershipRole string
 	PerPage        int // taille de page forcée, pour éprouver la pagination
 
-	Orgs      map[string]string // login → nom affiché
-	Users     map[string]string // login → nom complet (vide = profil sans nom)
-	Repos     map[string]*RepoState
-	Templates map[string]bool
+	Orgs map[string]string // login → nom affiché
+	// Rôle du compte connecté par organisation ; à défaut, MembershipRole vaut
+	// pour toutes. Une valeur vide simule une portée « read:org » absente.
+	OrgRoles map[string]string
+	// Droit accordé aux membres de créer des dépôts, quand il est connu.
+	MembersCanCreate map[string]bool
+	Users            map[string]string // login → nom complet (vide = profil sans nom)
+	Repos            map[string]*RepoState
+	Templates        map[string]bool
 
 	Collaborators map[string]map[string]string // dépôt → compte → droit
 	Invitations   map[string][]invitation
@@ -91,10 +96,12 @@ type treeEntry struct {
 // NewState prépare un état par défaut : une organisation « acme » et trois comptes.
 func NewState() *State {
 	return &State{
-		Viewer:         "prof",
-		Scopes:         "repo, read:org, delete_repo, workflow",
-		MembershipRole: "admin",
-		Orgs:           map[string]string{"acme": "ACME Éducation"},
+		Viewer:           "prof",
+		Scopes:           "repo, read:org, delete_repo, workflow",
+		MembershipRole:   "admin",
+		Orgs:             map[string]string{"acme": "ACME Éducation"},
+		OrgRoles:         map[string]string{},
+		MembersCanCreate: map[string]bool{},
 		Users: map[string]string{
 			"emilie-cote": "Émilie Côté",
 			"jlpicard":    "Jean-Luc Picard",
@@ -113,6 +120,14 @@ func NewState() *State {
 		Flaky:          map[string]int{},
 		nextInvitation: 1,
 	}
+}
+
+// roleLocked renvoie le rôle du compte connecté dans une organisation.
+func (s *State) roleLocked(org string) string {
+	if role, found := s.OrgRoles[org]; found {
+		return role
+	}
+	return s.MembershipRole
 }
 
 // AddRepo enregistre un dépôt existant.
@@ -298,21 +313,44 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		s.send(writer, 200, map[string]any{"login": state.Viewer})
 		return
 	}
+	if path == "/user/memberships/orgs" {
+		payload := make([]map[string]any, 0, len(state.Orgs))
+		for _, login := range sortedKeys(state.Orgs) {
+			role := state.roleLocked(login)
+			if role == "" {
+				continue // sans rôle lisible, l'organisation reste invisible
+			}
+			payload = append(payload, map[string]any{
+				"state":        "active",
+				"role":         role,
+				"organization": map[string]any{"login": login},
+			})
+		}
+		s.send(writer, 200, payload)
+		return
+	}
 	if match := orgRe.FindStringSubmatch(path); match != nil {
 		name, found := state.Orgs[match[1]]
 		if !found {
 			s.notFound(writer)
 			return
 		}
-		s.send(writer, 200, map[string]any{"login": match[1], "name": name})
+		payload := map[string]any{"login": match[1], "name": name}
+		// GitHub ne montre ce réglage qu'aux propriétaires : le test décide
+		// s'il est visible en renseignant, ou non, MembersCanCreate.
+		if permis, connu := state.MembersCanCreate[match[1]]; connu {
+			payload["members_can_create_repositories"] = permis
+		}
+		s.send(writer, 200, payload)
 		return
 	}
 	if match := membershipRe.FindStringSubmatch(path); match != nil {
-		if state.MembershipRole == "" {
+		role := state.roleLocked(match[1])
+		if role == "" {
 			s.send(writer, 403, map[string]string{"message": "Forbidden"})
 			return
 		}
-		s.send(writer, 200, map[string]any{"role": state.MembershipRole})
+		s.send(writer, 200, map[string]any{"role": role})
 		return
 	}
 	if match := userRe.FindStringSubmatch(path); match != nil {

@@ -25,7 +25,9 @@ type harnais struct {
 	Rapports  string
 	Reglages  string
 	CacheDir  string
+	XDGCache  string
 	Pauses    []time.Duration
+	scripte   *ui.Scripted
 	dernierRC int
 }
 
@@ -38,6 +40,11 @@ func nouveau(t *testing.T, state *fakegh.State) *harnais {
 	t.Cleanup(serveur.Close)
 
 	dossier := t.TempDir()
+	// Les emplacements du système sont détournés vers le dossier du test : rien
+	// de ce qui traîne sur la machine ne doit influencer un parcours.
+	xdgCache := filepath.Join(dossier, "xdg-cache")
+	t.Setenv("XDG_CACHE_HOME", xdgCache)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dossier, "xdg-config"))
 	sortie := &bytes.Buffer{}
 	h := &harnais{
 		t:        t,
@@ -48,6 +55,7 @@ func nouveau(t *testing.T, state *fakegh.State) *harnais {
 		Rapports: filepath.Join(dossier, "rapports"),
 		Reglages: filepath.Join(dossier, "config.json"),
 		CacheDir: filepath.Join(dossier, "cache"),
+		XDGCache: xdgCache,
 	}
 	h.Options = &app.Options{
 		Org:        "acme",
@@ -60,6 +68,25 @@ func nouveau(t *testing.T, state *fakegh.State) *harnais {
 		DelaySet:   true,
 	}
 	return h
+}
+
+// nouveauDansLeMemeDossier prépare une seconde session partageant les fichiers
+// de la première : cache, réglages et bilans.
+func nouveauDansLeMemeDossier(t *testing.T, precedent *harnais) *harnais {
+	t.Helper()
+	suivant := nouveau(t, precedent.State)
+	// Les emplacements du système restent ceux de la première session.
+	t.Setenv("XDG_CACHE_HOME", precedent.XDGCache)
+	suivant.XDGCache = precedent.XDGCache
+	suivant.Options.CacheDir = precedent.CacheDir
+	suivant.Options.ConfigPath = precedent.Reglages
+	suivant.Options.ReportDir = precedent.Rapports
+	suivant.Options.ManageRequested = precedent.Options.ManageRequested
+	suivant.Options.Manage = precedent.Options.Manage
+	suivant.CacheDir = precedent.CacheDir
+	suivant.Reglages = precedent.Reglages
+	suivant.Rapports = precedent.Rapports
+	return suivant
 }
 
 // executer déroule une session avec le questionneur donné.
@@ -75,6 +102,7 @@ func (h *harnais) executer(prompter ui.Prompter) int {
 func (h *harnais) script(reponses ...string) (int, *ui.Scripted) {
 	h.t.Helper()
 	scripte := ui.NewScripted(reponses...)
+	h.scripte = scripte
 	code := h.executer(scripte)
 	return code, scripte
 }
@@ -84,6 +112,24 @@ func (h *harnais) muet() int {
 	h.t.Helper()
 	h.Options.NonInteractive = true
 	return h.executer(&ui.ScriptPrompter{})
+}
+
+// derniereQuestion retrouve une question posée pendant la dernière session.
+func (h *harnais) derniereQuestion(fragment string) (ui.Question, bool) {
+	h.t.Helper()
+	if h.scripte == nil {
+		return ui.Question{}, false
+	}
+	return h.scripte.AskedFor(fragment)
+}
+
+// dernierMenu retrouve un menu proposé pendant la dernière session.
+func (h *harnais) dernierMenu(fragment string) (ui.Menu, bool) {
+	h.t.Helper()
+	if h.scripte == nil {
+		return ui.Menu{}, false
+	}
+	return h.scripte.MenuFor(fragment)
 }
 
 // texte renvoie tout ce qui a été affiché.

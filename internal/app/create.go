@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
@@ -46,12 +47,7 @@ func (s *Session) create() (int, error) {
 		}
 	}
 
-	code, err := s.execute(items)
-	if err != nil {
-		return ExitOK, err
-	}
-	s.persist()
-	return code, nil
+	return s.execute(items)
 }
 
 // collectPeople charge la liste des personnes : fichier CSV ou saisie guidée.
@@ -83,8 +79,9 @@ func (s *Session) collectPeople() ([]roster.Person, error) {
 		chosen := path
 		if chosen == "" {
 			answer, err := s.Prompt.Ask(ui.Question{
-				Title:   "Chemin du fichier CSV",
-				Default: s.Settings.RosterPath,
+				Title:    "Chemin du fichier CSV",
+				Default:  s.Settings.RosterPath,
+				Complete: complete.Path,
 			})
 			if err != nil {
 				return nil, err
@@ -218,7 +215,11 @@ func (s *Session) promptPeople() ([]roster.Person, error) {
 		return nil, err
 	}
 	if save {
-		target, err := s.Prompt.Ask(ui.Question{Title: "Chemin du fichier", Default: "cohorte.csv"})
+		target, err := s.Prompt.Ask(ui.Question{
+			Title:    "Chemin du fichier",
+			Default:  "cohorte.csv",
+			Complete: complete.Path,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -531,6 +532,7 @@ func (s *Session) configureStarter() error {
 				Title:      question,
 				Default:    s.Settings.StarterDir,
 				AllowEmpty: true,
+				Complete:   complete.Dir,
 			})
 			if err != nil {
 				return err

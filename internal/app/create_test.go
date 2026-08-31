@@ -9,6 +9,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
@@ -862,5 +863,69 @@ func TestCacheConserveApresSimulation(t *testing.T) {
 	var inventaire []groups.RepoInfo
 	if !relu.Get(cache.ReposKey("acme"), cache.ReposTTL, &inventaire) || len(inventaire) != 1 {
 		t.Errorf("une simulation ne doit pas toucher au cache : %+v", inventaire)
+	}
+}
+
+func TestQuestionsDeCheminOffrentLaCompletion(t *testing.T) {
+	h := nouveau(t, nil)
+	csv := h.cohorteCSV("Émilie Côté,emilie-cote")
+	depart := h.squelette()
+
+	code, scripte := h.script(
+		"creer",   // Mode
+		"fichier", // Source de la liste
+		csv,       // Chemin du fichier CSV
+		"oui",     // Vérifier les comptes
+		"tp1",     // Travail
+		"",        // Gabarit
+		"",        // Modèle
+		depart,    // Dossier de fichiers de départ
+		"",        // Message du commit
+		"",        // Visibilité
+		"oui",     // Inviter
+		"push",    // Droit
+		"oui",     // Confirmation
+	)
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+
+	cas := map[string]complete.Mode{
+		"Chemin du fichier CSV":         complete.Path,
+		"Dossier de fichiers de départ": complete.Dir,
+	}
+	for fragment, attendu := range cas {
+		question, trouvee := scripte.AskedFor(fragment)
+		if !trouvee {
+			t.Errorf("question « %s » jamais posée", fragment)
+			continue
+		}
+		if question.Complete != attendu {
+			t.Errorf("« %s » : complétion = %v, attendu %v", fragment, question.Complete, attendu)
+		}
+	}
+	// Les questions qui n'attendent pas de chemin n'en proposent pas.
+	if question, trouvee := scripte.AskedFor("Identifiant du travail"); !trouvee ||
+		question.Complete != complete.None {
+		t.Errorf("le travail ne doit pas se compléter comme un chemin : %+v", question)
+	}
+}
+
+func TestQuestionsDeCheminEnGestion(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "tp1-a", true)
+	state.AddRepo("acme", "tp1-b", true)
+	h := nouveau(t, state)
+	h.Options.ManageRequested = true
+	h.Options.Manage = "tp1"
+	cible := filepath.Join(t.TempDir(), "urls.csv")
+
+	code, scripte := h.script("urls", "tous", "oui", cible, "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	question, trouvee := scripte.AskedFor("Chemin du fichier")
+	if !trouvee || question.Complete != complete.Path {
+		t.Errorf("question = %+v, trouvée = %v", question, trouvee)
 	}
 }

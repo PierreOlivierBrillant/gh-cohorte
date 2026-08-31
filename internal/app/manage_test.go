@@ -1,11 +1,13 @@
 package app_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
@@ -512,4 +514,70 @@ func TestGestionSelectionInvalideSignalee(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("Sélection : « 42 » sort de la liste (1 à 3)")
+}
+
+func TestCacheHeriteDeClassroomEvitelesAppels(t *testing.T) {
+	state := groupe(t)
+	h := gestion(t, state, "tp1")
+
+	// Un cache laissé par la version Python de l'outil, au format d'origine.
+	ancien := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "classroom")
+	if err := os.MkdirAll(ancien, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	contenu := fmt.Sprintf(`{
+      "repos:acme": {"at": %d, "value": [
+        {"name": "tp1-emilie-cote", "private": true, "html_url": "https://github.com/acme/tp1-emilie-cote", "pushed_at": "2026-08-21T09:00:00Z"},
+        {"name": "tp1-jlpicard", "private": true, "html_url": "https://github.com/acme/tp1-jlpicard", "pushed_at": "2026-08-20T09:00:00Z"}
+      ]},
+      "profile:emilie-cote": {"at": %d, "value": "Émilie Côté"},
+      "profile:jlpicard": {"at": %d, "value": "Jean-Luc Picard"}
+    }`, time.Now().Unix(), time.Now().Unix(), time.Now().Unix())
+	if err := os.WriteFile(filepath.Join(ancien, "cache.json"), []byte(contenu), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _ := h.script("quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("3 entrée(s) reprises du cache de « classroom »", "Émilie Côté", "Jean-Luc Picard")
+	if appels := state.CallCount("GET /orgs/acme/repos"); appels != 0 {
+		t.Errorf("%d inventaire(s) demandé(s) : le cache hérité devait suffire", appels)
+	}
+	if profils := state.CallCount("GET /users/"); profils != 0 {
+		t.Errorf("%d profil(s) demandé(s) : les noms hérités devaient suffire", profils)
+	}
+	// Le groupe affiché vient bien du cache repris.
+	h.contient("Groupe « tp1 » — 2 dépôt(s)")
+}
+
+func TestCachePurgeNeRevientPas(t *testing.T) {
+	state := groupe(t)
+	h := gestion(t, state, "tp1")
+	ancien := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "classroom")
+	if err := os.MkdirAll(ancien, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	contenu := fmt.Sprintf(`{"profile:jlpicard": {"at": %d, "value": "Jean-Luc Picard"}}`, time.Now().Unix())
+	if err := os.WriteFile(filepath.Join(ancien, "cache.json"), []byte(contenu), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, _ := h.script("quitter"); code != app.ExitOK {
+		t.Fatalf("code = %d", code)
+	}
+	h.contient("reprises du cache")
+
+	// Après une purge, l'ancien cache ne doit pas se réinviter.
+	suivant := nouveauDansLeMemeDossier(t, h)
+	suivant.Options.ClearCache = true
+	if code, _ := suivant.script(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, suivant.texte())
+	}
+	dernier := nouveauDansLeMemeDossier(t, h)
+	if code, _ := dernier.script("quitter"); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, dernier.texte())
+	}
+	dernier.absent("reprises du cache")
 }

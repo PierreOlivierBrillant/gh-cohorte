@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 )
 
@@ -17,6 +18,9 @@ import (
 type LinePrompter struct {
 	console *Console
 	reader  *bufio.Reader
+	// lastPrefix retient la dernière demande de complétion : redemander le même
+	// chemin revient à taper deux tabulations de suite, et liste donc.
+	lastPrefix string
 }
 
 // NewLinePrompter construit un questionneur en mode ligne.
@@ -27,33 +31,53 @@ func NewLinePrompter(console *Console, input io.Reader) *LinePrompter {
 // Interactive indique que des questions peuvent être posées.
 func (p *LinePrompter) Interactive() bool { return true }
 
-// readLine lit une réponse ; la fin du flux vaut interruption.
-func (p *LinePrompter) readLine() (string, error) {
+// readRaw lit une réponse telle quelle ; la fin du flux vaut interruption.
+func (p *LinePrompter) readRaw() (string, error) {
 	line, err := p.reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(line) == "" {
 		return "", ErrAborted
 	}
-	return strings.TrimSpace(line), nil
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// readLine lit une réponse débarrassée de ses espaces.
+func (p *LinePrompter) readLine() (string, error) {
+	raw, err := p.readRaw()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(raw), nil
 }
 
 func (p *LinePrompter) prompt(text string) {
 	fmt.Fprintf(p.console.Out, "  %s ", text)
 }
 
-// Ask demande une valeur libre et valide la saisie.
+// Ask demande une valeur libre et valide la saisie. En mode ligne, la touche
+// de tabulation arrive dans la réponse : elle est traitée comme une demande de
+// complétion, à la manière d'un shell.
 func (p *LinePrompter) Ask(question Question) (string, error) {
+	defaultValue := question.Default
 	for {
 		title := question.Title
-		if question.Default != "" {
-			title += " [" + question.Default + "]"
+		if defaultValue != "" {
+			title += " [" + defaultValue + "]"
+		}
+		if question.Complete != complete.None {
+			title += " (⇥ complète, ⇥⇥ liste)"
 		}
 		p.prompt(title + " :")
-		answer, err := p.readLine()
+		raw, err := p.readRaw()
 		if err != nil {
 			return "", err
 		}
+		if question.Complete != complete.None && strings.Contains(raw, "\t") {
+			defaultValue = p.completePath(raw, defaultValue, question.Complete)
+			continue
+		}
+		answer := strings.TrimSpace(raw)
 		if answer == "" {
-			answer = question.Default
+			answer = defaultValue
 		}
 		if answer == "" {
 			if question.AllowEmpty {
@@ -72,6 +96,72 @@ func (p *LinePrompter) Ask(question Question) (string, error) {
 		}
 		return cleaned, nil
 	}
+}
+
+// completePath répond à une tabulation : il complète ce qui est certain, et
+// liste les possibilités quand la tabulation est doublée — comme un shell. La
+// valeur obtenue sert de départ à la question reposée.
+func (p *LinePrompter) completePath(raw, fallback string, mode complete.Mode) string {
+	prefix := strings.TrimSpace(strings.SplitN(raw, "\t", 2)[0])
+	if prefix == "" {
+		prefix = fallback
+	}
+	// Deux tabulations dans la même saisie, ou la même demande deux fois de
+	// suite : dans les deux cas, les possibilités sont attendues. Ce qu'une
+	// complétion vient de produire compte comme une demande, si bien qu'après
+	// avoir atteint un dossier, une seule tabulation de plus liste son contenu.
+	doubled := strings.Count(raw, "\t") > 1 || prefix == p.lastPrefix
+	p.lastPrefix = prefix
+
+	suggestions := complete.Suggest(prefix, mode)
+	switch {
+	case len(suggestions) == 0:
+		p.console.Note("Aucune correspondance pour « %s ».", prefix)
+		return prefix
+	case len(suggestions) == 1:
+		p.lastPrefix = suggestions[0]
+		return suggestions[0]
+	}
+
+	common := commonPrefix(suggestions)
+	if !doubled && len(common) > len(prefix) {
+		// La partie commune est acquise ; la liste attendra la demande suivante.
+		p.lastPrefix = common
+		return common
+	}
+	if !doubled {
+		p.console.Note("%d possibilités — une tabulation de plus pour les lister.", len(suggestions))
+		return prefix
+	}
+	for index, suggestion := range suggestions {
+		if index == 20 {
+			p.console.Note("… et %d autre(s).", len(suggestions)-20)
+			break
+		}
+		p.console.Print("    " + suggestion)
+	}
+	if len(common) > len(prefix) {
+		p.lastPrefix = common
+		return common
+	}
+	return prefix
+}
+
+// commonPrefix renvoie le plus long préfixe commun d'une liste de chemins.
+func commonPrefix(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	common := values[0]
+	for _, value := range values[1:] {
+		for !strings.HasPrefix(value, common) {
+			common = common[:len(common)-1]
+			if common == "" {
+				return ""
+			}
+		}
+	}
+	return common
 }
 
 // Confirm pose une question fermée.

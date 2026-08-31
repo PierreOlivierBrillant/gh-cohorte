@@ -3,9 +3,12 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
 )
 
@@ -33,6 +36,9 @@ type Question struct {
 	Default    string
 	AllowEmpty bool
 	Validate   func(string) (string, error) // renvoie la valeur nettoyée
+	// Complete active la complétion par tabulation : chemins de fichiers,
+	// dossiers seulement, ou rien.
+	Complete complete.Mode
 }
 
 // Prompter pose les questions. Deux implémentations existent : l'une interactive
@@ -48,10 +54,22 @@ type Prompter interface {
 // ------------------------------------------------------------------ interactif
 
 // HuhPrompter pose les questions au terminal.
-type HuhPrompter struct{ console *Console }
+type HuhPrompter struct {
+	console *Console
+	// input et output ne sont fournis que par les tests, qui jouent une suite
+	// de touches sans terminal.
+	input  io.Reader
+	output io.Writer
+}
 
 // NewPrompter construit le questionneur interactif.
 func NewPrompter(console *Console) *HuhPrompter { return &HuhPrompter{console: console} }
+
+// NewPrompterWithIO construit un questionneur dont l'entrée et la sortie sont
+// fournies : les tests y jouent des touches sans avoir besoin d'un terminal.
+func NewPrompterWithIO(console *Console, input io.Reader, output io.Writer) *HuhPrompter {
+	return &HuhPrompter{console: console, input: input, output: output}
+}
 
 // Interactive indique que des questions peuvent être posées.
 func (p *HuhPrompter) Interactive() bool { return true }
@@ -67,13 +85,28 @@ func convertError(err error) error {
 }
 
 // Ask demande une valeur libre, en validant la saisie sur place.
+// Les questions attendant un chemin se complètent à la tabulation.
 func (p *HuhPrompter) Ask(question Question) (string, error) {
+	// Une question de chemin a son propre champ : la tabulation y complète, et
+	// une seconde tabulation liste les possibilités.
+	if question.Complete != complete.None {
+		return p.askPath(question)
+	}
+	input, cleaned := buildInput(question)
+	if err := p.runForm(input); err != nil {
+		return "", err
+	}
+	return *cleaned, nil
+}
+
+// buildInput assemble le champ de saisie et le réceptacle de la valeur validée.
+func buildInput(question Question) (*huh.Input, *string) {
 	value := question.Default
 	title := question.Title
 	if question.Default != "" {
 		title = fmt.Sprintf("%s (défaut : %s)", title, question.Default)
 	}
-	cleaned := ""
+	cleaned := new(string)
 	input := huh.NewInput().
 		Title(title).
 		Value(&value).
@@ -81,33 +114,30 @@ func (p *HuhPrompter) Ask(question Question) (string, error) {
 			trimmed := strings.TrimSpace(raw)
 			if trimmed == "" {
 				if question.AllowEmpty {
-					cleaned = ""
+					*cleaned = ""
 					return nil
 				}
 				return errors.New("une valeur est attendue")
 			}
 			if question.Validate == nil {
-				cleaned = trimmed
+				*cleaned = trimmed
 				return nil
 			}
 			result, err := question.Validate(trimmed)
 			if err != nil {
 				return err
 			}
-			cleaned = result
+			*cleaned = result
 			return nil
 		})
-	if err := runForm(input); err != nil {
-		return "", err
-	}
-	return cleaned, nil
+	return input, cleaned
 }
 
 // Confirm pose une question fermée.
 func (p *HuhPrompter) Confirm(title string, defaultValue bool) (bool, error) {
 	answer := defaultValue
 	field := huh.NewConfirm().Title(title).Affirmative("Oui").Negative("Non").Value(&answer)
-	if err := runForm(field); err != nil {
+	if err := p.runForm(field); err != nil {
 		return false, err
 	}
 	return answer, nil
@@ -126,7 +156,7 @@ func (p *HuhPrompter) Choose(title string, options []Option, defaultValue string
 	if len(options) > visibleRows {
 		field = field.Height(visibleRows)
 	}
-	if err := runForm(field); err != nil {
+	if err := p.runForm(field); err != nil {
 		return "", err
 	}
 	return choice, nil
@@ -156,7 +186,7 @@ func (p *HuhPrompter) MultiSelect(title string, options []Option, selected []boo
 	if len(choices) > visibleRows {
 		field = field.Height(visibleRows)
 	}
-	if err := runForm(field); err != nil {
+	if err := p.runForm(field); err != nil {
 		return nil, err
 	}
 
@@ -174,9 +204,64 @@ func (p *HuhPrompter) MultiSelect(title string, options []Option, selected []boo
 	return indices, nil
 }
 
-func runForm(field huh.Field) error {
-	form := huh.NewForm(huh.NewGroup(field)).WithShowHelp(true).WithTheme(huh.ThemeBase())
+// runForm affiche un champ unique, avec des raccourcis en français.
+func (p *HuhPrompter) runForm(field huh.Field) error {
+	form := huh.NewForm(huh.NewGroup(field)).
+		WithShowHelp(true).
+		WithTheme(huh.ThemeBase()).
+		WithKeyMap(frenchKeyMap())
+	if p.input != nil {
+		form = form.WithInput(p.input)
+	}
+	if p.output != nil {
+		form = form.WithOutput(p.output)
+	}
 	return convertError(form.Run())
+}
+
+// frenchKeyMap reprend les raccourcis de huh en français. Les questions de
+// chemin, elles, ont leur propre champ : voir pathinput.go.
+func frenchKeyMap() *huh.KeyMap {
+	keys := huh.NewDefaultKeyMap()
+
+	keys.Input.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("maj+tab", "retour"))
+	keys.Input.Submit = key.NewBinding(key.WithKeys("enter"), key.WithHelp("entrée", "valider"))
+	keys.Input.Next = key.NewBinding(key.WithKeys("enter", "tab"), key.WithHelp("entrée", "valider"))
+	// Les suggestions de huh ne servent pas : les chemins ont leur propre champ.
+	keys.Input.AcceptSuggestion = key.NewBinding(
+		key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "compléter"), key.WithDisabled())
+
+	keys.Select.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("maj+tab", "retour"))
+	keys.Select.Next = key.NewBinding(key.WithKeys("enter", "tab"), key.WithHelp("entrée", "choisir"))
+	keys.Select.Submit = key.NewBinding(key.WithKeys("enter"), key.WithHelp("entrée", "choisir"))
+	keys.Select.Up = key.NewBinding(
+		key.WithKeys("up", "k", "ctrl+k", "ctrl+p"), key.WithHelp("↑", "monter"))
+	keys.Select.Down = key.NewBinding(
+		key.WithKeys("down", "j", "ctrl+j", "ctrl+n"), key.WithHelp("↓", "descendre"))
+	keys.Select.Filter = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filtrer"))
+	keys.Select.GotoTop = key.NewBinding(key.WithKeys("home", "g"), key.WithHelp("début", "au début"))
+	keys.Select.GotoBottom = key.NewBinding(key.WithKeys("end", "G"), key.WithHelp("fin", "à la fin"))
+
+	keys.MultiSelect.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("maj+tab", "retour"))
+	keys.MultiSelect.Next = key.NewBinding(key.WithKeys("enter", "tab"), key.WithHelp("entrée", "valider"))
+	keys.MultiSelect.Submit = key.NewBinding(key.WithKeys("enter"), key.WithHelp("entrée", "valider"))
+	keys.MultiSelect.Toggle = key.NewBinding(key.WithKeys(" ", "x"), key.WithHelp("espace", "cocher"))
+	keys.MultiSelect.Up = key.NewBinding(key.WithKeys("up", "k", "ctrl+p"), key.WithHelp("↑", "monter"))
+	keys.MultiSelect.Down = key.NewBinding(key.WithKeys("down", "j", "ctrl+n"), key.WithHelp("↓", "descendre"))
+	keys.MultiSelect.Filter = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filtrer"))
+	keys.MultiSelect.SelectAll = key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "tout cocher"))
+	keys.MultiSelect.SelectNone = key.NewBinding(
+		key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "tout décocher"), key.WithDisabled())
+
+	keys.Confirm.Prev = key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("maj+tab", "retour"))
+	keys.Confirm.Next = key.NewBinding(key.WithKeys("enter", "tab"), key.WithHelp("entrée", "valider"))
+	keys.Confirm.Submit = key.NewBinding(key.WithKeys("enter"), key.WithHelp("entrée", "valider"))
+	keys.Confirm.Toggle = key.NewBinding(
+		key.WithKeys("h", "l", "right", "left"), key.WithHelp("←/→", "basculer"))
+	keys.Confirm.Accept = key.NewBinding(key.WithKeys("o", "O", "y", "Y"), key.WithHelp("o", "Oui"))
+	keys.Confirm.Reject = key.NewBinding(key.WithKeys("n", "N"), key.WithHelp("n", "Non"))
+
+	return keys
 }
 
 func huhOptions(options []Option) []huh.Option[string] {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/clone"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
@@ -426,6 +427,7 @@ func (m *manageSession) askStarter() error {
 		Title:      "Dossier de fichiers de départ (vide = aucun)",
 		Default:    session.Settings.StarterDir,
 		AllowEmpty: true,
+		Complete:   complete.Dir,
 	})
 	if err != nil {
 		return err
@@ -666,8 +668,9 @@ func (m *manageSession) urls(group *groups.Group) error {
 		return err
 	}
 	target, err := m.session.Prompt.Ask(ui.Question{
-		Title:   "Chemin du fichier",
-		Default: group.Prefix + "-urls.csv",
+		Title:    "Chemin du fichier",
+		Default:  group.Prefix + "-urls.csv",
+		Complete: complete.Path,
 	})
 	if err != nil {
 		return err
@@ -722,6 +725,7 @@ func (m *manageSession) cloneRepos(group *groups.Group) error {
 		Title:      "Dossier de destination (« - » pour annuler)",
 		Default:    filepath.Join(parent, group.Prefix),
 		AllowEmpty: true,
+		Complete:   complete.Dir,
 	})
 	if err != nil {
 		return err
@@ -797,6 +801,7 @@ func (m *manageSession) pullClones(group *groups.Group) error {
 			Title:      "Dossier contenant les clones (« - » pour annuler)",
 			Default:    filepath.Join(parent, group.Prefix),
 			AllowEmpty: true,
+			Complete:   complete.Dir,
 		})
 		if err != nil {
 			return err

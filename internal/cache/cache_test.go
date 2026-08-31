@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 
@@ -156,4 +157,147 @@ func TestNeConserveQueLesChampsUtiles(t *testing.T) {
 	if len(champs) != 4 {
 		t.Errorf("%d champ(s) conservé(s) : %+v", len(champs), champs)
 	}
+}
+
+// heritage écrit un cache au format de la version précédente de l'outil.
+func heritage(t *testing.T, dossier string, entrees string) string {
+	t.Helper()
+	racine := filepath.Join(dossier, "classroom")
+	if err := os.MkdirAll(racine, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	chemin := filepath.Join(racine, "cache.json")
+	if err := os.WriteFile(chemin, []byte(entrees), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return chemin
+}
+
+func TestAdoptReprendLeCacheHerite(t *testing.T) {
+	dossier := t.TempDir()
+	maintenant := float64(time.Now().Unix())
+	ancien := heritage(t, dossier, `{
+      "repos:acme": {"at": `+itoa(maintenant)+`, "value": [{"name": "tp1-a", "private": true}]},
+      "profile:jlpicard": {"at": `+itoa(maintenant)+`, "value": "Jean-Luc Picard"}
+    }`)
+
+	c := cache.NewIn(filepath.Join(dossier, "cohorte"), true)
+	if repris := c.Adopt(ancien); repris != 2 {
+		t.Fatalf("Adopt = %d, attendu 2", repris)
+	}
+
+	var depots []groups.RepoInfo
+	if !c.Get(cache.ReposKey("acme"), cache.ReposTTL, &depots) || len(depots) != 1 {
+		t.Errorf("inventaire reprisé = %+v", depots)
+	}
+	var nom string
+	if !c.Get(cache.ProfileKey("jlpicard"), cache.ProfileTTL, &nom) || nom != "Jean-Luc Picard" {
+		t.Errorf("nom reprisé = %q", nom)
+	}
+	// L'ancien fichier n'est jamais touché : l'outil précédent continue de servir.
+	if _, err := os.Stat(ancien); err != nil {
+		t.Errorf("l'ancien cache a disparu : %v", err)
+	}
+}
+
+func TestAdoptConserveLHorodatage(t *testing.T) {
+	dossier := t.TempDir()
+	// Une entrée déjà périmée le reste après la reprise.
+	vieux := float64(time.Now().Add(-48 * time.Hour).Unix())
+	ancien := heritage(t, dossier, `{"repos:acme": {"at": `+itoa(vieux)+`, "value": [{"name": "tp1-a"}]}}`)
+
+	c := cache.NewIn(filepath.Join(dossier, "cohorte"), true)
+	if repris := c.Adopt(ancien); repris != 1 {
+		t.Fatalf("Adopt = %d", repris)
+	}
+	var depots []groups.RepoInfo
+	if c.Get(cache.ReposKey("acme"), cache.ReposTTL, &depots) {
+		t.Error("une entrée héritée périmée ne doit pas être servie")
+	}
+	if !c.Get(cache.ReposKey("acme"), 72*time.Hour, &depots) {
+		t.Error("l'entrée doit tout de même avoir été reprise")
+	}
+}
+
+func TestAdoptNEcrasePasCeQuiEstConnu(t *testing.T) {
+	dossier := t.TempDir()
+	maintenant := float64(time.Now().Unix())
+	ancien := heritage(t, dossier, `{"profile:jlpicard": {"at": `+itoa(maintenant)+`, "value": "Ancien Nom"}}`)
+
+	c := cache.NewIn(filepath.Join(dossier, "cohorte"), true)
+	c.Set(cache.ProfileKey("jlpicard"), "Jean-Luc Picard")
+	if repris := c.Adopt(ancien); repris != 0 {
+		t.Fatalf("Adopt = %d, rien ne devait être repris", repris)
+	}
+	var nom string
+	if !c.Get(cache.ProfileKey("jlpicard"), cache.ProfileTTL, &nom) || nom != "Jean-Luc Picard" {
+		t.Errorf("nom = %q", nom)
+	}
+}
+
+func TestAdoptNeSeRepetePas(t *testing.T) {
+	dossier := t.TempDir()
+	maintenant := float64(time.Now().Unix())
+	ancien := heritage(t, dossier, `{"profile:a": {"at": `+itoa(maintenant)+`, "value": "Personne A"}}`)
+	racine := filepath.Join(dossier, "cohorte")
+
+	premier := cache.NewIn(racine, true)
+	if repris := premier.Adopt(ancien); repris != 1 {
+		t.Fatalf("Adopt = %d", repris)
+	}
+	// Une purge volontaire ne doit pas être défaite au lancement suivant.
+	premier.Clear()
+
+	second := cache.NewIn(racine, true)
+	if repris := second.Adopt(ancien); repris != 0 {
+		t.Errorf("Adopt = %d : le cache vidé ne doit pas se remplir tout seul", repris)
+	}
+	var nom string
+	if second.Get(cache.ProfileKey("a"), cache.ProfileTTL, &nom) {
+		t.Error("le cache devrait être resté vide")
+	}
+}
+
+func TestAdoptSansHeritage(t *testing.T) {
+	dossier := t.TempDir()
+	c := cache.NewIn(filepath.Join(dossier, "cohorte"), true)
+	if repris := c.Adopt(filepath.Join(dossier, "absent.json")); repris != 0 {
+		t.Errorf("Adopt = %d", repris)
+	}
+	// Rien ne doit être créé quand il n'y a rien à reprendre.
+	if _, err := os.Stat(filepath.Join(dossier, "cohorte")); !os.IsNotExist(err) {
+		t.Error("aucun dossier ne devait être créé")
+	}
+}
+
+func TestAdoptFichierCorrompu(t *testing.T) {
+	dossier := t.TempDir()
+	ancien := heritage(t, dossier, "ceci n'est pas du JSON")
+	c := cache.NewIn(filepath.Join(dossier, "cohorte"), true)
+	if repris := c.Adopt(ancien); repris != 0 {
+		t.Errorf("Adopt = %d", repris)
+	}
+}
+
+func TestAdoptCacheDesactive(t *testing.T) {
+	dossier := t.TempDir()
+	maintenant := float64(time.Now().Unix())
+	ancien := heritage(t, dossier, `{"profile:a": {"at": `+itoa(maintenant)+`, "value": "Personne A"}}`)
+	c := cache.NewIn(filepath.Join(dossier, "cohorte"), false)
+	if repris := c.Adopt(ancien); repris != 0 {
+		t.Errorf("Adopt = %d avec --no-cache", repris)
+	}
+}
+
+func TestLegacyPathRespecteXDG(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", "/tmp/xdg-essai")
+	attendu := filepath.Join("/tmp/xdg-essai", "classroom", "cache.json")
+	if chemin := cache.LegacyPath(); chemin != attendu {
+		t.Errorf("LegacyPath = %q, attendu %q", chemin, attendu)
+	}
+}
+
+// itoa met un horodatage sous une forme utilisable dans du JSON.
+func itoa(value float64) string {
+	return strconv.FormatFloat(value, 'f', 0, 64)
 }

@@ -31,7 +31,7 @@ gh extension upgrade cohorte
 | --- | --- |
 | `gh` authentifié | `gh auth login` — l'extension reprend le jeton, l'hôte et les limites de débit de la CLI |
 | Portée `repo` | nécessaire pour créer les dépôts et inviter les personnes |
-| Portée `read:org` | pour lire votre rôle dans l'organisation (avertissement seulement) |
+| Portée `read:org` | pour lister vos organisations et y lire votre rôle |
 | Portée `delete_repo` | uniquement pour supprimer un dépôt (`gh auth refresh -s delete_repo`) |
 | Portée `workflow` | uniquement pour déposer des fichiers dans `.github/workflows` (`gh auth refresh -s workflow`) |
 | `git` | uniquement pour cloner et mettre à jour des clones |
@@ -51,6 +51,23 @@ gh cohorte
 L'assistant enchaîne : authentification → organisation → liste des personnes →
 vérification des comptes → paramètres → **récapitulatif** → confirmation →
 création → bilan.
+
+L'organisation se choisit dans la liste de celles auxquelles vous appartenez,
+annotées de ce que vous pouvez y faire — celles où vous êtes propriétaire
+d'abord :
+
+```
+Organisation GitHub
+> acme — ACME Éducation  · propriétaire
+  college — Collège Untel  · membre, création autorisée
+  labo — Laboratoire  · membre
+  tierce — Organisation tierce  · membre, création réservée aux propriétaires
+  Saisir un autre nom…
+```
+
+Le curseur se pose sur celle de la dernière fois. La liste est mise en cache
+douze heures ; `--org` la court-circuite, et « Saisir un autre nom… » permet de
+viser une organisation absente de la liste.
 
 Pour voir ce qui serait fait, sans rien créer :
 
@@ -236,10 +253,24 @@ dépôts se réaffiche instantanément.
 Le cache est renouvelé dès qu'un dépôt est créé ou supprimé, et l'action
 « Recharger la liste » force un rafraîchissement.
 
+**Le cache de la version précédente est repris** : si `~/.cache/classroom/cache.json`
+existe — l'outil Python dont cette extension est la suite —, ses inventaires et
+ses noms de profils sont adoptés au premier lancement, sans que rien n'ait à
+être retéléchargé. L'ancien fichier n'est pas touché, la reprise n'a lieu qu'une
+fois, et une purge volontaire n'est jamais défaite. Les bilans de l'ancien outil
+sont lus tels quels : `--report-dir chemin/vers/rapports` suffit à retrouver les
+noms complets déjà connus.
+
 ```bash
 gh cohorte --no-cache       # ignorer le cache pour cette exécution
 gh cohorte --clear-cache    # vider le cache puis quitter
 ```
+
+| Variable d'environnement | Effet |
+| --- | --- |
+| `NO_COLOR` | retire la couleur |
+| `COHORTE_NO_ARROWS` | force les listes numérotées plutôt que les flèches |
+| `COHORTE_NO_SHELL_COMPLETION` | complète les chemins sans interroger le shell |
 
 Le menu **Options avancées**, accessible **sans authentification**, affiche
 l'emplacement et l'état des trois fichiers gérés par l'outil — réglages, cache,
@@ -250,6 +281,28 @@ bilans — et permet de vider le cache ou d'oublier les réglages mémorisés.
 - Toutes les listes se parcourent aux flèches et défilent quand elles sont
   longues ; les sélections multiples (clonage, URL, mise à jour) sont des cases
   à cocher.
+- **Les questions attendant un chemin se complètent à la tabulation** — fichier
+  CSV, dossier de fichiers de départ, dossier de clonage, fichier d'export —
+  exactement comme dans un shell : `⇥` complète jusqu'à ce qui est certain,
+  `⇥⇥` liste les possibilités, `↵` valide, `échap` annule.
+
+  ```
+    Chemin du fichier CSV
+    ⇥ complète · ⇥⇥ liste · ↵ valide · échap annule
+  > ~/cours/co
+    cohorte.csv   cohorte-hiver.csv   cours-2026/
+  ```
+
+  Après avoir atteint un dossier, une seule tabulation de plus liste ce qu'il
+  contient ; sur un champ vide, `⇥⇥` liste le répertoire courant. Quand la
+  tabulation n'a rien à ajouter, le nombre de possibilités est annoncé plutôt
+  que de laisser croire qu'il ne se passe rien. Les candidats sont
+  demandés au shell configuré (`$SHELL` : bash, zsh ou fish), `~` est développé,
+  et les questions attendant un dossier ne proposent que des dossiers. Le mode
+  ligne suit les mêmes règles, la tabulation arrivant dans la réponse.
+- Les raccourcis affichés en bas des listes sont en français (`↑ monter`,
+  `espace cocher`, `tab compléter`, `entrée valider`), et une confirmation
+  s'accepte par `o` comme par `y`.
 - Les sélections acceptent aussi une expression : `tous`, `1,3`, `2-5`, un nom
   de dépôt, ou un mélange des trois.
 - Barres de progression pour tout ce qui interroge l'API en boucle.
@@ -298,7 +351,10 @@ Codes de retour : `0` succès, `1` au moins un échec, `2` erreur de validation,
 - Le jeton n'est jamais affiché, journalisé ni écrit sur le disque : il vient de
   `gh` et ne sert qu'aux en-têtes HTTP.
 - Le fichier de réglages (`~/.config/cohorte/config.json`, permissions `600`) ne
-  contient que l'organisation, le travail et les préférences d'affichage.
+  contient que l'organisation, le travail et les préférences d'affichage. Il est
+  écrit à la fin de la session **quelle qu'en soit l'issue** — y compris après
+  une annulation ou une interruption —, mais seulement si quelque chose a
+  changé, et jamais après un oubli volontaire.
 - Les actions destructives — suppression d'un dépôt, retrait d'un accès —
   demandent toujours une confirmation explicite. La suppression exige que le
   **nom exact du dépôt soit retapé** ; aucune option, `--yes` compris, ne
@@ -333,6 +389,7 @@ sortie propre hors terminal.
 | `internal/identity` | résolution des noms complets |
 | `internal/runner` | exécution du plan et bilans |
 | `internal/clone` | clonage et mise à jour |
+| `internal/complete` | complétion des chemins, déléguée au shell |
 | `internal/ui` | console, questions, barres de progression |
 | `internal/app` | assemblage : drapeaux, assistant, gestion, options avancées |
 
@@ -376,6 +433,25 @@ tranché, et pourquoi.
   flèches, le défilement et le filtrage au clavier, mais pas le saut direct à une
   entrée par son numéro ; la numérotation reste disponible dans le mode ligne
   (`COHORTE_NO_ARROWS=1`), où chaque entrée se choisit par son chiffre.
+- **Les organisations où la création est restreinte restent proposées.** Elles
+  sont annotées et placées en fin de liste, sans être masquées : le mode gestion
+  — accès, clonage, URL — ne demande aucun droit de création, et GitHub ne
+  révèle le réglage `members_can_create_repositories` qu'aux propriétaires, si
+  bien qu'une organisation « membre » n'est pas forcément fermée.
+- **Les questions de chemin ont leur propre champ.** Dans `huh`, `tab` passe au
+  champ suivant, la complétion est sur `ctrl+e` et les suggestions ne
+  s'affichent qu'une à une ; rien n'y permet le `tab` / `tab tab` d'un shell.
+  Ces questions passent donc par un champ écrit pour l'occasion
+  (`internal/ui/pathinput.go`, bâti sur `bubbles/textinput`), qui complète, liste
+  et valide comme on s'y attend. Les autres questions restent des champs `huh`.
+- **La complétion des chemins passe par le shell, avec un filet.** Les candidats
+  viennent de `compgen` (bash), du globbing de `zsh` ou de `complete -C` (fish),
+  selon `$SHELL`, complétés par un parcours natif du dossier : selon les
+  réglages de chacun, un shell peut être plus avare que l'autre, et la liste est
+  de toute façon filtrée, dédoublonnée et triée. Une saisie contenant des
+  caractères qu'un shell interpréterait (`$`, backtick, `;`, `|`…) n'est jamais
+  passée à un shell : la complétion native s'en charge seule. L'appel est borné
+  à 400 ms et mis en cache, pour que la frappe n'attende jamais.
 - **Le cache tient dans un seul fichier JSON.** La purge reste triviale et rien
   ne s'éparpille en centaines de petits fichiers ; seuls les champs utiles des
   dépôts y sont conservés (nom, visibilité, URL, date du dernier envoi).
