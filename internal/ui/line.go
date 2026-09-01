@@ -198,11 +198,14 @@ func (p *LinePrompter) Choose(title string, options []Option, defaultValue strin
 		p.console.Blank()
 		p.console.Print("  " + p.console.Bold(title))
 		for index, option := range options {
-			marker := " "
+			// Le chevron du mode flèches, et le mot qui va avec : l'étoile
+			// d'usage marquait le défaut sans dire ce qu'elle marquait.
 			if option.Value == defaultValue {
-				marker = "*"
+				p.console.Printf("   %s%2d  %s %s", cursorMark, index+1,
+					p.console.Bold(option.Label), p.console.Dim("(défaut)"))
+				continue
 			}
-			p.console.Printf("   %s %2d  %s", marker, index+1, option.Label)
+			p.console.Printf("     %2d  %s", index+1, option.Label)
 		}
 		p.prompt("Votre choix (numéro) :")
 		answer, err := p.readLine()

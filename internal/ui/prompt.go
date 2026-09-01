@@ -93,7 +93,7 @@ func (p *HuhPrompter) Ask(question Question) (string, error) {
 		return p.askPath(question)
 	}
 	input, cleaned := buildInput(question)
-	if err := p.runForm(input); err != nil {
+	if err := p.runForm(input, promptTheme()); err != nil {
 		return "", err
 	}
 	return *cleaned, nil
@@ -137,7 +137,7 @@ func buildInput(question Question) (*huh.Input, *string) {
 func (p *HuhPrompter) Confirm(title string, defaultValue bool) (bool, error) {
 	answer := defaultValue
 	field := huh.NewConfirm().Title(title).Affirmative("Oui").Negative("Non").Value(&answer)
-	if err := p.runForm(field); err != nil {
+	if err := p.runForm(field, promptTheme()); err != nil {
 		return false, err
 	}
 	return answer, nil
@@ -156,7 +156,7 @@ func (p *HuhPrompter) Choose(title string, options []Option, defaultValue string
 	if len(options) > visibleRows {
 		field = field.Height(visibleRows)
 	}
-	if err := p.runForm(field); err != nil {
+	if err := p.runForm(field, promptTheme()); err != nil {
 		return "", err
 	}
 	return choice, nil
@@ -186,7 +186,7 @@ func (p *HuhPrompter) MultiSelect(title string, options []Option, selected []boo
 	if len(choices) > visibleRows {
 		field = field.Height(visibleRows)
 	}
-	if err := p.runForm(field); err != nil {
+	if err := p.runForm(field, multiSelectTheme()); err != nil {
 		return nil, err
 	}
 
@@ -204,11 +204,13 @@ func (p *HuhPrompter) MultiSelect(title string, options []Option, selected []boo
 	return indices, nil
 }
 
-// runForm affiche un champ unique, avec des raccourcis en français.
-func (p *HuhPrompter) runForm(field huh.Field) error {
+// runForm affiche un champ unique, avec des raccourcis en français. Le thème
+// est celui du champ posé : les cases à cocher ne marquent pas la sélection
+// comme les listes à choix unique (voir theme.go).
+func (p *HuhPrompter) runForm(field huh.Field, theme *huh.Theme) error {
 	form := huh.NewForm(huh.NewGroup(field)).
 		WithShowHelp(true).
-		WithTheme(huh.ThemeBase()).
+		WithTheme(theme).
 		WithKeyMap(frenchKeyMap())
 	if p.input != nil {
 		form = form.WithInput(p.input)

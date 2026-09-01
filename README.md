@@ -58,7 +58,7 @@ d'abord :
 
 ```
 Organisation GitHub
-> acme — ACME Éducation  · propriétaire
+▸ acme — ACME Éducation  · propriétaire
   college — Collège Untel  · membre, création autorisée
   labo — Laboratoire  · membre
   tierce — Organisation tierce  · membre, création réservée aux propriétaires
@@ -281,6 +281,12 @@ bilans — et permet de vider le cache ou d'oublier les réglages mémorisés.
 - Toutes les listes se parcourent aux flèches et défilent quand elles sont
   longues ; les sélections multiples (clonage, URL, mise à jour) sont des cases
   à cocher.
+- **Ce qui est retenu se voit** : la ligne sous le curseur est surlignée et
+  précédée d'un chevron `▸`, la case cochée porte une croix `[✓]`, et le bouton
+  retenu d'une question fermée est plein quand l'autre n'est qu'un contour. Les
+  couleurs ne sont pas celles de la palette du terminal, pour rester lisibles sur
+  un fond clair comme sur un fond sombre ; le chevron, la croix et le trait épais
+  suffisent quand la couleur manque — `NO_COLOR` ou terminal monochrome.
 - **Les questions attendant un chemin se complètent à la tabulation** — fichier
   CSV, dossier de fichiers de départ, dossier de clonage, fichier d'export —
   exactement comme dans un shell : `⇥` complète jusqu'à ce qui est certain,
