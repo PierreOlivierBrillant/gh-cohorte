@@ -222,14 +222,17 @@ func (m *pathModel) columns() string {
 	return view.String()
 }
 
-// lastSegment isole ce qui distingue une possibilité des autres.
+// lastSegment isole ce qui distingue une possibilité des autres. Le séparateur
+// qui marque les dossiers est conservé tel que la suggestion le porte.
 func lastSegment(path string) string {
-	trimmed := strings.TrimSuffix(path, "/")
-	segment := filepath.Base(trimmed)
-	if strings.HasSuffix(path, "/") {
-		return segment + "/"
+	trimmed := path
+	for len(trimmed) > 0 && os.IsPathSeparator(trimmed[len(trimmed)-1]) {
+		trimmed = trimmed[:len(trimmed)-1]
 	}
-	return segment
+	if trimmed == "" {
+		return path
+	}
+	return filepath.Base(trimmed) + path[len(trimmed):]
 }
 
 // askPath pose une question de chemin dans son propre champ de saisie.

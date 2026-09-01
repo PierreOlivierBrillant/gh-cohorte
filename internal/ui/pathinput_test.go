@@ -10,6 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// séparateur est celui que portent les suggestions quand la saisie emploie
+// celui du système — la barre oblique inversée sous Windows.
+const séparateur = string(filepath.Separator)
+
 // champDEssai monte le champ de saisie sur une arborescence connue.
 func champDEssai(t *testing.T, question Question) *pathModel {
 	t.Helper()
@@ -105,7 +109,7 @@ func TestChampVideDoubleTabulationListeLeRepertoireCourant(t *testing.T) {
 		t.Fatal("le répertoire courant doit s'afficher")
 	}
 	vue := modele.View()
-	for _, attendu := range []string{"cohorte.csv", "notes.txt", "depart/", "documents/"} {
+	for _, attendu := range []string{"cohorte.csv", "notes.txt", "depart" + séparateur, "documents" + séparateur} {
 		if !strings.Contains(vue, attendu) {
 			t.Errorf("« %s » absent de la vue :\n%s", attendu, vue)
 		}
@@ -121,7 +125,7 @@ func TestChampUneSeulePossibiliteEstAdoptee(t *testing.T) {
 	})
 
 	tabulation(modele)
-	attendu := filepath.Join(racine, "depart") + "/"
+	attendu := filepath.Join(racine, "depart") + séparateur
 	if valeur := modele.input.Value(); valeur != attendu {
 		t.Fatalf("valeur = %q, attendu %q", valeur, attendu)
 	}
@@ -141,7 +145,7 @@ func TestChampDossiersSeulement(t *testing.T) {
 	tabulation(modele)
 	tabulation(modele)
 	vue := modele.View()
-	if !strings.Contains(vue, "depart/") || !strings.Contains(vue, "documents/") {
+	if !strings.Contains(vue, "depart"+séparateur) || !strings.Contains(vue, "documents"+séparateur) {
 		t.Errorf("dossiers attendus :\n%s", vue)
 	}
 	if strings.Contains(vue, "cohorte.csv") {
@@ -277,8 +281,8 @@ func TestChampDeuxTabulationsApresAvoirAtteintUnDossier(t *testing.T) {
 
 	// La première tabulation atteint le dossier…
 	tabulation(modele)
-	if valeur := modele.input.Value(); valeur != dossier+"/" {
-		t.Fatalf("valeur = %q, attendu %q", valeur, dossier+"/")
+	if valeur := modele.input.Value(); valeur != dossier+séparateur {
+		t.Fatalf("valeur = %q, attendu %q", valeur, dossier+séparateur)
 	}
 	// … et une seule de plus suffit à voir ce qu'il contient.
 	tabulation(modele)

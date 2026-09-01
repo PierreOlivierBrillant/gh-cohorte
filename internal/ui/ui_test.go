@@ -11,6 +11,10 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 )
 
+// séparateur est celui que portent les suggestions quand la saisie emploie
+// celui du système — la barre oblique inversée sous Windows.
+const séparateur = string(filepath.Separator)
+
 func console() (*ui.Console, *bytes.Buffer) {
 	tampon := &bytes.Buffer{}
 	return ui.NewConsoleFor(tampon), tampon
@@ -327,7 +331,7 @@ func TestLinePrompterCompletionUneSeuleCorrespondance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask : %v", err)
 	}
-	if valeur != filepath.Join(racine, "depart")+"/" {
+	if valeur != filepath.Join(racine, "depart")+séparateur {
 		t.Errorf("valeur = %q", valeur)
 	}
 }
@@ -385,7 +389,7 @@ func TestLinePrompterDoubleTabulationListeLeRepertoireCourant(t *testing.T) {
 		t.Fatalf("Ask : %v", err)
 	}
 	sortie := tampon.String()
-	for _, attendu := range []string{"cohorte.csv", "depart/"} {
+	for _, attendu := range []string{"cohorte.csv", "depart" + séparateur} {
 		if !strings.Contains(sortie, attendu) {
 			t.Errorf("« %s » absent :\n%s", attendu, sortie)
 		}
@@ -435,7 +439,7 @@ func TestLinePrompterCompletionDepuisLeDefaut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ask : %v", err)
 	}
-	if valeur != filepath.Join(racine, "depart")+"/" {
+	if valeur != filepath.Join(racine, "depart")+séparateur {
 		t.Errorf("valeur = %q", valeur)
 	}
 }

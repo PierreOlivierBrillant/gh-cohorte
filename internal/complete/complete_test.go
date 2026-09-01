@@ -10,6 +10,10 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 )
 
+// séparateur est celui que portent les suggestions quand la saisie emploie
+// celui du système — la barre oblique inversée sous Windows.
+const séparateur = string(filepath.Separator)
+
 // arborescence prépare un dossier représentatif et renvoie son chemin.
 func arborescence(t *testing.T) string {
 	t.Helper()
@@ -69,8 +73,8 @@ func TestSuggestDossiersSeulement(t *testing.T) {
 		t.Fatalf("suggestions = %v", suggestions)
 	}
 	for _, suggestion := range suggestions {
-		if !strings.HasSuffix(suggestion, "/") {
-			t.Errorf("un dossier doit se terminer par « / » : %s", suggestion)
+		if !strings.HasSuffix(suggestion, séparateur) {
+			t.Errorf("un dossier doit se terminer par « %s » : %s", séparateur, suggestion)
 		}
 		if strings.Contains(suggestion, ".csv") || strings.Contains(suggestion, "notes") {
 			t.Errorf("un fichier s'est glissé dans les dossiers : %s", suggestion)
@@ -90,7 +94,7 @@ func TestSuggestIgnoreLesFichiersCaches(t *testing.T) {
 	complete.Forget()
 	// filepath.Join nettoierait le point : la saisie est construite telle quelle.
 	demandes := complete.Suggest(racine+string(filepath.Separator)+".", complete.Path)
-	if !contient(demandes, filepath.Join(racine, ".cache")+"/") {
+	if !contient(demandes, filepath.Join(racine, ".cache")+séparateur) {
 		t.Errorf("un point saisi doit les faire apparaître : %v", demandes)
 	}
 }
@@ -129,16 +133,37 @@ func TestSuggestTilde(t *testing.T) {
 		t.Skip("aucune entrée visible dans le dossier personnel")
 	}
 
-	complete.Forget()
-	saisie := "~/" + visible[:1]
-	suggestions := complete.Suggest(saisie, complete.Path)
-	if len(suggestions) == 0 {
-		t.Fatalf("aucune suggestion pour %q", saisie)
-	}
-	for _, suggestion := range suggestions {
-		if !strings.HasPrefix(suggestion, "~/") {
-			t.Errorf("la forme « ~ » doit être conservée : %s", suggestion)
+	// Les deux formes sont acceptées : celle du système, et la barre oblique
+	// que l'on tape par habitude même là où elle n'est pas la sienne.
+	for _, tête := range []string{"~/", "~" + séparateur} {
+		complete.Forget()
+		saisie := tête + visible[:1]
+		suggestions := complete.Suggest(saisie, complete.Path)
+		if len(suggestions) == 0 {
+			t.Fatalf("aucune suggestion pour %q", saisie)
 		}
+		for _, suggestion := range suggestions {
+			if !strings.HasPrefix(suggestion, tête) {
+				t.Errorf("la forme « %s » doit être conservée : %s", tête, suggestion)
+			}
+		}
+	}
+}
+
+// Une saisie à la barre oblique se prolonge sans changer de forme, y compris
+// là où le système préfère l'autre séparateur : la suggestion remplace le
+// champ de saisie, elle ne doit jamais en réécrire le début.
+func TestSuggestConserveLaBarreObliqueSaisie(t *testing.T) {
+	racine := arborescence(t)
+	saisie := filepath.ToSlash(racine) + "/dep"
+	complete.Forget()
+
+	suggestions := complete.Suggest(saisie, complete.Path)
+	if len(suggestions) != 1 {
+		t.Fatalf("suggestions = %v", suggestions)
+	}
+	if attendu := filepath.ToSlash(racine) + "/depart/"; suggestions[0] != attendu {
+		t.Errorf("suggestion = %q, attendu %q", suggestions[0], attendu)
 	}
 }
 

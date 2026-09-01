@@ -52,7 +52,8 @@ var (
 
 // Suggest renvoie les chemins qui prolongent la saisie. Chaque suggestion
 // commence par la saisie elle-même : les champs de texte complètent en ajoutant
-// ce qui manque. Les dossiers sont suivis d'une barre oblique.
+// ce qui manque. Les dossiers sont suivis d'un séparateur — celui de la saisie
+// quand le système en accepte plusieurs, celui du système sinon.
 func Suggest(input string, mode Mode) []string {
 	if mode == None {
 		return nil
@@ -214,6 +215,9 @@ func nativeCandidates(input string) []string {
 // s'appliquent quelle que soit la source des candidats.
 func normalize(input string, candidates []string, mode Mode) []string {
 	_, home := expandHome(input)
+	// Les chemins produits reprennent le séparateur de la saisie : une
+	// suggestion se substitue au champ, elle ne doit pas en réécrire le début.
+	sep := separator(input)
 	// Les fichiers cachés ne se proposent que si la saisie les appelle.
 	_, typed := filepath.Split(input)
 	wantsHidden := strings.HasPrefix(typed, ".")
@@ -222,8 +226,7 @@ func normalize(input string, candidates []string, mode Mode) []string {
 	var suggestions []string
 
 	for _, candidate := range candidates {
-		clean := strings.TrimSuffix(candidate, string(os.PathSeparator))
-		clean = strings.TrimSuffix(clean, "/")
+		clean := trimSeparators(candidate)
 		if clean == "" {
 			continue
 		}
@@ -242,13 +245,13 @@ func normalize(input string, candidates []string, mode Mode) []string {
 		if mode == Dir && !info.IsDir() {
 			continue
 		}
-		display := clean
+		display := withSeparator(clean, sep)
 		if info.IsDir() {
-			display += "/"
+			display += sep
 		}
 		// « ./ » saisi en tête doit être conservé : les suggestions prolongent
 		// la saisie, elles ne la réécrivent pas.
-		for _, marker := range []string{"./", "../"} {
+		for _, marker := range []string{"." + sep, ".." + sep} {
 			if strings.HasPrefix(input, marker) && !strings.HasPrefix(display, marker) {
 				display = marker + display
 				break
@@ -256,11 +259,11 @@ func normalize(input string, candidates []string, mode Mode) []string {
 		}
 		// La saisie utilisait « ~ » : les suggestions doivent la prolonger.
 		if home != "" {
-			if rest, found := strings.CutPrefix(display, home); found {
+			if rest, found := strings.CutPrefix(display, withSeparator(home, sep)); found {
 				display = "~" + rest
 			}
 		}
-		if !strings.HasPrefix(strings.ToLower(display), strings.ToLower(input)) {
+		if !strings.HasPrefix(fold(display), fold(input)) {
 			continue
 		}
 		if seen[display] {
@@ -279,15 +282,68 @@ func normalize(input string, candidates []string, mode Mode) []string {
 
 // expandHome développe « ~ » et renvoie le dossier personnel utilisé, s'il l'a été.
 func expandHome(input string) (string, string) {
-	if input != "~" && !strings.HasPrefix(input, "~/") {
+	rest, found := cutTilde(input)
+	if !found {
 		return input, ""
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return input, ""
 	}
-	if input == "~" {
+	if rest == "" {
 		return home, home
 	}
-	return filepath.Join(home, strings.TrimPrefix(input, "~/")), home
+	return filepath.Join(home, rest), home
+}
+
+// cutTilde reconnaît « ~ » suivi d'un séparateur et renvoie ce qui suit.
+// Windows acceptant les deux formes, « ~/… » comme « ~\… » sont développés.
+func cutTilde(input string) (string, bool) {
+	if input == "~" {
+		return "", true
+	}
+	if len(input) > 1 && input[0] == '~' && os.IsPathSeparator(input[1]) {
+		return input[2:], true
+	}
+	return "", false
+}
+
+// ------------------------------------------------------- les séparateurs
+
+// separator choisit le séparateur des suggestions : celui que la personne a
+// déjà tapé quand le système en accepte plusieurs, celui du système sinon.
+func separator(input string) string {
+	if os.PathSeparator == '/' {
+		return "/"
+	}
+	// Sur Windows, « / » et « \ » ouvrent le même dossier : la suggestion
+	// reprend la forme saisie plutôt que d'imposer la sienne.
+	for index := len(input) - 1; index >= 0; index-- {
+		if os.IsPathSeparator(input[index]) {
+			return input[index : index+1]
+		}
+	}
+	return string(os.PathSeparator)
+}
+
+// withSeparator réécrit avec le séparateur voulu un chemin assemblé par filepath.
+func withSeparator(path, sep string) string {
+	if sep == string(os.PathSeparator) {
+		return path
+	}
+	return strings.ReplaceAll(path, string(os.PathSeparator), sep)
+}
+
+// trimSeparators retire les séparateurs de fin, quelle que soit leur forme.
+func trimSeparators(path string) string {
+	for len(path) > 0 && os.IsPathSeparator(path[len(path)-1]) {
+		path = path[:len(path)-1]
+	}
+	return path
+}
+
+// fold ramène un chemin à la forme qui sert aux comparaisons : casse ignorée,
+// et séparateurs unifiés là où le système les tient pour équivalents.
+func fold(path string) string {
+	return strings.ToLower(filepath.ToSlash(path))
 }
