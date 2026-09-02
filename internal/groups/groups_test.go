@@ -52,6 +52,55 @@ func TestDetectDeuxTravauxDuMemePrefixe(t *testing.T) {
 	}
 }
 
+// parPrefixe indexe les groupes détectés par préfixe, pour des attentes lisibles.
+func parPrefixe(detectes []groups.Detected) map[string]int {
+	tailles := map[string]int{}
+	for _, item := range detectes {
+		tailles[item.Prefix] = item.Count
+	}
+	return tailles
+}
+
+func TestDetectSepareDeuxTravauxSousUnPrefixeCommun(t *testing.T) {
+	noms := []string{
+		"a26-5n6-travailsession-emilie-cote", "a26-5n6-travailsession-jlpicard",
+		"a26-4w6-tp1-aminata-d", "a26-4w6-tp1-jlpicard",
+	}
+	tailles := parPrefixe(groups.Detect(noms, 2))
+	attendu := map[string]int{"a26-5n6-travailsession": 2, "a26-4w6-tp1": 2}
+	if !reflect.DeepEqual(tailles, attendu) {
+		t.Fatalf("groupes = %+v, attendu %+v", tailles, attendu)
+	}
+}
+
+func TestDetectSepareMalgreUnDepotIsole(t *testing.T) {
+	// Un dépôt qui s'arrête au préfixe commun — des notes du cours, par exemple —
+	// ne doit pas refondre les deux travaux dans « a26 ».
+	noms := []string{
+		"a26-5n6-travailsession-emilie-cote", "a26-5n6-travailsession-jlpicard",
+		"a26-4w6-tp1-aminata-d", "a26-4w6-tp1-jlpicard",
+		"a26-notes",
+	}
+	tailles := parPrefixe(groups.Detect(noms, 2))
+	attendu := map[string]int{"a26-5n6-travailsession": 2, "a26-4w6-tp1": 2}
+	if !reflect.DeepEqual(tailles, attendu) {
+		t.Fatalf("groupes = %+v, attendu %+v", tailles, attendu)
+	}
+}
+
+func TestDetectNeSubdivisePasUnGroupeDeComptes(t *testing.T) {
+	// Des comptes GitHub qui partagent un premier segment ne font pas des
+	// sous-groupes : « tp1 » reste entier.
+	noms := []string{
+		"tp1-emilie-cote", "tp1-emilie-roy", "tp1-marie-curie", "tp1-marie-eve",
+		"tp1-jlpicard", "tp1-adiallo",
+	}
+	tailles := parPrefixe(groups.Detect(noms, 2))
+	if !reflect.DeepEqual(tailles, map[string]int{"tp1": 6}) {
+		t.Fatalf("groupes = %+v, attendu tp1 avec 6 dépôts", tailles)
+	}
+}
+
 func TestBuildGroupe(t *testing.T) {
 	repos := []groups.RepoInfo{
 		{Name: "tp1-jlpicard", Private: true, HTMLURL: "https://github.com/acme/tp1-jlpicard", PushedAt: "2026-08-19T10:11:12Z"},

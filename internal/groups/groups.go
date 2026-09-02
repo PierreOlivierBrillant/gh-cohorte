@@ -82,99 +82,103 @@ type Detected struct {
 	Count  int
 }
 
-// candidatePrefixes énumère les préfixes possibles d'un nom, le nom entier exclu.
-func candidatePrefixes(name string) []string {
-	parts := strings.Split(name, Separator)
-	prefixes := make([]string, 0, len(parts)-1)
-	for size := 1; size < len(parts); size++ {
-		prefixes = append(prefixes, strings.Join(parts[:size], Separator))
+// segmented découpe les noms en segments, en minuscules. Un nom sans séparateur
+// ne peut porter aucun préfixe : il est écarté.
+func segmented(names []string) [][]string {
+	members := make([][]string, 0, len(names))
+	for _, name := range names {
+		segments := strings.Split(strings.ToLower(name), Separator)
+		if len(segments) < 2 {
+			continue
+		}
+		members = append(members, segments)
 	}
-	return prefixes
+	return members
 }
 
-// commonPrefix calcule le plus long préfixe commun, segment par segment.
-func commonPrefix(names []string) string {
-	if len(names) == 0 {
-		return ""
+// branches répartit les dépôts selon le segment qui suit le préfixe de longueur
+// « depth ». Un dépôt dont il ne reste qu'un segment — son suffixe — ne peut pas
+// descendre plus bas : il est compté à part.
+func branches(members [][]string, depth int) (map[string][][]string, int) {
+	byNext := make(map[string][][]string)
+	terminal := 0
+	for _, segments := range members {
+		if len(segments) <= depth+1 {
+			terminal++
+			continue
+		}
+		next := segments[depth]
+		byNext[next] = append(byNext[next], segments)
 	}
-	segments := make([][]string, len(names))
-	shortest := -1
-	for index, name := range names {
-		segments[index] = strings.Split(name, Separator)
-		if shortest < 0 || len(segments[index]) < shortest {
-			shortest = len(segments[index])
+	return byNext, terminal
+}
+
+// splits dit si le préfixe se subdivise en travaux distincts : au moins deux
+// sous-préfixes rassemblent chacun un groupe entier, et les dépôts qui
+// s'arrêtent au préfixe sont trop peu nombreux pour en former un eux-mêmes.
+// C'est le cas de « a26 » quand l'organisation porte « a26-4w6-tp1-… » et
+// « a26-5n6-travailsession-… » : deux travaux que fondre dans « a26 »
+// n'aiderait personne. À l'inverse, un groupe dont les suffixes sont des
+// comptes GitHub garde toujours des noms d'un seul segment — « tp1-jlpicard »
+// à côté de « tp1-emilie-cote » — et reste donc entier.
+func splits(byNext map[string][][]string, terminal, minimum int) bool {
+	if terminal >= minimum {
+		return false
+	}
+	subgroups := 0
+	for _, sub := range byNext {
+		if len(sub) >= minimum {
+			subgroups++
 		}
 	}
-	var common []string
-	for position := 0; position < shortest-1; position++ {
-		current := segments[0][position]
-		same := true
-		for _, item := range segments {
-			if item[position] != current {
-				same = false
-				break
-			}
-		}
-		if !same {
+	return subgroups >= 2
+}
+
+// collect retient le groupe formé par les « depth » premiers segments, ou
+// descend dans ses sous-groupes s'il se subdivise.
+func collect(members [][]string, depth, minimum int, found *[]Detected) {
+	// Le préfixe est d'abord étendu à ce que partagent réellement ses membres :
+	// « projet » redevient « projet-final » si tous les dépôts le portent.
+	for {
+		byNext, terminal := branches(members, depth)
+		if terminal > 0 || len(byNext) != 1 {
 			break
 		}
-		common = append(common, current)
+		depth++
 	}
-	return strings.Join(common, Separator)
+	byNext, terminal := branches(members, depth)
+	if splits(byNext, terminal, minimum) {
+		for _, sub := range byNext {
+			if len(sub) >= minimum {
+				collect(sub, depth+1, minimum, found)
+			}
+		}
+		return
+	}
+	if len(members) >= minimum {
+		*found = append(*found, Detected{
+			Prefix: strings.Join(members[0][:depth], Separator),
+			Count:  len(members),
+		})
+	}
 }
 
 // Detect devine les groupes présents et les renvoie du plus grand au plus petit.
+// Le préfixe retenu est le plus général qui rassemble au moins « minimum »
+// dépôts sans se subdiviser en plusieurs groupes de cette taille.
 func Detect(names []string, minimum int) []Detected {
 	if minimum < 1 {
 		minimum = 2
 	}
-	counts := map[string]int{}
-	for _, name := range names {
-		for _, prefix := range candidatePrefixes(strings.ToLower(name)) {
-			counts[prefix]++
-		}
-	}
-
-	retained := map[string]bool{}
-	for prefix, total := range counts {
-		if total >= minimum {
-			retained[prefix] = true
-		}
-	}
-
-	// On ne garde que les préfixes les plus généraux : « tp1 » l'emporte sur « tp1-jean ».
-	groups := map[string]int{}
-	for prefix := range retained {
-		general := true
-		for other := range retained {
-			if other != prefix && strings.HasPrefix(prefix, other+Separator) {
-				general = false
-				break
-			}
-		}
-		if !general {
+	// Le premier segment est toujours un point de départ distinct : rien ne
+	// rassemble « tp1-… » et « tp2-… ». Les branches trop petites tombent ici.
+	roots, _ := branches(segmented(names), 0)
+	detected := make([]Detected, 0, len(roots))
+	for _, members := range roots {
+		if len(members) < minimum {
 			continue
 		}
-		var members []string
-		for _, name := range names {
-			if strings.HasPrefix(strings.ToLower(name), prefix+Separator) {
-				members = append(members, strings.ToLower(name))
-			}
-		}
-		// Le préfixe est étendu à ce que partagent réellement ses membres :
-		// « projet » redevient « projet-final » si tous les dépôts le portent.
-		label := commonPrefix(members)
-		if label == "" {
-			label = prefix
-		}
-		if len(members) > groups[label] {
-			groups[label] = len(members)
-		}
-	}
-
-	detected := make([]Detected, 0, len(groups))
-	for prefix, count := range groups {
-		detected = append(detected, Detected{Prefix: prefix, Count: count})
+		collect(members, 1, minimum, &detected)
 	}
 	sort.Slice(detected, func(i, j int) bool {
 		if detected[i].Count != detected[j].Count {

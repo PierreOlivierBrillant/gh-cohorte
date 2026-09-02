@@ -132,7 +132,11 @@ gh cohorte --manage         # inventorie l'organisation et propose les groupes
 
 Les groupes sont déduits des noms de dépôts : le préfixe retenu est le plus
 général qui rassemble au moins deux dépôts, étendu à ce que ses membres ont
-réellement en commun — `projet-final` plutôt que `projet`.
+réellement en commun — `projet-final` plutôt que `projet`. Un préfixe qui
+recouvre plusieurs travaux distincts est au contraire subdivisé :
+`a26-5n6-travailsession` et `a26-4w6-tp1` restent deux groupes au lieu d'être
+fondus dans `a26`. Au besoin, « Saisir un autre préfixe… » ouvre n'importe quel
+préfixe, y compris plus court.
 
 Le groupe choisi s'affiche avec, pour chaque dépôt, **le nom complet de la
 personne**, la visibilité et la date du dernier envoi :
