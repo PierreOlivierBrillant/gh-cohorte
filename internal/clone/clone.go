@@ -37,10 +37,10 @@ const GitTimeout = 5 * time.Minute
 
 // Result est l'issue du traitement d'un dépôt.
 type Result struct {
-	Name   string
-	Status string
-	Path   string
-	Error  string
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Path   string `json:"path"`
+	Error  string `json:"error"`
 }
 
 // IsFailed indique un échec.
@@ -54,8 +54,8 @@ type Target struct {
 
 // Clone est un clone déjà présent sur le disque.
 type Clone struct {
-	Name string
-	Path string
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // Cloner clone ou met à jour une série de dépôts en parallèle.

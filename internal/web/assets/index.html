@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>gh cohorte</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- Barre globale, à la manière de l'en-tête sombre de GitHub. -->
+<header class="barre-globale">
+  <span class="produit">gh cohorte <span class="version" id="version"></span></span>
+  <span class="espace"></span>
+  <span class="compte" id="compte"></span>
+  <button type="button" id="quitter" class="bouton discret inverse">Quitter</button>
+</header>
+
+<!-- En-tête du cours : l'organisation tient lieu de « classroom ». -->
+<div class="entete-cours">
+  <div class="ligne-cours">
+    <h1 id="cours-titre">…</h1>
+    <div class="choix-cours">
+      <label class="etiquette" for="organisation">Organisation</label>
+      <select id="organisation" class="champ"></select>
+      <input type="text" id="organisation-libre" class="champ" placeholder="nom de l'organisation" hidden>
+    </div>
+  </div>
+  <p class="note" id="cours-sous-titre"></p>
+  <nav class="onglets" id="onglets">
+    <button type="button" data-vue="travaux" class="actif">Travaux</button>
+    <button type="button" data-vue="etudiants">Étudiants</button>
+    <button type="button" data-vue="reglages">Réglages</button>
+  </nav>
+</div>
+
+<main>
+
+  <!-- ---------------------------------------------------- travaux : la liste -->
+  <section id="vue-travaux" class="vue">
+    <div class="barre-outils">
+      <div>
+        <h2 id="travaux-compte">Travaux</h2>
+        <p class="note" id="travaux-source"></p>
+      </div>
+      <div class="actions">
+        <button type="button" id="travaux-recharger" class="bouton">Recharger</button>
+        <button type="button" id="travaux-nouveau" class="bouton vert">Nouveau travail</button>
+      </div>
+    </div>
+    <div class="boite" id="travaux-liste"></div>
+  </section>
+
+  <!-- ------------------------------------------- travaux : le détail de l'un -->
+  <section id="vue-travail" class="vue" hidden>
+    <nav class="fil"><button type="button" id="travail-retour" class="lien">Travaux</button>
+      <span class="separateur">/</span><span id="fil-travail"></span></nav>
+
+    <div class="barre-outils">
+      <div>
+        <h2 id="detail-titre"></h2>
+        <p class="note" id="detail-resume"></p>
+      </div>
+      <div class="actions">
+        <button type="button" id="detail-noms" class="bouton">Retrouver les noms</button>
+        <button type="button" id="detail-acces" class="bouton">Inspecter les accès</button>
+        <button type="button" id="detail-ajouter" class="bouton vert">Ajouter des étudiants</button>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete">
+        <label class="case"><input type="checkbox" id="detail-tout"> <span id="detail-selection"></span></label>
+        <span class="espace"></span>
+        <button type="button" id="detail-copier" class="bouton petit">Copier les URL</button>
+        <button type="button" id="detail-csv" class="bouton petit">Exporter en CSV</button>
+        <button type="button" id="detail-cloner" class="bouton petit">Cloner</button>
+        <button type="button" id="detail-pull" class="bouton petit">Mettre à jour des clones</button>
+      </div>
+      <table class="tableau" id="detail-table">
+        <thead>
+          <tr>
+            <th class="etroit"></th>
+            <th>Étudiant</th>
+            <th>Dépôt</th>
+            <th>Visibilité</th>
+            <th>Dernier envoi</th>
+            <th>Accès</th>
+            <th class="etroit"></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------ nouveau travail : l'assistant -->
+  <section id="vue-assistant" class="vue" hidden>
+    <nav class="fil"><button type="button" id="assistant-retour" class="lien">Travaux</button>
+      <span class="separateur">/</span><span id="fil-assistant">Nouveau travail</span></nav>
+
+    <ol class="etapes" id="etapes">
+      <li data-etape="1"><span class="pastille">1</span><span class="libelle">Bases du travail</span></li>
+      <li data-etape="2"><span class="pastille">2</span><span class="libelle">Code de départ</span></li>
+      <li data-etape="3"><span class="pastille">3</span><span class="libelle">Étudiants et création</span></li>
+    </ol>
+
+    <!-- étape 1 -->
+    <div class="boite etape" data-etape="1">
+      <div class="boite-entete"><strong>Bases du travail</strong></div>
+      <div class="boite-corps">
+        <label class="champ-bloc">
+          <span class="etiquette">Identifiant du travail</span>
+          <input type="text" id="reglage-assignment" class="champ" placeholder="tp1">
+          <span class="aide">Il préfixe le nom de chaque dépôt : <code id="apercu-nom">tp1-compte</code></span>
+        </label>
+        <label class="champ-bloc">
+          <span class="etiquette">Gabarit de nom des dépôts</span>
+          <input type="text" id="reglage-pattern" class="champ">
+          <span class="aide" id="aide-champs"></span>
+        </label>
+        <label class="champ-bloc">
+          <span class="etiquette">Gabarit de description</span>
+          <input type="text" id="reglage-description" class="champ">
+        </label>
+
+        <fieldset class="groupe-radio">
+          <legend class="etiquette">Visibilité des dépôts</legend>
+          <label class="case"><input type="radio" name="visibilite" value="private" id="visibilite-privee">
+            <span><strong>Privé</strong><span class="aide">Seuls vous et l'étudiant voyez le dépôt.</span></span></label>
+          <label class="case"><input type="radio" name="visibilite" value="public" id="visibilite-publique">
+            <span><strong>Public</strong><span class="aide">Le dépôt est visible de tous.</span></span></label>
+        </fieldset>
+
+        <fieldset class="groupe-radio">
+          <legend class="etiquette">Accès des étudiants</legend>
+          <label class="case"><input type="checkbox" id="reglage-collaborateur">
+            <span><strong>Inviter chaque étudiant sur son dépôt</strong>
+            <span class="aide">Une invitation part vers le compte GitHub de la personne.</span></span></label>
+          <label class="champ-bloc etroit-champ">
+            <span class="etiquette">Droit accordé</span>
+            <select id="reglage-permission" class="champ"></select>
+          </label>
+        </fieldset>
+
+        <div class="pied-etape">
+          <span class="espace"></span>
+          <button type="button" class="bouton vert" data-continuer="2">Continuer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- étape 2 -->
+    <div class="boite etape" data-etape="2" hidden>
+      <div class="boite-entete"><strong>Code de départ</strong></div>
+      <div class="boite-corps">
+        <label class="champ-bloc">
+          <span class="etiquette">Dépôt modèle</span>
+          <span class="ligne-champ">
+            <input type="text" id="reglage-template" class="champ" placeholder="organisation/depot">
+            <button type="button" id="template-verifier" class="bouton">Vérifier</button>
+          </span>
+          <span class="aide">Laissez vide pour créer des dépôts neufs, initialisés d'un README.</span>
+        </label>
+
+        <label class="champ-bloc">
+          <span class="etiquette">Dossier de fichiers de départ</span>
+          <span class="ligne-champ">
+            <input type="text" id="reglage-starter" class="champ" list="suggestions-starter">
+            <datalist id="suggestions-starter"></datalist>
+            <button type="button" id="starter-inspecter" class="bouton">Inspecter</button>
+          </span>
+          <span class="aide">Un dossier de cette machine, déposé dans chaque dépôt en un seul commit.</span>
+        </label>
+
+        <label class="champ-bloc">
+          <span class="etiquette">Message du commit</span>
+          <input type="text" id="reglage-commit" class="champ">
+        </label>
+
+        <div id="starter-resume"></div>
+
+        <div class="pied-etape">
+          <button type="button" class="bouton" data-continuer="1">Revenir</button>
+          <span class="espace"></span>
+          <button type="button" class="bouton vert" data-continuer="3">Continuer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- étape 3 -->
+    <div class="boite etape" data-etape="3" hidden>
+      <div class="boite-entete"><strong>Étudiants et création</strong></div>
+      <div class="boite-corps">
+        <div id="assistant-ajout" class="avis" hidden></div>
+
+        <div class="rangee">
+          <label class="champ-bloc">
+            <span class="etiquette">Fichier CSV de la machine</span>
+            <span class="ligne-champ">
+              <input type="text" id="roster-chemin" class="champ" placeholder="cohorte.csv" list="suggestions-roster">
+              <datalist id="suggestions-roster"></datalist>
+              <button type="button" id="roster-charger" class="bouton">Charger</button>
+            </span>
+          </label>
+          <label class="champ-bloc">
+            <span class="etiquette">…ou un fichier déposé ici</span>
+            <input type="file" id="roster-fichier" accept=".csv,.tsv,.txt">
+          </label>
+        </div>
+
+        <label class="champ-bloc">
+          <span class="etiquette">…ou une liste collée : « nom complet, compte GitHub » par ligne</span>
+          <textarea id="roster-texte" class="champ" rows="5"
+            placeholder="Jean-Luc Picard, jlpicard&#10;Émilie Côté, emilie-cote"></textarea>
+        </label>
+
+        <div class="actions">
+          <button type="button" id="roster-lire" class="bouton">Lire la liste</button>
+          <button type="button" id="roster-enregistrer" class="bouton">Enregistrer en CSV…</button>
+          <button type="button" id="comptes-verifier" class="bouton">Vérifier les comptes GitHub</button>
+          <span class="note" id="roster-resume"></span>
+        </div>
+
+        <div id="roster-rejets"></div>
+
+        <h3>Dépôts qui seront créés</h3>
+        <div id="plan-erreur"></div>
+        <table class="tableau" id="plan-table" hidden>
+          <thead><tr><th>Dépôt</th><th>Étudiant</th><th>Compte</th><th>Description</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="note" id="plan-resume"></p>
+
+        <label class="case"><input type="checkbox" id="creer-force">
+          <span>Déposer les fichiers de départ même dans un dépôt déjà garni</span></label>
+
+        <div class="pied-etape">
+          <button type="button" class="bouton" data-continuer="2">Revenir</button>
+          <span class="espace"></span>
+          <button type="button" id="lancer-simulation" class="bouton">Simuler</button>
+          <button type="button" id="lancer-creation" class="bouton vert">Créer les dépôts</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- étudiants -->
+  <section id="vue-etudiants" class="vue" hidden>
+    <div class="barre-outils">
+      <div>
+        <h2>Étudiants</h2>
+        <p class="note">La liste de la cohorte, et les travaux où chaque personne a déjà un dépôt.</p>
+      </div>
+      <div class="actions">
+        <button type="button" id="etudiants-recharger" class="bouton">Recharger</button>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete">
+        <span class="ligne-champ">
+          <input type="text" id="etudiants-chemin" class="champ" placeholder="cohorte.csv" list="suggestions-etudiants">
+          <datalist id="suggestions-etudiants"></datalist>
+          <button type="button" id="etudiants-charger" class="bouton">Importer la liste</button>
+        </span>
+        <span class="espace"></span>
+        <span class="note" id="etudiants-resume"></span>
+      </div>
+      <table class="tableau" id="etudiants-table">
+        <thead><tr><th>Étudiant</th><th>Compte GitHub</th><th>Travaux</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="boite-vide" id="etudiants-vide">
+        Aucune liste chargée. Importez un fichier CSV « nom complet, compte GitHub ».
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------------- réglages -->
+  <section id="vue-reglages" class="vue" hidden>
+    <div class="barre-outils">
+      <div>
+        <h2>Réglages</h2>
+        <p class="note">Ce que l'outil retient d'une session à l'autre, et où il l'écrit.</p>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>Portées du jeton</strong></div>
+      <div class="boite-corps">
+        <div id="portees" class="etiquettes"></div>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>Fichiers</strong></div>
+      <table class="tableau" id="chemins">
+        <thead><tr><th>Élément</th><th>Chemin</th><th>État</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="boite-pied">
+        <button type="button" id="cache-vider" class="bouton">Vider le cache local</button>
+        <button type="button" id="reglages-enregistrer" class="bouton">Mémoriser les réglages</button>
+        <span class="note" id="reglages-etat"></span>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>Création</strong></div>
+      <div class="boite-corps">
+        <label class="champ-bloc etroit-champ">
+          <span class="etiquette">Marge entre deux créations (secondes)</span>
+          <input type="number" id="reglage-delay" class="champ" min="0" step="0.5">
+          <span class="aide">GitHub limite les écritures en rafale.</span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ------------------------------------------------------- travail en cours -->
+<!-- Opérations longues : création, clonage, vérifications. -->
+<aside id="operation" hidden>
+  <div class="operation-entete">
+    <strong id="operation-titre"></strong>
+    <span class="note" id="operation-etat"></span>
+    <button type="button" id="operation-annuler" class="bouton petit">Annuler</button>
+    <button type="button" id="operation-fermer" class="bouton petit">Fermer</button>
+  </div>
+  <progress id="operation-barre" max="100" value="0"></progress>
+  <div class="journal" id="operation-journal"></div>
+</aside>
+
+<div id="messages" class="messages" aria-live="polite"></div>
+
+<dialog id="dialogue">
+  <form method="dialog">
+    <h3 id="dialogue-titre"></h3>
+    <div id="dialogue-corps"></div>
+    <menu>
+      <button value="annuler" id="dialogue-annuler" class="bouton">Annuler</button>
+      <button value="ok" id="dialogue-ok" class="bouton vert">Confirmer</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -9,8 +9,13 @@ suppression.
 Toute l'interface est en français. L'extension est écrite en Go et distribuée
 précompilée : aucune installation de Go n'est nécessaire pour s'en servir.
 
+Deux façons de s'en servir, pour les mêmes opérations : l'assistant du terminal,
+ou une **interface graphique** servie sur la boucle locale et ouverte dans le
+navigateur.
+
 ```
-gh cohorte
+gh cohorte          # assistant au terminal
+gh cohorte --web    # interface graphique
 ```
 
 ## Installation
@@ -280,6 +285,95 @@ Le menu **Options avancées**, accessible **sans authentification**, affiche
 l'emplacement et l'état des trois fichiers gérés par l'outil — réglages, cache,
 bilans — et permet de vider le cache ou d'oublier les réglages mémorisés.
 
+## Interface web
+
+`gh cohorte --web` monte un petit serveur sur la boucle locale et ouvre le
+navigateur dessus. C'est la même extension, les mêmes vérifications et les mêmes
+écritures : seule la façon de poser les questions change.
+
+```
+gh cohorte --web
+```
+
+```
+Interface web
+  Adresse : http://127.0.0.1:41287/?jeton=8f3c…
+  Le serveur n'écoute que sur cette machine et n'accepte que cette adresse :
+  le jeton en fait partie.
+  Ctrl-C pour fermer, ou « Quitter » dans le navigateur.
+```
+
+L'organisation y tient lieu de **cours**, et l'écran reprend l'organisation de
+GitHub Classroom : un en-tête de cours, trois onglets, une liste de travaux, et
+un assistant en trois étapes pour en créer un.
+
+| GitHub Classroom | Ici |
+| --- | --- |
+| Classroom | l'organisation GitHub |
+| Assignment | un **travail** : les dépôts partageant un préfixe |
+| Roster | la liste des **étudiants**, au format CSV |
+| « a accepté le devoir » | a déjà un dépôt dans ce travail |
+| Starter code repository | dépôt modèle, ou dossier de fichiers de départ |
+
+Ce que Classroom faisait et que l'outil ne fait pas : pas de lien d'invitation à
+distribuer — les dépôts sont créés directement —, pas d'échéance, pas de
+correction automatique, pas de travail en équipe.
+
+### Travaux
+
+La liste des travaux détectés dans l'organisation, chacun avec son nombre de
+dépôts. En ouvrir un donne la page du travail : un tableau **étudiant par
+étudiant** — nom complet, dépôt, visibilité, dernier envoi, accès — et les
+actions qui vont avec : retrouver les noms complets, inspecter les accès de tout
+le travail, gérer les collaborateurs d'un dépôt, copier ou exporter les URL,
+cloner une sélection, mettre à jour des clones, supprimer un dépôt.
+
+### Nouveau travail, en trois étapes
+
+Le bouton vert **Nouveau travail** ouvre l'assistant, calqué sur celui de
+Classroom :
+
+1. **Bases du travail** — identifiant, gabarit de nom (le nom d'un dépôt
+   s'affiche au fil de la frappe), description, visibilité, invitation des
+   étudiants et droit accordé.
+2. **Code de départ** — dépôt modèle, ou dossier de fichiers de départ de cette
+   machine, et le message du commit.
+3. **Étudiants et création** — la liste (fichier de la machine, fichier déposé
+   dans la page, ou liste collée), la vérification des comptes GitHub, et
+   **l'aperçu des dépôts qui se recalcule à chaque frappe** : chaque nom est
+   visible avant la moindre écriture. Puis la simulation, ou la création.
+
+Une fois les dépôts créés, l'interface ouvre la page du travail — comme
+Classroom mène à la page du devoir. Depuis cette page, **Ajouter des étudiants**
+relance l'assistant directement à l'étape 3, en réutilisant le modèle du travail
+et en écartant les étudiants qui ont déjà un dépôt.
+
+### Étudiants
+
+La liste de la cohorte et, pour chaque personne, les travaux où elle a déjà un
+dépôt — l'équivalent de la colonne « accepté » de Classroom, déduit des dépôts
+existants plutôt que d'une invitation.
+
+### Réglages
+
+Portées du jeton, emplacements des fichiers, purge du cache, marge entre deux
+créations, mémorisation des réglages.
+
+---
+
+Les opérations longues — création, clonage, vérification des comptes, inspection
+des accès — tournent en arrière-plan et se suivent dans un panneau de
+progression, ligne par ligne, avec un bouton d'annulation. Les réglages modifiés
+dans l'interface sont mémorisés en quittant, comme après l'assistant du terminal.
+
+Le clonage, les fichiers de départ et les listes CSV désignent des chemins **de
+la machine**, pas du navigateur : les champs correspondants se complètent au fil
+de la frappe, le serveur local répondant à la place du shell.
+
+L'interface est aussi accessible depuis le menu principal de `gh cohorte`, et
+`--no-browser` se contente d'afficher l'adresse sans ouvrir de navigateur — utile
+à travers une session SSH avec redirection de port.
+
 ## Interface
 
 - Toutes les listes se parcourent aux flèches et défilent quand elles sont
@@ -344,6 +438,8 @@ bilans — et permet de vider le cache ou d'oublier les réglages mémorisés.
 --dry-run                simuler sans rien créer
 -y, --yes                passer la confirmation finale
 --non-interactive        échouer plutôt que poser une question
+--web                    ouvrir l'interface graphique sur la boucle locale
+--no-browser             avec --web, ne pas ouvrir le navigateur
 --host HOTE              hôte GitHub (github.com ou instance Enterprise)
 --config FICHIER         fichier de réglages
 --report-dir DOSSIER     dossier des bilans (défaut : rapports)
@@ -371,6 +467,15 @@ Codes de retour : `0` succès, `1` au moins un échec, `2` erreur de validation,
   court-circuite cette confirmation.
 - Les données d'étudiants (bilans, listes, clones) sont exclues du dépôt par le
   `.gitignore`.
+- **L'interface web n'écoute que sur `127.0.0.1`**, sur un port tiré au hasard à
+  chaque lancement. Un jeton de session, lui aussi tiré au hasard, figure une
+  seule fois dans l'adresse affichée puis vit dans un témoin `HttpOnly`,
+  `SameSite=Strict` : sans lui, toute requête est refusée. L'en-tête `Host` doit
+  désigner la boucle locale — une entrée DNS pointant sur `127.0.0.1` ne suffit
+  pas —, l'origine de toute requête est vérifiée, et une écriture doit porter un
+  en-tête que seule la page sait ajouter : un autre site ouvert dans le même
+  navigateur ne peut donc rien déclencher. Le jeton GitHub, lui, ne quitte jamais
+  le processus : la page ne parle qu'à cette API locale.
 
 ## Développement
 
@@ -393,6 +498,7 @@ sortie propre hors terminal.
 | `internal/roster` | lecture et écriture des listes CSV |
 | `internal/plan` | gabarits et plan de génération |
 | `internal/groups` | détection des groupes, sélections |
+| `internal/orgs` | inventaire des organisations : rôle et droit de créer |
 | `internal/starter` | lecture d'un dossier de fichiers de départ |
 | `internal/config`, `internal/cache` | réglages et cache disque |
 | `internal/ghapi` | client de l'API GitHub, bâti sur go-gh |
@@ -401,6 +507,7 @@ sortie propre hors terminal.
 | `internal/clone` | clonage et mise à jour |
 | `internal/complete` | complétion des chemins, déléguée au shell |
 | `internal/ui` | console, questions, barres de progression |
+| `internal/web` | serveur local, API JSON et page embarquée |
 | `internal/app` | assemblage : drapeaux, assistant, gestion, options avancées |
 
 Publication : pousser une étiquette `vX.Y.Z` déclenche le workflow
@@ -429,6 +536,17 @@ tranché, et pourquoi.
 - **Le mode gestion suppose un terminal.** En mode non interactif, il exige au
   moins un préfixe (`--manage tp1`) et refuse de choisir un groupe à votre
   place.
+- **L'interface web est une API au-dessus des paquets du domaine, pas un
+  terminal déguisé.** `internal/web` appelle `plan`, `groups`, `runner`, `clone`
+  et `ghapi` directement : la validation, les gabarits, le refus des collisions
+  de noms et la confirmation par nom exact restent au même endroit, et les deux
+  interfaces ne peuvent pas diverger sur ce qui compte. Ce qui est propre au
+  terminal — questions, barres, couleurs — n'y entre pas ; les opérations longues
+  deviennent des travaux en arrière-plan suivis par un flux d'événements.
+- **La page est embarquée dans le binaire** (`go:embed`), sans dépendance
+  externe ni étape de construction : du HTML, du CSS et du JavaScript écrits à la
+  main. La promesse « aucune installation nécessaire » vaut aussi pour
+  l'interface graphique, et le graphe de dépendances du module ne bouge pas.
 - **Les questions passent par une interface `ui.Prompter`.** Quatre
   implémentations : `huh` sur un vrai terminal ; un questionneur en mode ligne
   (listes numérotées, sélections par expression) quand la sortie est redirigée
