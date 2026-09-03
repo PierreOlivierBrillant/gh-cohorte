@@ -303,68 +303,112 @@ Interface web
   Ctrl-C pour fermer, ou « Quitter » dans le navigateur.
 ```
 
-L'organisation y tient lieu de **cours**, et l'écran reprend l'organisation de
-GitHub Classroom : un en-tête de cours, trois onglets, une liste de travaux, et
-un assistant en trois étapes pour en créer un.
+L'interface reprend le modèle de GitHub Classroom : des **groupes**, chacun
+avec ses **étudiants**, à qui l'on **distribue des travaux**.
 
 | GitHub Classroom | Ici |
 | --- | --- |
-| Classroom | l'organisation GitHub |
-| Assignment | un **travail** : les dépôts partageant un préfixe |
-| Roster | la liste des **étudiants**, au format CSV |
-| « a accepté le devoir » | a déjà un dépôt dans ce travail |
+| Classroom | un **groupe** : une organisation, un préfixe, des étudiants |
+| Roster | la liste des étudiants du groupe |
+| Assignment | un **travail** distribué au groupe |
+| « a accepté le devoir » | a un dépôt pour ce travail |
 | Starter code repository | dépôt modèle, ou dossier de fichiers de départ |
 
 Ce que Classroom faisait et que l'outil ne fait pas : pas de lien d'invitation à
 distribuer — les dépôts sont créés directement —, pas d'échéance, pas de
 correction automatique, pas de travail en équipe.
 
+### Comment un groupe tient sans serveur
+
+Le nom d'un dépôt porte tout : `préfixe-travail-compte`. Le groupe `a26-5n6`
+distribue `tp1` à `emilie-cote`, et le dépôt s'appelle `a26-5n6-tp1-emilie-cote`.
+**GitHub reste la seule source de vérité** : les travaux ne sont pas des fiches
+enregistrées quelque part, ils sont lus dans l'inventaire de l'organisation.
+Déclarer un groupe n'écrit rien sur GitHub, et le retirer n'y efface rien.
+
+Le fichier local `groupes.json`, voisin des réglages, ne retient que ce que les
+noms de dépôts ne savent pas dire : **qui sont les étudiants** et les réglages
+que les travaux du groupe reprennent.
+
+C'est aussi la liste des étudiants qui permet de **relire** un nom de dépôt.
+`a26-5n6-tp1-emilie-cote` ne se découpe en travail et en compte que si l'on sait
+déjà qu'`emilie-cote` est du groupe — sans quoi rien ne dit où finit le nom du
+travail. Cette relecture remplace le couplage « invitation → compte » de
+Classroom : un travail distribué à une seule personne est reconnu aussi bien
+qu'un travail distribué à trente.
+
+### Adopter ce qui existe déjà
+
+Une organisation en cours d'année n'a rien à renommer. Au moment de déclarer un
+groupe, l'interface propose les **groupes repérés dans les dépôts** : elle
+détecte les travaux, les regroupe par ce qui les précède, et propose le préfixe
+avec les comptes qu'on y trouve.
+
+```
+Groupes repérés dans l'organisation
+  a26-5n6    travailsession, tp1        24 compte(s)   48 dépôt(s)
+  a26-4w6    tp1                        22 compte(s)   22 dépôt(s)
+```
+
+En choisir un reprend son préfixe et pré-remplit la liste des étudiants à partir
+des dépôts existants ; il ne reste qu'à retrouver les noms complets. Un groupe
+sans préfixe couvre les travaux nommés à la racine de l'organisation, pour une
+nomenclature plate du type `tp1-emilie-cote`.
+
 ### Travaux
 
-La liste des travaux détectés dans l'organisation, chacun avec son nombre de
-dépôts. En ouvrir un donne la page du travail : un tableau **étudiant par
-étudiant** — nom complet, dépôt, visibilité, dernier envoi, accès — et les
-actions qui vont avec : retrouver les noms complets, inspecter les accès de tout
-le travail, gérer les collaborateurs d'un dépôt, copier ou exporter les URL,
-cloner une sélection, mettre à jour des clones, supprimer un dépôt.
+La page d'un groupe liste ses travaux, chacun avec le nombre d'étudiants servis
+— `18 étudiant(s) du groupe sur 24`. En ouvrir un donne la page du travail : un
+tableau **étudiant par étudiant** — nom complet, dépôt, visibilité, dernier
+envoi, accès — et les actions qui vont avec : inspecter les accès de tout le
+travail, gérer les collaborateurs d'un dépôt, copier ou exporter les URL, cloner
+une sélection, mettre à jour des clones, supprimer un dépôt.
 
-### Nouveau travail, en trois étapes
+Un dépôt dont le compte n'est pas dans la liste du groupe reste visible, signalé
+« hors liste » : rien n'est caché sous prétexte que la liste est incomplète.
+
+### Distribuer un travail, en trois étapes
 
 Le bouton vert **Nouveau travail** ouvre l'assistant, calqué sur celui de
 Classroom :
 
-1. **Bases du travail** — identifiant, gabarit de nom (le nom d'un dépôt
-   s'affiche au fil de la frappe), description, visibilité, invitation des
-   étudiants et droit accordé.
+1. **Bases du travail** — nom, gabarit (le nom d'un dépôt s'affiche au fil de la
+   frappe), description, visibilité, invitation des étudiants et droit accordé.
 2. **Code de départ** — dépôt modèle, ou dossier de fichiers de départ de cette
    machine, et le message du commit.
-3. **Étudiants et création** — la liste (fichier de la machine, fichier déposé
-   dans la page, ou liste collée), la vérification des comptes GitHub, et
+3. **Distribution** — les étudiants du groupe, tous cochés par défaut, et
    **l'aperçu des dépôts qui se recalcule à chaque frappe** : chaque nom est
-   visible avant la moindre écriture. Puis la simulation, ou la création.
+   visible avant la moindre écriture. Puis la simulation, ou la distribution.
 
-Une fois les dépôts créés, l'interface ouvre la page du travail — comme
-Classroom mène à la page du devoir. Depuis cette page, **Ajouter des étudiants**
-relance l'assistant directement à l'étape 3, en réutilisant le modèle du travail
-et en écartant les étudiants qui ont déjà un dépôt.
+Les étudiants qui ont déjà un dépôt pour ce travail sont écartés et signalés :
+redistribuer après avoir ajouté trois personnes ne crée que trois dépôts.
+**Distribuer aux manquants**, depuis la page d'un travail, reprend l'assistant
+directement à l'étape 3.
+
+Le groupe retient les réglages du dernier travail distribué : le suivant n'a pas
+à les retaper.
 
 ### Étudiants
 
-La liste de la cohorte et, pour chaque personne, les travaux où elle a déjà un
-dépôt — l'équivalent de la colonne « accepté » de Classroom, déduit des dépôts
-existants plutôt que d'une invitation.
+La liste du groupe et, pour chaque personne, les travaux où elle a déjà un dépôt
+— l'équivalent de la colonne « accepté » de Classroom, déduit des dépôts plutôt
+que d'une invitation. De là : retrouver les noms complets manquants (une fois
+retrouvés, ils sont retenus), et remplacer la liste.
 
-### Réglages
+### Réglages du groupe
 
-Portées du jeton, emplacements des fichiers, purge du cache, marge entre deux
-créations, mémorisation des réglages.
+Nom, organisation, préfixe, et les réglages par défaut de ses travaux. Changer
+le préfixe ne renomme aucun dépôt : il change ce que le groupe regarde.
 
 ---
 
-Les opérations longues — création, clonage, vérification des comptes, inspection
-des accès — tournent en arrière-plan et se suivent dans un panneau de
-progression, ligne par ligne, avec un bouton d'annulation. Les réglages modifiés
-dans l'interface sont mémorisés en quittant, comme après l'assistant du terminal.
+Les opérations longues — distribution, clonage, vérification des comptes,
+inspection des accès — tournent en arrière-plan et se suivent dans un panneau de
+progression, ligne par ligne, avec un bouton d'annulation.
+
+L'assistant du terminal ignore les groupes : il continue de travailler par
+préfixe (`--manage tp1`), ce qui revient au même puisque le préfixe d'un travail
+est son identifiant. Les deux interfaces lisent les mêmes dépôts.
 
 Le clonage, les fichiers de départ et les listes CSV désignent des chemins **de
 la machine**, pas du navigateur : les champs correspondants se complètent au fil
@@ -497,7 +541,8 @@ sortie propre hors terminal.
 | `internal/valid` | validation et normalisation des saisies |
 | `internal/roster` | lecture et écriture des listes CSV |
 | `internal/plan` | gabarits et plan de génération |
-| `internal/groups` | détection des groupes, sélections |
+| `internal/groups` | détection des groupes de dépôts, sélections |
+| `internal/classroom` | groupes : étudiants, préfixe, travaux lus dans les dépôts |
 | `internal/orgs` | inventaire des organisations : rôle et droit de créer |
 | `internal/starter` | lecture d'un dossier de fichiers de départ |
 | `internal/config`, `internal/cache` | réglages et cache disque |
@@ -536,6 +581,22 @@ tranché, et pourquoi.
 - **Le mode gestion suppose un terminal.** En mode non interactif, il exige au
   moins un préfixe (`--manage tp1`) et refuse de choisir un groupe à votre
   place.
+- **Un groupe est une convention de nommage, pas une base de données.** Le nom
+  d'un dépôt — `préfixe-travail-compte` — porte l'appartenance ; GitHub reste la
+  seule source de vérité, et la nomenclature déjà en place d'une organisation
+  (`a26-5n6-travailsession-…`) est reconnue sans rien renommer. Le fichier local
+  ne retient que ce que les noms ne disent pas : la liste des étudiants et les
+  réglages. Déclarer ou retirer un groupe n'écrit ni n'efface rien sur GitHub.
+  L'alternative — un dépôt de service dans l'organisation pour y stocker la
+  liste — rendrait le groupe partageable entre plusieurs enseignants, au prix
+  d'écritures que personne n'a demandées ; elle reste ouverte.
+- **La liste des étudiants sert à relire les noms de dépôts.** Découper
+  `a26-5n6-tp1-emilie-cote` en travail et en compte est impossible sans savoir
+  qu'`emilie-cote` existe : le gabarit est donc inversé en expression régulière,
+  personne par personne (`plan.Matcher`). C'est ce qui remplace le couplage
+  « invitation → compte » de Classroom, et ce qui permet de reconnaître un
+  travail distribué à une seule personne — là où la détection par préfixe seule
+  exige deux dépôts pour conclure.
 - **L'interface web est une API au-dessus des paquets du domaine, pas un
   terminal déguisé.** `internal/web` appelle `plan`, `groups`, `runner`, `clone`
   et `ghapi` directement : la validation, les gabarits, le refus des collisions

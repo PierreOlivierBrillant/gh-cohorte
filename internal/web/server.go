@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
@@ -52,14 +53,15 @@ type Deps struct {
 
 // Server est l'interface web d'une session.
 type Server struct {
-	deps     Deps
-	jobs     *Jobs
-	listener net.Listener
-	token    string
-	port     string
-	handler  http.Handler
-	stop     chan struct{}
-	stopOnce sync.Once
+	deps       Deps
+	jobs       *Jobs
+	classrooms *classroom.Store
+	listener   net.Listener
+	token      string
+	port       string
+	handler    http.Handler
+	stop       chan struct{}
+	stopOnce   sync.Once
 
 	mutex     sync.Mutex
 	settings  config.Settings
@@ -88,15 +90,16 @@ func New(deps Deps) (*Server, error) {
 	}
 
 	server := &Server{
-		deps:      deps,
-		jobs:      NewJobs(),
-		listener:  listener,
-		token:     token,
-		port:      port,
-		stop:      make(chan struct{}),
-		settings:  deps.Settings,
-		inventory: map[string][]groups.RepoInfo{},
-		resolvers: map[string]*identity.Resolver{},
+		deps:       deps,
+		jobs:       NewJobs(),
+		listener:   listener,
+		token:      token,
+		port:       port,
+		classrooms: classroom.Open(classroom.PathNextTo(deps.ConfigFile)),
+		stop:       make(chan struct{}),
+		settings:   deps.Settings,
+		inventory:  map[string][]groups.RepoInfo{},
+		resolvers:  map[string]*identity.Resolver{},
 	}
 	server.handler = server.guard(server.routes())
 	return server, nil
@@ -168,17 +171,27 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/orgs/{org}/groups/{prefix}", s.handleGroup)
 	mux.HandleFunc("GET /api/orgs/{org}/groups/{prefix}/template", s.handleGroupTemplate)
 	mux.HandleFunc("POST /api/orgs/{org}/groups/{prefix}/names", s.handleGroupNames)
-	mux.HandleFunc("POST /api/orgs/{org}/students", s.handleStudents)
 
-	// --- création
+	// --- groupes
+	mux.HandleFunc("GET /api/classrooms", s.handleClassrooms)
+	mux.HandleFunc("POST /api/classrooms", s.handleCreateClassroom)
+	mux.HandleFunc("GET /api/classrooms/{id}", s.handleClassroom)
+	mux.HandleFunc("PUT /api/classrooms/{id}", s.handleUpdateClassroom)
+	mux.HandleFunc("DELETE /api/classrooms/{id}", s.handleDeleteClassroom)
+	mux.HandleFunc("GET /api/classrooms/{id}/students", s.handleClassroomStudents)
+	mux.HandleFunc("POST /api/classrooms/{id}/students", s.handleSetStudents)
+	mux.HandleFunc("POST /api/classrooms/{id}/students/names", s.handleResolveStudentNames)
+	mux.HandleFunc("POST /api/classrooms/{id}/assignments", s.handleCreateAssignment)
+	mux.HandleFunc("POST /api/classrooms/{id}/assignments/preview", s.handlePreviewAssignment)
+	mux.HandleFunc("GET /api/orgs/{org}/candidates", s.handleCandidates)
+
+	// --- listes et code de départ
 	mux.HandleFunc("POST /api/roster/parse", s.handleParseRoster)
 	mux.HandleFunc("POST /api/roster/load", s.handleLoadRoster)
 	mux.HandleFunc("POST /api/roster/save", s.handleSaveRoster)
-	mux.HandleFunc("POST /api/plan", s.handlePlan)
 	mux.HandleFunc("POST /api/template/check", s.handleCheckTemplate)
 	mux.HandleFunc("POST /api/starter/inspect", s.handleInspectStarter)
 	mux.HandleFunc("POST /api/accounts/verify", s.handleVerifyAccounts)
-	mux.HandleFunc("POST /api/create", s.handleCreate)
 
 	// --- accès et dépôts
 	mux.HandleFunc("GET /api/orgs/{org}/repos/{repo}/access", s.handleAccess)

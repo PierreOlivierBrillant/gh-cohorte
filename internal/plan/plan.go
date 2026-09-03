@@ -90,6 +90,59 @@ func Render(pattern string, person roster.Person, assignment string, index int) 
 	})
 }
 
+// Matcher construit l'expression qui reconnaît les dépôts d'une personne et en
+// extrait l'identifiant du travail : c'est l'inverse de Render. Elle permet de
+// rattacher un dépôt existant à un travail sans deviner où finit le nom du
+// travail et où commence le compte — « a26-5n6-tp1-emilie-cote » ne se découpe
+// pas autrement que si l'on connaît déjà « emilie-cote ».
+//
+// Le champ {index} n'est pas connu à la relecture : n'importe quel nombre y est
+// accepté. Un gabarit sans {assignment} ne se relit pas et renvoie nil.
+func Matcher(pattern string, person roster.Person) *regexp.Regexp {
+	if !strings.Contains(pattern, "{assignment}") {
+		return nil
+	}
+	values := fields(person, "", 1)
+
+	var motif strings.Builder
+	// Les noms de dépôts GitHub ne se distinguent pas par la casse.
+	motif.WriteString(`(?i)\A`)
+	position := 0
+	for _, bornes := range placeholderRe.FindAllStringSubmatchIndex(pattern, -1) {
+		motif.WriteString(regexp.QuoteMeta(pattern[position:bornes[0]]))
+		switch champ := pattern[bornes[2]:bornes[3]]; champ {
+		case "assignment":
+			motif.WriteString(`(.+)`)
+		case "index":
+			motif.WriteString(`\d+`)
+		default:
+			motif.WriteString(regexp.QuoteMeta(values[champ]))
+		}
+		position = bornes[1]
+	}
+	motif.WriteString(regexp.QuoteMeta(pattern[position:]))
+	motif.WriteString(`\z`)
+
+	expression, err := regexp.Compile(motif.String())
+	if err != nil {
+		return nil
+	}
+	return expression
+}
+
+// Assignment retrouve l'identifiant du travail auquel un dépôt appartient, pour
+// une personne donnée.
+func Assignment(expression *regexp.Regexp, repoName string) (string, bool) {
+	if expression == nil {
+		return "", false
+	}
+	parts := expression.FindStringSubmatch(repoName)
+	if parts == nil || len(parts) < 2 || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
+}
+
 // Build construit le plan complet et refuse toute collision de noms de dépôts.
 func Build(people []roster.Person, settings config.Settings) ([]PlannedRepo, error) {
 	if _, err := ValidatePattern(settings.NamePattern, "Gabarit de nom", true); err != nil {

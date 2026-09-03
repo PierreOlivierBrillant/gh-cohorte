@@ -5,10 +5,8 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -179,22 +177,6 @@ type planItem struct {
 	Username    string `json:"username"`
 }
 
-// buildPlan valide les réglages et construit le plan des dépôts.
-func buildPlan(settings config.Settings, people []roster.Person) (config.Settings, []plan.PlannedRepo, error) {
-	cleaned, err := normalize(settings)
-	if err != nil {
-		return settings, nil, err
-	}
-	if len(people) == 0 {
-		return cleaned, nil, valid.Errorf("Aucune personne dans la liste.")
-	}
-	items, err := plan.Build(people, cleaned)
-	if err != nil {
-		return cleaned, nil, err
-	}
-	return cleaned, items, nil
-}
-
 // rows met le plan sous la forme attendue par l'interface.
 func rows(items []plan.PlannedRepo) []planItem {
 	list := make([]planItem, 0, len(items))
@@ -205,24 +187,6 @@ func rows(items []plan.PlannedRepo) []planItem {
 		})
 	}
 	return list
-}
-
-// handlePlan prévisualise les dépôts qui seraient créés.
-func (s *Server) handlePlan(writer http.ResponseWriter, request *http.Request) {
-	var body struct {
-		Settings config.Settings `json:"settings"`
-		People   []roster.Person `json:"people"`
-	}
-	if err := decode(request, &body); err != nil {
-		fail(writer, err)
-		return
-	}
-	_, items, err := buildPlan(body.Settings, body.People)
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-	writeJSON(writer, http.StatusOK, map[string]any{"items": rows(items)})
 }
 
 // handleCheckTemplate vérifie qu'un dépôt modèle existe et en est bien un.
@@ -336,127 +300,4 @@ func (s *Server) handleVerifyAccounts(writer http.ResponseWriter, request *http.
 			return map[string]any{"checked": len(people), "missing": missing}, nil
 		})
 	writeJSON(writer, http.StatusAccepted, job.State())
-}
-
-// ---------------------------------------------------------------- génération
-
-// handleCreate lance la création des dépôts en arrière-plan.
-func (s *Server) handleCreate(writer http.ResponseWriter, request *http.Request) {
-	var body struct {
-		Settings     config.Settings `json:"settings"`
-		People       []roster.Person `json:"people"`
-		DryRun       bool            `json:"dry_run"`
-		ForceStarter bool            `json:"force_starter"`
-		// Group désigne un groupe existant : les personnes déjà servies en sont
-		// écartées, comme le fait « Ajouter des dépôts » dans le terminal.
-		Group string `json:"group"`
-	}
-	if err := decode(request, &body); err != nil {
-		fail(writer, err)
-		return
-	}
-
-	people := body.People
-	var skipped []roster.Person
-	if strings.TrimSpace(body.Group) != "" {
-		kept, left, err := s.withoutServed(body.Settings.Org, body.Group, people)
-		if err != nil {
-			fail(writer, err)
-			return
-		}
-		people, skipped = kept, left
-	}
-	if len(people) == 0 {
-		fail(writer, valid.Errorf("Rien à créer : toutes les personnes ont déjà un dépôt."))
-		return
-	}
-
-	settings, items, err := buildPlan(body.Settings, people)
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-
-	// Les fichiers de départ sont relus au lancement : le dossier a pu changer
-	// depuis la prévisualisation.
-	var bundle *starter.Bundle
-	if strings.TrimSpace(settings.StarterDir) != "" {
-		bundle, err = starter.Load(settings.StarterDir)
-		if err != nil {
-			fail(writer, err)
-			return
-		}
-		settings.StarterDir = bundle.Root
-	}
-
-	s.mutex.Lock()
-	s.settings = settings
-	s.mutex.Unlock()
-
-	label := "Création de " + itoa(len(items)) + " dépôt(s) dans « " + settings.Org + " »"
-	if body.DryRun {
-		label = "Simulation de " + itoa(len(items)) + " dépôt(s)"
-	}
-	job := s.jobs.Start("creation", label, func(job *Job) (any, error) {
-		executor := runner.New(s.deps.Client, settings, bundle)
-		report, err := executor.Run(items, runner.Options{
-			DryRun:       body.DryRun,
-			ForceStarter: body.ForceStarter,
-			OnProgress: func(index, total int, result runner.Result) {
-				job.Progress(index, total, result.Repo)
-				job.Line(result.Repo+" : "+result.Status, result)
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		if !body.DryRun && report.Count(runner.Created) > 0 {
-			s.forget(settings.Org)
-		}
-
-		summary := map[string]any{
-			"report":   report,
-			"created":  report.Count(runner.Created),
-			"existing": report.Count(runner.Existing),
-			"failed":   len(report.Failures()),
-			"dry_run":  body.DryRun,
-			"skipped":  skipped,
-		}
-		if jsonPath, csvPath, err := report.Save(s.reportDir()); err != nil {
-			job.Warn("Bilan non enregistré : " + err.Error())
-		} else {
-			summary["json_path"], summary["csv_path"] = jsonPath, csvPath
-		}
-		return summary, nil
-	})
-	writeJSON(writer, http.StatusAccepted, job.State())
-}
-
-// withoutServed écarte les personnes qui ont déjà un dépôt dans le groupe.
-func (s *Server) withoutServed(org, prefix string, people []roster.Person) (
-	[]roster.Person, []roster.Person, error) {
-	login, err := valid.Login(org, "Organisation")
-	if err != nil {
-		return nil, nil, err
-	}
-	cleaned, err := valid.SlugFragment(prefix, "Préfixe")
-	if err != nil {
-		return nil, nil, err
-	}
-	repos, _, err := s.repos(login, false)
-	if err != nil {
-		return nil, nil, err
-	}
-	taken := groups.Build(cleaned, repos).Suffixes()
-
-	fresh := make([]roster.Person, 0, len(people))
-	served := make([]roster.Person, 0)
-	for _, person := range people {
-		if taken[strings.ToLower(person.Username)] {
-			served = append(served, person)
-			continue
-		}
-		fresh = append(fresh, person)
-	}
-	return fresh, served, nil
 }

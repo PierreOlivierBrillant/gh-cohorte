@@ -1,8 +1,10 @@
 'use strict';
 
-// Interface locale de gh cohorte, organisée comme GitHub Classroom :
-// l'organisation tient lieu de cours, un travail rassemble les dépôts d'un
-// même préfixe, et la liste des étudiants dit qui en a déjà un.
+// Interface locale de gh cohorte, organisée comme GitHub Classroom.
+//
+// Un groupe rassemble des étudiants ; un travail est distribué à ce groupe, un
+// dépôt par étudiant. Le groupe n'existe que dans le fichier local : sur GitHub,
+// ce sont les noms de dépôts — « préfixe-travail-compte » — qui portent tout.
 //
 // Tout le contenu variable passe par textContent : un nom de dépôt ou de
 // personne ne peut pas devenir du balisage.
@@ -74,14 +76,15 @@ const encode = encodeURIComponent;
 const etat = {
   contexte: null,
   reglages: {},
-  organisation: '',
-  travail: null,        // le travail ouvert : préfixe, dépôts, noms manquants
+  groupes: [],
+  groupe: null,
+  travail: null,
   selection: new Set(),
   acces: new Map(),
-  personnes: [],        // liste chargée dans l'assistant
-  rejets: [],
-  etudiants: [],        // liste chargée dans l'onglet Étudiants
-  ajoutAuTravail: '',   // préfixe quand l'assistant complète un travail existant
+  etudiants: [],
+  destinataires: new Set(),
+  reglagesTravail: {},
+  nouveau: { org: '', etudiants: [], rejets: [] },
   etape: 1,
 };
 
@@ -223,10 +226,10 @@ function demander(titre, contenu, libelle = 'Confirmer') {
 
 // --------------------------------------------------------------------- vues
 
-// Le détail d'un travail et l'assistant vivent sous l'onglet « Travaux ».
+// Les vues d'un groupe partagent son en-tête et ses onglets.
 const ongletDeLaVue = {
   travaux: 'travaux', travail: 'travaux', assistant: 'travaux',
-  etudiants: 'etudiants', reglages: 'reglages',
+  etudiants: 'etudiants', 'groupe-reglages': 'groupe-reglages',
 };
 
 for (const bouton of $('onglets').querySelectorAll('button')) {
@@ -234,32 +237,105 @@ for (const bouton of $('onglets').querySelectorAll('button')) {
 }
 
 function afficherVue(nom) {
+  const onglet = ongletDeLaVue[nom];
+  $('entete-groupe').hidden = !onglet;
   for (const bouton of $('onglets').querySelectorAll('button')) {
-    bouton.classList.toggle('actif', bouton.dataset.vue === ongletDeLaVue[nom]);
+    bouton.classList.toggle('actif', bouton.dataset.vue === onglet);
   }
   for (const vue of document.querySelectorAll('.vue')) {
     vue.hidden = vue.id !== 'vue-' + nom;
   }
   window.scrollTo(0, 0);
-  // Les emplacements changent au fil de la session : un bilan écrit, un cache
-  // rempli. La page les redemande à chaque visite plutôt que de les figer.
+  // Les comptages d'une vue changent pendant qu'on est ailleurs : chaque
+  // retour les redemande plutôt que de laisser voir un état périmé.
+  if (nom === 'groupes') chargerGroupes();
   if (nom === 'reglages') rafraichirEmplacements();
-  if (nom === 'etudiants') ouvrirEtudiants();
+  if (nom === 'etudiants') chargerEtudiants();
+  if (nom === 'groupe-reglages') ecrireReglagesGroupe();
 }
 
-async function rafraichirEmplacements() {
-  const contexte = await api('GET', '/api/context').catch(() => null);
-  if (!contexte) return;
-  etat.contexte = contexte;
-  dessinerPortees(contexte.scopes);
-  dessinerChemins(contexte.paths);
+// travaux accorde le mot avec le nombre.
+function travaux(nombre) {
+  return nombre === 1 ? '1 travail' : `${nombre} travaux`;
 }
 
-// -------------------------------------------------------------- organisations
+$('accueil').addEventListener('click', () => afficherVue('groupes'));
+$('retour-groupes').addEventListener('click', () => afficherVue('groupes'));
+$('nouveau-retour').addEventListener('click', () => afficherVue('groupes'));
+$('reglages-retour').addEventListener('click', () => afficherVue('groupes'));
+$('ouvrir-reglages').addEventListener('click', () => afficherVue('reglages'));
+$('travail-retour').addEventListener('click', () => afficherVue('travaux'));
+$('assistant-retour').addEventListener('click', () => afficherVue('travaux'));
+
+// --------------------------------------------------------- liste des groupes
+
+async function chargerGroupes() {
+  const donnees = await tenter(() => api('GET', '/api/classrooms'), 'Groupes');
+  if (!donnees) return;
+  etat.groupes = donnees.classrooms || [];
+
+  const conteneur = $('groupes-liste');
+  vider(conteneur);
+  if (etat.groupes.length === 0) {
+    conteneur.append(el('div', { classe: 'boite-vide' },
+      el('p', { texte: 'Aucun groupe déclaré.' }),
+      el('p', { classe: 'note',
+        texte: "« Nouveau groupe » repère les groupes déjà présents dans une organisation " +
+          "à partir des dépôts existants : rien n'est renommé." })));
+    return;
+  }
+  for (const groupe of etat.groupes) {
+    const sesTravaux = groupe.assignments || [];
+    conteneur.append(el('button', {
+      classe: 'travail-ligne groupe-ligne', type: 'button',
+      onclick: () => ouvrirGroupe(groupe.id),
+    },
+      el('span', { classe: 'travail-infos' },
+        el('span', { classe: 'titre', texte: groupe.name }),
+        el('span', { classe: 'detail',
+          texte: `${groupe.org}${groupe.prefix ? ' · ' + groupe.prefix + '-…' : ''}` })),
+      el('span', { classe: 'espace' }),
+      el('span', { classe: 'jeton', texte: `${(groupe.students || []).length} étudiant(s)` }),
+      el('span', { classe: 'jeton', texte: travaux(sesTravaux.length) }),
+      el('span', { classe: 'chevron', texte: '›' })));
+  }
+}
+
+async function ouvrirGroupe(id, force) {
+  const groupe = await tenter(() => api('GET',
+    `/api/classrooms/${encode(id)}${force ? '?refresh=1' : ''}`), 'Groupe');
+  if (!groupe) return;
+  etat.groupe = groupe;
+  etat.travail = null;
+  etat.etudiants = [];
+
+  $('groupe-titre').textContent = groupe.name;
+  $('groupe-prefixe').textContent = groupe.prefix ? groupe.prefix + '-…' : 'sans préfixe';
+  $('groupe-sous-titre').textContent =
+    `Organisation ${groupe.org} · ${(groupe.students || []).length} étudiant(s)`;
+  dessinerTravaux();
+  afficherVue('travaux');
+}
+
+// --------------------------------------------------- déclaration d'un groupe
+
+$('groupes-nouveau').addEventListener('click', async () => {
+  etat.nouveau = { org: '', etudiants: [], rejets: [] };
+  $('nouveau-prefixe').value = '';
+  $('nouveau-nom').value = '';
+  $('nouveau-chemin').value = etat.reglages.roster_path || '';
+  $('nouveau-texte').value = '';
+  $('nouveau-resume').textContent = '';
+  vider($('nouveau-rejets'));
+  $('nouveau-table').hidden = true;
+  majApercuPrefixe();
+  afficherVue('nouveau-groupe');
+  await chargerOrganisations();
+});
 
 async function chargerOrganisations() {
   const donnees = await tenter(() => api('GET', '/api/orgs'), 'Organisations');
-  const choix = $('organisation');
+  const choix = $('nouveau-org');
   vider(choix);
   const liste = (donnees && donnees.orgs) || [];
   for (const acces of liste) {
@@ -279,115 +355,236 @@ async function chargerOrganisations() {
   await choisirOrganisation(choix.value);
 }
 
-$('organisation').addEventListener('change', () => choisirOrganisation($('organisation').value));
-
-$('organisation-libre').addEventListener('change', async () => {
-  const saisie = $('organisation-libre').value.trim();
-  if (saisie) await retenirOrganisation(saisie);
+$('nouveau-org').addEventListener('change', () => choisirOrganisation($('nouveau-org').value));
+$('nouveau-org-libre').addEventListener('change', () => {
+  const saisie = $('nouveau-org-libre').value.trim();
+  if (saisie) retenirOrganisation(saisie);
 });
 
 async function choisirOrganisation(valeur) {
   const libre = valeur === '__saisir';
-  $('organisation-libre').hidden = !libre;
+  $('nouveau-org-libre').hidden = !libre;
   if (libre) {
-    $('organisation-libre').value = etat.organisation || '';
-    $('organisation-libre').focus();
+    $('nouveau-org-libre').value = etat.nouveau.org || '';
+    $('nouveau-org-libre').focus();
     return;
   }
   await retenirOrganisation(valeur);
 }
 
 async function retenirOrganisation(org) {
+  const avis = $('nouveau-org-avis');
+  vider(avis);
   const details = await tenter(() => api('GET', `/api/orgs/${encode(org)}`), 'Organisation');
   if (!details) return;
-  etat.organisation = details.login;
-  etat.reglages.org = details.login;
-  etat.travail = null;
-  etat.ajoutAuTravail = '';
-  etat.etudiants = [];
-  $('cours-titre').textContent = details.name;
-  $('cours-sous-titre').textContent =
-    `Organisation ${details.login} sur ${etat.contexte.host} · un dépôt par étudiant et par travail`;
-  if (details.warning) message(details.warning, 'alerte', 12000);
-  afficherVue('travaux');
-  await chargerTravaux(false);
+  etat.nouveau.org = details.login;
+  if (details.warning) {
+    avis.append(el('div', { classe: 'avis alerte', texte: details.warning }));
+  }
+  await chargerCandidats(details.login);
 }
 
-// ---------------------------------------------------------- liste des travaux
+async function chargerCandidats(org) {
+  const bloc = $('candidats-bloc');
+  const conteneur = $('candidats-liste');
+  vider(conteneur);
+  bloc.hidden = true;
 
-async function chargerTravaux(force) {
-  if (!etat.organisation) return;
-  const chemin = `/api/orgs/${encode(etat.organisation)}/groups${force ? '?refresh=1' : ''}`;
-  const donnees = await tenter(() => api('GET', chemin), 'Inventaire');
-  if (!donnees) return;
+  const donnees = await tenter(() =>
+    api('GET', `/api/orgs/${encode(org)}/candidates`), 'Inventaire');
+  if (!donnees || !donnees.candidates || donnees.candidates.length === 0) return;
 
-  const travaux = donnees.groups || [];
-  $('travaux-compte').textContent = travaux.length === 1 ? '1 travail' : `${travaux.length} travaux`;
-  $('travaux-source').textContent =
-    `${donnees.total} dépôt(s) dans l'organisation — source : ${donnees.source}`;
+  bloc.hidden = false;
+  for (const candidat of donnees.candidates) {
+    const libelle = candidat.prefix || 'racine de l\'organisation';
+    conteneur.append(el('button', {
+      classe: 'travail-ligne', type: 'button',
+      onclick: () => adopterCandidat(candidat),
+    },
+      el('span', { classe: 'travail-infos' },
+        el('span', { classe: 'titre', texte: libelle }),
+        el('span', { classe: 'detail',
+          texte: candidat.assignments.join(', ') || 'aucun travail' })),
+      el('span', { classe: 'espace' }),
+      el('span', { classe: 'jeton', texte: `${candidat.students.length} compte(s)` }),
+      el('span', { classe: 'jeton', texte: `${candidat.repos} dépôt(s)` })));
+  }
+}
+
+// adopterCandidat reprend un préfixe déjà en place et les comptes qu'on y trouve.
+function adopterCandidat(candidat) {
+  $('nouveau-prefixe').value = candidat.prefix;
+  if (!$('nouveau-nom').value.trim()) {
+    $('nouveau-nom').value = candidat.prefix || etat.nouveau.org;
+  }
+  majApercuPrefixe();
+  appliquerListeNouveau({
+    people: candidat.students.map((compte) => ({ username: compte, full_name: '' })),
+    issues: [],
+  });
+  message(`Préfixe « ${candidat.prefix || 'racine' } » repris, ` +
+    `${candidat.students.length} compte(s) trouvé(s) dans les dépôts existants.`);
+}
+
+$('nouveau-prefixe').addEventListener('input', majApercuPrefixe);
+
+function majApercuPrefixe() {
+  const prefixe = $('nouveau-prefixe').value.trim();
+  $('nouveau-apercu').textContent = prefixe ? `${prefixe}-travail-compte` : 'travail-compte';
+}
+
+$('nouveau-lire').addEventListener('click', async () => {
+  const texte = $('nouveau-texte').value;
+  if (!texte.trim()) { message('La zone de texte est vide.', 'alerte'); return; }
+  const liste = await tenter(() => api('POST', '/api/roster/parse', { text: texte }), 'Liste');
+  if (liste) appliquerListeNouveau(liste);
+});
+
+$('nouveau-charger').addEventListener('click', async () => {
+  const chemin = $('nouveau-chemin').value.trim();
+  if (!chemin) { message('Indiquez un chemin de fichier.', 'alerte'); return; }
+  const liste = await tenter(() => api('POST', '/api/roster/load', { path: chemin }), 'Fichier');
+  if (!liste) return;
+  $('nouveau-chemin').value = liste.path;
+  appliquerListeNouveau(liste);
+});
+
+$('nouveau-fichier').addEventListener('change', async (evenement) => {
+  const fichier = evenement.target.files[0];
+  if (!fichier) return;
+  const texte = await fichier.text();
+  $('nouveau-texte').value = texte;
+  const liste = await tenter(() => api('POST', '/api/roster/parse', { text: texte }), 'Liste');
+  if (liste) appliquerListeNouveau(liste);
+});
+
+function appliquerListeNouveau(liste) {
+  etat.nouveau.etudiants = liste.people || [];
+  etat.nouveau.rejets = liste.issues || [];
+
+  $('nouveau-resume').textContent = `${etat.nouveau.etudiants.length} étudiant(s)` +
+    (etat.nouveau.rejets.length ? `, ${etat.nouveau.rejets.length} ligne(s) rejetée(s)` : '');
+  dessinerRejets($('nouveau-rejets'), etat.nouveau.rejets);
+
+  const table = $('nouveau-table');
+  const corps = table.querySelector('tbody');
+  vider(corps);
+  table.hidden = etat.nouveau.etudiants.length === 0;
+  for (const personne of etat.nouveau.etudiants) {
+    corps.append(el('tr', {},
+      el('td', personne.full_name
+        ? { texte: personne.full_name }
+        : { classe: 'vide', texte: 'nom à retrouver' }),
+      el('td', {}, el('code', { texte: '@' + personne.username }))));
+  }
+}
+
+function dessinerRejets(conteneur, rejets) {
+  vider(conteneur);
+  if (!rejets || rejets.length === 0) return;
+  const details = el('details', {},
+    el('summary', { texte: `${rejets.length} ligne(s) rejetée(s)` }));
+  const corps = el('div', { classe: 'corps' });
+  for (const rejet of rejets.slice(0, 30)) {
+    corps.append(el('div', { classe: 'note',
+      texte: (rejet.line > 0 ? `ligne ${rejet.line}` : 'fichier') + ` : ${rejet.message}` }));
+  }
+  details.append(corps);
+  conteneur.append(details);
+}
+
+$('nouveau-creer').addEventListener('click', async () => {
+  const org = $('nouveau-org-libre').hidden
+    ? $('nouveau-org').value
+    : $('nouveau-org-libre').value.trim();
+  if (!org || org === '__saisir') { message('Choisissez une organisation.', 'alerte'); return; }
+
+  const cree = await tenter(() => api('POST', '/api/classrooms', {
+    org,
+    prefix: $('nouveau-prefixe').value.trim(),
+    name: $('nouveau-nom').value.trim(),
+    students: etat.nouveau.etudiants,
+    roster_path: $('nouveau-chemin').value.trim(),
+    defaults: {},
+  }), 'Groupe');
+  if (!cree) return;
+  message(`Groupe « ${cree.name} » créé.`);
+  await chargerGroupes();
+  await ouvrirGroupe(cree.id);
+});
+
+// ---------------------------------------------------------------- travaux
+
+function dessinerTravaux() {
+  const groupe = etat.groupe;
+  const sesTravaux = groupe.assignments || [];
+  $('travaux-compte').textContent = travaux(sesTravaux.length);
+  $('travaux-source').textContent = groupe.source
+    ? `Dépôts de ${groupe.org} — source : ${groupe.source}`
+    : '';
 
   const conteneur = $('travaux-liste');
   vider(conteneur);
-  if (travaux.length === 0) {
+  if (sesTravaux.length === 0) {
     conteneur.append(el('div', { classe: 'boite-vide' },
-      el('p', { texte: 'Aucun travail dans cette organisation.' }),
+      el('p', { texte: 'Aucun travail dans ce groupe.' }),
       el('p', { classe: 'note',
-        texte: 'Un travail est un groupe de dépôts partageant un préfixe, ' +
-          'par exemple « tp1-jlpicard » et « tp1-emilie-cote ».' })));
+        texte: '« Nouveau travail » crée un dépôt par étudiant du groupe.' })));
     return;
   }
-  for (const item of travaux) {
+  const total = (groupe.students || []).length;
+  for (const travail of sesTravaux) {
+    const detail = [`${travail.students} étudiant(s) du groupe sur ${total}`];
+    if (travail.others > 0) detail.push(`${travail.others} dépôt(s) hors liste`);
     conteneur.append(el('button', {
-      classe: 'travail-ligne', type: 'button', onclick: () => ouvrirTravail(item.prefix),
+      classe: 'travail-ligne', type: 'button', onclick: () => ouvrirTravail(travail),
     },
       el('span', { classe: 'travail-infos' },
-        el('span', { classe: 'titre', texte: item.prefix }),
-        el('span', { classe: 'detail', texte: 'Travail individuel · un dépôt par étudiant' })),
+        el('span', { classe: 'titre', texte: travail.name }),
+        el('span', { classe: 'detail', texte: detail.join(' · ') })),
       el('span', { classe: 'espace' }),
-      el('span', { classe: 'jeton', texte: `${item.count} dépôt(s)` }),
+      el('span', {
+        classe: 'jeton ' + (total > 0 && travail.students >= total ? 'oui' : ''),
+        texte: `${travail.repos} dépôt(s)`,
+      }),
       el('span', { classe: 'chevron', texte: '›' })));
   }
 }
 
-$('travaux-recharger').addEventListener('click', () => chargerTravaux(true));
-$('travail-retour').addEventListener('click', () => afficherVue('travaux'));
-$('assistant-retour').addEventListener('click', () => afficherVue('travaux'));
+$('travaux-recharger').addEventListener('click', () => ouvrirGroupe(etat.groupe.id, true));
 
-// --------------------------------------------------------- détail d'un travail
+// ------------------------------------------------------- détail d'un travail
 
-async function ouvrirTravail(prefixe, force) {
-  const chemin = `/api/orgs/${encode(etat.organisation)}/groups/${encode(prefixe)}` +
+async function ouvrirTravail(travail, force) {
+  const chemin = `/api/orgs/${encode(etat.groupe.org)}/groups/${encode(travail.id)}` +
     (force ? '?refresh=1' : '');
-  const travail = await tenter(() => api('GET', chemin), 'Travail');
-  if (!travail) return;
+  const detail = await tenter(() => api('GET', chemin), 'Travail');
+  if (!detail) return;
 
-  etat.travail = travail;
-  etat.selection = new Set(travail.repos.map((repo) => repo.name));
+  // « repos » compte les dépôts dans la fiche du travail et les énumère dans le
+  // détail : on ne garde que la liste, sous un nom qui ne prête pas à confusion.
+  etat.travail = { id: travail.id, name: travail.name, depots: detail.repos };
+  etat.selection = new Set(detail.repos.map((repo) => repo.name));
   etat.acces.clear();
-  $('fil-travail').textContent = travail.prefix;
-  $('detail-titre').textContent = travail.prefix;
-  majBoutonNoms();
+  $('fil-travail').textContent = travail.name;
+  $('detail-titre').textContent = travail.name;
   dessinerTravail();
   afficherVue('travail');
 }
 
-// majBoutonNoms reflète ce qu'il reste de noms complets à retrouver.
-function majBoutonNoms() {
-  const restants = etat.travail ? etat.travail.missing_names : 0;
-  $('detail-noms').disabled = restants === 0;
-  $('detail-noms').textContent = restants === 0
-    ? 'Noms complets connus'
-    : `Retrouver ${restants} nom(s)`;
-}
-
 function dessinerTravail() {
-  const travail = etat.travail;
-  $('detail-resume').textContent = resumerTravail(travail);
+  const depots = etat.travail.depots;
+  const total = (etat.groupe.students || []).length;
+  const servis = depots.filter((repo) => estDuGroupe(repo.suffix)).length;
+  $('detail-resume').textContent =
+    `${depots.length} dépôt(s) · ${servis} étudiant(s) du groupe sur ${total} en ont un` +
+    (depots.length - servis > 0 ? ` · ${depots.length - servis} hors liste` : '');
 
   const corps = $('detail-table').querySelector('tbody');
   vider(corps);
-  for (const repo of travail.repos) {
+  for (const repo of depots) {
     const acces = etat.acces.get(repo.name);
+    const nom = nomDe(repo.suffix) || repo.full_name;
     corps.append(el('tr', {},
       el('td', {}, el('input', {
         type: 'checkbox',
@@ -398,9 +595,7 @@ function dessinerTravail() {
           majSelection();
         },
       })),
-      el('td', repo.full_name
-        ? { texte: repo.full_name }
-        : { classe: 'vide', texte: '@' + repo.suffix }),
+      el('td', nom ? { texte: nom } : { classe: 'vide', texte: '@' + repo.suffix }),
       el('td', {}, el('a', {
         href: repo.url, target: '_blank', rel: 'noreferrer noopener', texte: repo.name,
       })),
@@ -415,20 +610,17 @@ function dessinerTravail() {
   majSelection();
 }
 
-// resumerTravail dit combien d'étudiants ont un dépôt. Quand la liste de la
-// cohorte est chargée, la proportion se lit comme le « X of Y students
-// accepted » de Classroom ; sinon, seuls les dépôts sont comptés.
-function resumerTravail(travail) {
-  const total = travail.repos.length;
-  if (etat.etudiants.length > 0) {
-    const servis = new Set(travail.repos.map((repo) => repo.suffix.toLowerCase()));
-    const comptes = etat.etudiants.filter((personne) =>
-      servis.has(personne.username.toLowerCase())).length;
-    return `${total} dépôt(s) · ${comptes} étudiant(s) sur ${etat.etudiants.length} ` +
-      'de la liste ont un dépôt';
-  }
-  const nommes = travail.repos.filter((repo) => repo.full_name).length;
-  return `${total} dépôt(s) · ${nommes} étudiant(s) identifié(s) par leur nom complet`;
+// estDuGroupe dit si un suffixe de dépôt correspond à un étudiant inscrit.
+function estDuGroupe(compte) {
+  return (etat.groupe.students || []).some((personne) =>
+    personne.username.toLowerCase() === compte.toLowerCase());
+}
+
+// nomDe retrouve le nom complet d'un étudiant du groupe.
+function nomDe(compte) {
+  const trouve = (etat.groupe.students || []).find((personne) =>
+    personne.username.toLowerCase() === compte.toLowerCase());
+  return trouve ? trouve.full_name : '';
 }
 
 function resumerAcces(acces) {
@@ -439,43 +631,27 @@ function resumerAcces(acces) {
 }
 
 function majSelection() {
-  const total = etat.travail ? etat.travail.repos.length : 0;
+  const total = etat.travail ? etat.travail.depots.length : 0;
   $('detail-selection').textContent = `${etat.selection.size} dépôt(s) sur ${total} sélectionné(s)`;
   $('detail-tout').checked = total > 0 && etat.selection.size === total;
 }
 
 $('detail-tout').addEventListener('change', (evenement) => {
   etat.selection = evenement.target.checked
-    ? new Set(etat.travail.repos.map((repo) => repo.name))
+    ? new Set(etat.travail.depots.map((repo) => repo.name))
     : new Set();
   dessinerTravail();
 });
 
 function selectionnes() {
-  return etat.travail.repos.filter((repo) => etat.selection.has(repo.name));
+  return etat.travail.depots.filter((repo) => etat.selection.has(repo.name));
 }
-
-// --- noms complets
-
-$('detail-noms').addEventListener('click', async () => {
-  const fiche = await tenter(() => api('POST',
-    `/api/orgs/${encode(etat.organisation)}/groups/${encode(etat.travail.prefix)}/names`), 'Noms');
-  if (!fiche) return;
-  const noms = await suivre(fiche);
-  if (!noms) return;
-  for (const repo of etat.travail.repos) {
-    if (noms[repo.name]) repo.full_name = noms[repo.name];
-  }
-  etat.travail.missing_names = etat.travail.repos.filter((repo) => !repo.full_name).length;
-  majBoutonNoms();
-  dessinerTravail();
-});
 
 // --- accès de tout le travail
 
 $('detail-acces').addEventListener('click', async () => {
   const fiche = await tenter(() => api('POST',
-    `/api/orgs/${encode(etat.organisation)}/groups/${encode(etat.travail.prefix)}/access`), 'Accès');
+    `/api/orgs/${encode(etat.groupe.org)}/groups/${encode(etat.travail.id)}/access`), 'Accès');
   if (!fiche) return;
   const resultats = await suivre(fiche);
   if (!Array.isArray(resultats)) return;
@@ -487,7 +663,7 @@ $('detail-acces').addEventListener('click', async () => {
 
 async function panneauAcces(repo) {
   const acces = await tenter(() =>
-    api('GET', `/api/orgs/${encode(etat.organisation)}/repos/${encode(repo.name)}/access`), 'Accès');
+    api('GET', `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/access`), 'Accès');
   if (!acces) return;
   etat.acces.set(repo.name, acces);
   dessinerTravail();
@@ -502,13 +678,13 @@ async function panneauAcces(repo) {
     for (const login of courant.collaborators) {
       liste.append(ligneAcces(repo, login, 'collaborateur', async () => {
         await api('DELETE',
-          `/api/orgs/${encode(etat.organisation)}/repos/${encode(repo.name)}/collaborators/${encode(login)}`);
+          `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/collaborators/${encode(login)}`);
       }, redessiner));
     }
     for (const invitation of courant.invitations) {
       liste.append(ligneAcces(repo, invitation.login, 'invitation en attente', async () => {
         await api('DELETE',
-          `/api/orgs/${encode(etat.organisation)}/repos/${encode(repo.name)}/invitations/${invitation.id}`);
+          `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/invitations/${invitation.id}`);
       }, redessiner));
     }
   };
@@ -517,15 +693,13 @@ async function panneauAcces(repo) {
   const compte = el('input', { type: 'text', classe: 'champ', placeholder: 'compte GitHub' });
   const droit = el('select', { classe: 'champ' }, etat.contexte.permissions.map(
     (option) => el('option', { value: option.value, texte: option.label })));
-  droit.value = etat.reglages.permission || 'push';
+  droit.value = (etat.groupe.defaults && etat.groupe.defaults.permission) || 'push';
   const ajout = el('div', { classe: 'ligne-champ' }, compte, droit,
     el('button', {
-      type: 'button',
-      classe: 'bouton vert',
-      texte: 'Inviter',
+      type: 'button', classe: 'bouton vert', texte: 'Inviter',
       onclick: async () => {
         const succes = await tenter(() => api('POST',
-          `/api/orgs/${encode(etat.organisation)}/repos/${encode(repo.name)}/collaborators`,
+          `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/collaborators`,
           { username: compte.value.trim(), permission: droit.value }), 'Invitation');
         if (!succes) return;
         message(`@${succes.username} : ${succes.label} (${succes.permission}).`);
@@ -556,7 +730,7 @@ function ligneAcces(repo, login, role, retirer, redessiner) {
 
 async function rafraichirAcces(repo) {
   const acces = await tenter(() =>
-    api('GET', `/api/orgs/${encode(etat.organisation)}/repos/${encode(repo.name)}/access`), 'Accès');
+    api('GET', `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/access`), 'Accès');
   if (acces) {
     etat.acces.set(repo.name, acces);
     dessinerTravail();
@@ -576,16 +750,17 @@ async function supprimerDepot(repo) {
   if (!confirme) return;
 
   const fait = await tenter(() => api('DELETE',
-    `/api/orgs/${encode(etat.organisation)}/repos/${encode(repo.name)}`,
+    `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}`,
     { confirm: saisie.value.trim() }), 'Suppression');
   if (!fait) return;
   message(fait.message);
-  const prefixe = etat.travail.prefix;
-  await chargerTravaux(true);
-  await ouvrirTravail(prefixe, true);
+  const travail = etat.travail;
+  await ouvrirGroupe(etat.groupe.id, true);
+  const encore = (etat.groupe.assignments || []).find((item) => item.id === travail.id);
+  if (encore) await ouvrirTravail(encore, true);
 }
 
-// --- URL
+// --- URL, clonage, mise à jour
 
 $('detail-copier').addEventListener('click', async () => {
   const urls = selectionnes().map((repo) => repo.url).join('\n');
@@ -594,7 +769,7 @@ $('detail-copier').addEventListener('click', async () => {
     await navigator.clipboard.writeText(urls);
     message(`${etat.selection.size} URL copiée(s).`);
   } catch {
-    message('Copie refusée par le navigateur : utilisez l\'export CSV.', 'alerte');
+    message("Copie refusée par le navigateur : utilisez l'export CSV.", 'alerte');
   }
 });
 
@@ -602,10 +777,12 @@ $('detail-csv').addEventListener('click', () => {
   const choisis = selectionnes();
   if (!choisis.length) { message('Aucun dépôt sélectionné.', 'alerte'); return; }
   const lignes = [['nom_complet', 'depot', 'url']];
-  for (const repo of choisis) lignes.push([repo.full_name || '', repo.name, repo.url]);
+  for (const repo of choisis) {
+    lignes.push([nomDe(repo.suffix) || repo.full_name || '', repo.name, repo.url]);
+  }
   const contenu = lignes.map((ligne) =>
     ligne.map((valeur) => `"${String(valeur).replace(/"/g, '""')}"`).join(',')).join('\n');
-  telecharger(`${etat.travail.prefix}-urls.csv`, contenu, 'text/csv');
+  telecharger(`${etat.travail.id}-urls.csv`, contenu, 'text/csv');
 });
 
 function telecharger(nom, contenu, type) {
@@ -617,8 +794,6 @@ function telecharger(nom, contenu, type) {
   URL.revokeObjectURL(adresse);
 }
 
-// --- clonage
-
 $('detail-cloner').addEventListener('click', async () => {
   const choisis = selectionnes();
   if (!choisis.length) { message('Aucun dépôt sélectionné.', 'alerte'); return; }
@@ -626,7 +801,7 @@ $('detail-cloner').addEventListener('click', async () => {
   const parent = etat.reglages.clone_dir || '.';
   const destination = el('input', {
     type: 'text', classe: 'champ',
-    value: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.prefix}`,
+    value: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.id}`,
   });
   const confirme = await demander(`Cloner ${choisis.length} dépôt(s)`, el('div', {},
     el('label', { classe: 'champ-bloc' },
@@ -636,8 +811,8 @@ $('detail-cloner').addEventListener('click', async () => {
   if (!confirme) return;
 
   const fiche = await tenter(() => api('POST', '/api/clones/clone', {
-    org: etat.organisation,
-    prefix: etat.travail.prefix,
+    org: etat.groupe.org,
+    prefix: etat.travail.id,
     names: choisis.map((repo) => repo.name),
     destination: destination.value.trim(),
   }), 'Clonage');
@@ -650,13 +825,11 @@ $('detail-cloner').addEventListener('click', async () => {
   }
 });
 
-// --- mise à jour des clones
-
 $('detail-pull').addEventListener('click', async () => {
   const parent = etat.reglages.clone_dir || '.';
   const dossier = el('input', {
     type: 'text', classe: 'champ',
-    value: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.prefix}`,
+    value: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.id}`,
   });
   const trouve = await demander('Mettre à jour des clones', el('div', {},
     el('label', { classe: 'champ-bloc' },
@@ -670,7 +843,7 @@ $('detail-pull').addEventListener('click', async () => {
 
   const cases = liste.clones.map((item) => {
     const coche = el('input', { type: 'checkbox', checked: true, value: item.name });
-    const horsTravail = etat.travail && !etat.travail.repos.some((repo) => repo.name === item.name);
+    const horsTravail = !etat.travail.depots.some((repo) => repo.name === item.name);
     return el('label', { classe: 'case' }, coche,
       el('span', { texte: item.name + (horsTravail ? '   (hors travail)' : '') }));
   });
@@ -693,41 +866,25 @@ $('detail-pull').addEventListener('click', async () => {
 // ------------------------------------------------------------------ assistant
 
 $('travaux-nouveau').addEventListener('click', () => {
-  etat.ajoutAuTravail = '';
-  etat.reglages.assignment = '';
-  ecrireReglages();
-  $('fil-assistant').textContent = 'Nouveau travail';
-  $('assistant-ajout').hidden = true;
-  $('detail-ajouter').blur();
-  afficherEtape(1);
-  afficherVue('assistant');
-  $('reglage-assignment').focus();
+  ouvrirAssistant('', 'Nouveau travail');
 });
 
-// « Ajouter des étudiants » reprend un travail existant : les bases et le code
-// de départ en viennent, seule la liste manque.
-$('detail-ajouter').addEventListener('click', async () => {
-  const prefixe = etat.travail.prefix;
-  etat.ajoutAuTravail = prefixe;
-  etat.reglages.assignment = prefixe;
-
-  const modele = await tenter(() => api('GET',
-    `/api/orgs/${encode(etat.organisation)}/groups/${encode(prefixe)}/template`));
-  if (modele) etat.reglages.template = modele.template;
-  ecrireReglages();
-
-  $('fil-assistant').textContent = `Ajouter des étudiants à « ${prefixe} »`;
-  const avis = $('assistant-ajout');
-  avis.hidden = false;
-  avis.textContent = modele && modele.template
-    ? `Ajout au travail « ${prefixe} » — modèle réutilisé : ${modele.template}. ` +
-      'Les étudiants ayant déjà un dépôt seront écartés.'
-    : `Ajout au travail « ${prefixe} ». Les étudiants ayant déjà un dépôt seront écartés.`;
-
-  afficherEtape(3);
-  afficherVue('assistant');
-  planifierApercu();
+// « Distribuer aux manquants » reprend le travail ouvert : mêmes réglages, et
+// seuls les étudiants sans dépôt sont cochés.
+$('detail-distribuer').addEventListener('click', () => {
+  ouvrirAssistant(etat.travail.name, `Distribuer « ${etat.travail.name} »`, 3);
 });
+
+function ouvrirAssistant(nom, titre, etape = 1) {
+  etat.reglagesTravail = Object.assign({}, etat.groupe.defaults);
+  $('travail-nom').value = nom;
+  $('fil-assistant').textContent = titre;
+  ecrireReglagesTravail();
+  dessinerDestinataires();
+  afficherEtape(etape);
+  afficherVue('assistant');
+  if (etape === 1) $('travail-nom').focus();
+}
 
 for (const bouton of document.querySelectorAll('[data-continuer]')) {
   bouton.addEventListener('click', () => afficherEtape(Number(bouton.dataset.continuer)));
@@ -747,10 +904,9 @@ function afficherEtape(numero) {
   window.scrollTo(0, 0);
 }
 
-// ------------------------------------------------------------------ réglages
+// --- réglages du travail
 
-const champsReglages = {
-  assignment: 'reglage-assignment',
+const champsTravail = {
   name_pattern: 'reglage-pattern',
   description_pattern: 'reglage-description',
   template: 'reglage-template',
@@ -759,51 +915,44 @@ const champsReglages = {
   starter_dir: 'reglage-starter',
 };
 
-function ecrireReglages() {
-  for (const [cle, id] of Object.entries(champsReglages)) {
-    $(id).value = etat.reglages[cle] || '';
+function ecrireReglagesTravail() {
+  for (const [cle, id] of Object.entries(champsTravail)) {
+    $(id).value = etat.reglagesTravail[cle] || '';
   }
-  const publique = etat.reglages.visibility === 'public';
+  const publique = etat.reglagesTravail.visibility === 'public';
   $('visibilite-publique').checked = publique;
   $('visibilite-privee').checked = !publique;
-  $('reglage-delay').value = etat.reglages.delay_seconds ?? 1;
-  $('reglage-collaborateur').checked = etat.reglages.add_collaborator !== false;
-  $('roster-chemin').value = etat.reglages.roster_path || '';
+  $('reglage-collaborateur').checked = etat.reglagesTravail.add_collaborator !== false;
+  vider($('starter-resume'));
   majApercuDuNom();
 }
 
-function lireReglages() {
-  for (const [cle, id] of Object.entries(champsReglages)) {
-    etat.reglages[cle] = $(id).value.trim();
+function lireReglagesTravail() {
+  for (const [cle, id] of Object.entries(champsTravail)) {
+    etat.reglagesTravail[cle] = $(id).value.trim();
   }
-  // Changer l'identifiant du travail sort du mode « ajout » : la liste n'a plus
-  // de raison d'être filtrée sur les dépôts de l'ancien.
-  if (etat.ajoutAuTravail && etat.reglages.assignment !== etat.ajoutAuTravail) {
-    etat.ajoutAuTravail = '';
-    $('assistant-ajout').hidden = true;
-  }
-  etat.reglages.visibility = $('visibilite-publique').checked ? 'public' : 'private';
-  etat.reglages.delay_seconds = Number($('reglage-delay').value) || 0;
-  etat.reglages.add_collaborator = $('reglage-collaborateur').checked;
-  etat.reglages.org = etat.organisation;
-  return etat.reglages;
+  etat.reglagesTravail.visibility = $('visibilite-publique').checked ? 'public' : 'private';
+  etat.reglagesTravail.add_collaborator = $('reglage-collaborateur').checked;
+  return etat.reglagesTravail;
 }
 
-for (const id of Object.values(champsReglages)) {
-  $(id).addEventListener('change', () => { lireReglages(); planifierApercu(); });
+for (const id of Object.values(champsTravail)) {
+  $(id).addEventListener('change', () => { lireReglagesTravail(); planifierApercu(); });
 }
-for (const id of ['visibilite-privee', 'visibilite-publique', 'reglage-collaborateur', 'reglage-delay']) {
-  $(id).addEventListener('change', lireReglages);
+for (const id of ['visibilite-privee', 'visibilite-publique', 'reglage-collaborateur']) {
+  $(id).addEventListener('change', lireReglagesTravail);
 }
 
-// Le nom des dépôts se lit avant d'exister : le gabarit est rendu au vol.
-$('reglage-assignment').addEventListener('input', majApercuDuNom);
+$('travail-nom').addEventListener('input', majApercuDuNom);
 $('reglage-pattern').addEventListener('input', majApercuDuNom);
+$('travail-nom').addEventListener('change', planifierApercu);
 
+// Le nom des dépôts se lit avant qu'ils existent : le gabarit est rendu au vol.
 function majApercuDuNom() {
   const gabarit = $('reglage-pattern').value.trim() || '{assignment}-{username}';
+  const prefixe = etat.groupe && etat.groupe.prefix ? etat.groupe.prefix + '-' : '';
   const valeurs = {
-    assignment: $('reglage-assignment').value.trim() || 'travail',
+    assignment: prefixe + ($('travail-nom').value.trim() || 'travail'),
     username: 'compte', name: 'prenom-nom', fullname: 'Prénom Nom',
     first: 'prenom', last: 'nom', index: '01',
   };
@@ -811,8 +960,361 @@ function majApercuDuNom() {
     (tout, champ) => (champ in valeurs ? valeurs[champ] : tout));
 }
 
+// --- destinataires
+
+function dessinerDestinataires() {
+  const etudiants = etat.groupe.students || [];
+  etat.destinataires = new Set(etudiants.map((personne) => personne.username));
+
+  const conteneur = $('dest-liste');
+  vider(conteneur);
+  for (const personne of etudiants) {
+    const coche = el('input', {
+      type: 'checkbox', checked: true, value: personne.username,
+      onchange: (evenement) => {
+        if (evenement.target.checked) etat.destinataires.add(personne.username);
+        else etat.destinataires.delete(personne.username);
+        majDestinataires();
+        planifierApercu();
+      },
+    });
+    conteneur.append(el('label', { classe: 'case' }, coche,
+      el('span', {},
+        personne.full_name ? personne.full_name + ' ' : '',
+        el('span', { classe: 'compte', texte: '@' + personne.username }))));
+  }
+  majDestinataires();
+}
+
+function majDestinataires() {
+  const total = (etat.groupe.students || []).length;
+  $('dest-compte').textContent = `${etat.destinataires.size} étudiant(s) sur ${total}`;
+  $('dest-tout').checked = total > 0 && etat.destinataires.size === total;
+  for (const coche of $('dest-liste').querySelectorAll('input')) {
+    coche.checked = etat.destinataires.has(coche.value);
+  }
+}
+
+$('dest-tout').addEventListener('change', (evenement) => {
+  etat.destinataires = evenement.target.checked
+    ? new Set((etat.groupe.students || []).map((personne) => personne.username))
+    : new Set();
+  majDestinataires();
+  planifierApercu();
+});
+
+// --- modèle et fichiers de départ
+
+$('template-verifier').addEventListener('click', async () => {
+  const reference = $('reglage-template').value.trim();
+  if (!reference) { message('Aucun modèle : les dépôts seront créés neufs.'); return; }
+  const bilan = await tenter(() =>
+    api('POST', '/api/template/check', { template: reference }), 'Modèle');
+  if (!bilan) return;
+  $('reglage-template').value = bilan.template;
+  lireReglagesTravail();
+  if (bilan.warning) message(bilan.warning, 'alerte', 12000);
+  else message(`Modèle vérifié : ${bilan.template}.`);
+});
+
+$('starter-inspecter').addEventListener('click', async () => {
+  const chemin = $('reglage-starter').value.trim();
+  const resume = $('starter-resume');
+  vider(resume);
+  if (!chemin) { lireReglagesTravail(); return; }
+
+  const bundle = await tenter(() =>
+    api('POST', '/api/starter/inspect', { path: chemin }), 'Fichiers de départ');
+  if (!bundle) return;
+  $('reglage-starter').value = bundle.root;
+  lireReglagesTravail();
+
+  resume.append(el('div', { classe: 'avis', texte: `${bundle.summary} depuis ${bundle.root}` }));
+  if (bundle.warning) resume.append(el('div', { classe: 'avis alerte', texte: bundle.warning }));
+  if (bundle.large) {
+    resume.append(el('div', { classe: 'avis alerte',
+      texte: "Envoi volumineux : un fichier par appel d'API. Un dépôt modèle serait plus rapide." }));
+  }
+  const details = el('details', {}, el('summary', { texte: `${bundle.files.length} fichier(s)` }));
+  const corps = el('div', { classe: 'corps' });
+  for (const fichier of bundle.files) {
+    corps.append(el('div', { classe: 'note', texte: `${fichier.path} — ${fichier.label}` }));
+  }
+  for (const ecarte of bundle.skipped.slice(0, 10)) {
+    corps.append(el('div', { classe: 'note', texte: `écarté : ${ecarte.path} (${ecarte.reason})` }));
+  }
+  details.append(corps);
+  resume.append(details);
+});
+
+// --- aperçu
+
+let minuterieApercu = null;
+
+function planifierApercu() {
+  clearTimeout(minuterieApercu);
+  minuterieApercu = setTimeout(rafraichirApercu, 350);
+}
+
+function corpsDuTravail() {
+  return {
+    name: $('travail-nom').value.trim(),
+    settings: lireReglagesTravail(),
+    usernames: [...etat.destinataires],
+  };
+}
+
+async function rafraichirApercu() {
+  const erreur = $('plan-erreur');
+  vider(erreur);
+  vider($('deja-servis'));
+  const table = $('plan-table');
+  const corps = table.querySelector('tbody');
+  vider(corps);
+  table.hidden = true;
+  $('plan-resume').textContent = '';
+
+  if (!etat.groupe || !$('travail-nom').value.trim()) return;
+  try {
+    const apercu = await api('POST',
+      `/api/classrooms/${encode(etat.groupe.id)}/assignments/preview`, corpsDuTravail());
+    for (const item of apercu.items) {
+      corps.append(el('tr', {},
+        el('td', {}, el('code', { texte: item.name })),
+        el('td', { texte: item.full_name || '—' }),
+        el('td', {}, el('code', { texte: '@' + item.username })),
+        el('td', { classe: 'note', texte: item.description })));
+    }
+    table.hidden = apercu.items.length === 0;
+    $('plan-resume').textContent =
+      `${apercu.items.length} dépôt(s) à créer dans « ${etat.groupe.org} » — travail « ${apercu.assignment} »`;
+
+    if (apercu.served && apercu.served.length) {
+      $('deja-servis').append(el('div', { classe: 'avis',
+        texte: `${apercu.served.length} étudiant(s) ont déjà un dépôt pour ce travail : ` +
+          apercu.served.map((personne) => '@' + personne.username).join(', ') +
+          ". Ils sont écartés de la distribution." }));
+    }
+  } catch (probleme) {
+    erreur.append(el('div', { classe: 'avis erreur', texte: probleme.message }));
+  }
+}
+
+// --- distribution
+
+$('lancer-simulation').addEventListener('click', () => distribuer(true));
+$('lancer-creation').addEventListener('click', () => distribuer(false));
+
+async function distribuer(simulation) {
+  const corps = corpsDuTravail();
+  if (!corps.name) { message('Donnez un nom au travail.', 'alerte'); return; }
+  if (corps.usernames.length === 0) { message('Aucun étudiant retenu.', 'alerte'); return; }
+
+  if (!simulation) {
+    const confirme = await demander('Confirmer la distribution', el('div', {},
+      el('p', { texte: `${corps.usernames.length} étudiant(s) du groupe « ${etat.groupe.name} », ` +
+        `travail « ${corps.name} ».` }),
+      el('p', { classe: 'note', texte:
+        `Visibilité : ${corps.settings.visibility === 'public' ? 'public' : 'privé'}. ` +
+        (corps.settings.add_collaborator
+          ? `Invitations : oui (${corps.settings.permission}).` : 'Invitations : non.') +
+        (corps.settings.template ? ` Modèle : ${corps.settings.template}.` : ' Dépôts neufs.') })),
+      'Distribuer');
+    if (!confirme) return;
+  }
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.id)}/assignments`,
+    Object.assign({}, corps, {
+      dry_run: simulation,
+      force_starter: $('creer-force').checked,
+    })), simulation ? 'Simulation' : 'Distribution');
+  if (!fiche) return;
+
+  const bilan = await suivre(fiche);
+  if (!bilan || !bilan.report) return;
+
+  journaliser(`${bilan.created} ${simulation ? 'à créer' : 'créé(s)'} · ` +
+    `${bilan.existing} déjà présent(s) · ${bilan.failed} en échec`, bilan.failed ? 'warn' : 'ok');
+  if (bilan.skipped && bilan.skipped.length) {
+    journaliser(`${bilan.skipped.length} étudiant(s) avaient déjà un dépôt.`, 'dim');
+  }
+  if (bilan.json_path) journaliser(`Bilan : ${bilan.json_path}`, 'dim');
+  if (simulation) return;
+
+  // Une fois distribué, le travail s'ouvre — comme Classroom mène à la page du
+  // devoir une fois créé.
+  await ouvrirGroupe(etat.groupe.id, true);
+  const travail = (etat.groupe.assignments || []).find((item) => item.id === bilan.assignment);
+  if (travail) await ouvrirTravail(travail, true);
+}
+
+// ------------------------------------------------------------------ étudiants
+
+async function chargerEtudiants(force) {
+  const donnees = await tenter(() => api('GET',
+    `/api/classrooms/${encode(etat.groupe.id)}/students${force ? '?refresh=1' : ''}`), 'Étudiants');
+  if (!donnees) return;
+  etat.etudiants = donnees.students || [];
+
+  const corps = $('etudiants-table').querySelector('tbody');
+  vider(corps);
+  $('etudiants-table').hidden = etat.etudiants.length === 0;
+  $('etudiants-vide').hidden = etat.etudiants.length > 0;
+
+  let sansNom = 0;
+  for (const ligne of etat.etudiants) {
+    if (!ligne.full_name) sansNom++;
+    corps.append(el('tr', {},
+      el('td', ligne.full_name
+        ? { texte: ligne.full_name }
+        : { classe: 'vide', texte: 'nom inconnu' }),
+      el('td', {}, el('code', { texte: '@' + ligne.username })),
+      el('td', {}, ligne.assignments.length === 0
+        ? el('span', { classe: 'vide', texte: 'aucun dépôt' })
+        : el('span', { classe: 'etiquettes' }, ligne.assignments.map((travail) =>
+            el('a', {
+              classe: 'jeton lien', href: travail.url,
+              target: '_blank', rel: 'noreferrer noopener', texte: travail.name,
+            }))))));
+  }
+
+  $('etudiants-resume').textContent =
+    `${etat.etudiants.length} étudiant(s) · ${travaux((donnees.assignments || []).length)}`;
+  $('etudiants-noms').disabled = sansNom === 0;
+  $('etudiants-noms').textContent = sansNom === 0
+    ? 'Noms complets connus'
+    : `Retrouver ${sansNom} nom(s) complet(s)`;
+}
+
+$('etudiants-recharger').addEventListener('click', () => chargerEtudiants(true));
+
+$('etudiants-noms').addEventListener('click', async () => {
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.id)}/students/names`), 'Noms');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (!bilan) return;
+  message(`${bilan.resolved} nom(s) complet(s) retrouvé(s).`);
+  await ouvrirGroupe(etat.groupe.id);
+  afficherVue('etudiants');
+});
+
+$('etudiants-importer').addEventListener('click', async () => {
+  const chemin = el('input', {
+    type: 'text', classe: 'champ',
+    value: etat.groupe.roster_path || '',
+    placeholder: 'cohorte.csv',
+  });
+  const zone = el('textarea', { classe: 'champ', rows: '5',
+    placeholder: 'Jean-Luc Picard, jlpicard' });
+  const confirme = await demander('Remplacer la liste des étudiants', el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Fichier CSV de la machine' }), chemin),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: '…ou une liste collée' }), zone),
+    el('p', { classe: 'note',
+      texte: "La liste remplace l'ancienne. Aucun dépôt n'est touché." })), 'Remplacer');
+  if (!confirme) return;
+
+  let corps = null;
+  if (zone.value.trim()) {
+    const liste = await tenter(() =>
+      api('POST', '/api/roster/parse', { text: zone.value }), 'Liste');
+    if (!liste) return;
+    corps = { people: liste.people };
+  } else if (chemin.value.trim()) {
+    corps = { path: chemin.value.trim() };
+  } else {
+    message('Indiquez un fichier ou collez une liste.', 'alerte');
+    return;
+  }
+
+  const bilan = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.id)}/students`, corps), 'Étudiants');
+  if (!bilan) return;
+  if (bilan.issues && bilan.issues.length) {
+    message(`${bilan.issues.length} ligne(s) rejetée(s).`, 'alerte', 10000);
+  }
+  await ouvrirGroupe(etat.groupe.id);
+  afficherVue('etudiants');
+});
+
+// -------------------------------------------------------- réglages du groupe
+
+const champsGroupe = {
+  name_pattern: 'gr-pattern',
+  description_pattern: 'gr-description',
+  template: 'gr-template',
+  visibility: 'gr-visibilite',
+  permission: 'gr-permission',
+};
+
+function ecrireReglagesGroupe() {
+  const groupe = etat.groupe;
+  $('gr-nom').value = groupe.name || '';
+  $('gr-org').value = groupe.org || '';
+  $('gr-prefixe').value = groupe.prefix || '';
+  const defauts = groupe.defaults || {};
+  for (const [cle, id] of Object.entries(champsGroupe)) {
+    $(id).value = defauts[cle] || '';
+  }
+  $('gr-collaborateur').checked = defauts.add_collaborator !== false;
+}
+
+$('gr-enregistrer').addEventListener('click', async () => {
+  const defauts = Object.assign({}, etat.groupe.defaults);
+  for (const [cle, id] of Object.entries(champsGroupe)) {
+    defauts[cle] = $(id).value.trim();
+  }
+  defauts.add_collaborator = $('gr-collaborateur').checked;
+
+  const modifie = await tenter(() => api('PUT', `/api/classrooms/${encode(etat.groupe.id)}`, {
+    name: $('gr-nom').value.trim(),
+    org: $('gr-org').value.trim(),
+    prefix: $('gr-prefixe').value.trim(),
+    students: etat.groupe.students,
+    roster_path: etat.groupe.roster_path || '',
+    defaults: defauts,
+  }), 'Groupe');
+  if (!modifie) return;
+  message('Réglages du groupe enregistrés.');
+  await chargerGroupes();
+  await ouvrirGroupe(modifie.id, true);
+  afficherVue('groupe-reglages');
+});
+
+$('gr-supprimer').addEventListener('click', async () => {
+  const confirme = await demander(`Retirer « ${etat.groupe.name} » ?`, el('div', {},
+    el('p', { texte: 'Le groupe disparaît de cette liste.' }),
+    el('p', { classe: 'note',
+      texte: "Aucun dépôt n'est supprimé sur GitHub : le groupe n'est qu'une vue locale." })),
+    'Retirer le groupe');
+  if (!confirme) return;
+
+  const fait = await tenter(() =>
+    api('DELETE', `/api/classrooms/${encode(etat.groupe.id)}`), 'Suppression');
+  if (!fait) return;
+  message(fait.message, 'succes', 10000);
+  etat.groupe = null;
+  await chargerGroupes();
+  afficherVue('groupes');
+});
+
+// ------------------------------------------------------- réglages généraux
+
+async function rafraichirEmplacements() {
+  const contexte = await api('GET', '/api/context').catch(() => null);
+  if (!contexte) return;
+  etat.contexte = contexte;
+  dessinerPortees(contexte.scopes);
+  dessinerChemins(contexte.paths);
+  $('reglage-delay').value = etat.reglages.delay_seconds ?? 1;
+}
+
 $('reglages-enregistrer').addEventListener('click', async () => {
-  const bilan = await tenter(() => api('PUT', '/api/settings', lireReglages()), 'Réglages');
+  etat.reglages.delay_seconds = Number($('reglage-delay').value) || 0;
+  const bilan = await tenter(() => api('PUT', '/api/settings', etat.reglages), 'Réglages');
   if (!bilan) return;
   $('reglages-etat').textContent = bilan.saved
     ? `Mémorisés dans ${bilan.path}`
@@ -824,7 +1326,6 @@ $('cache-vider').addEventListener('click', async () => {
   if (!bilan) return;
   message(`Cache vidé (${bilan.removed} entrée(s)).`);
   dessinerChemins(bilan.paths);
-  await chargerTravaux(false);
 });
 
 function dessinerPortees(portees) {
@@ -866,301 +1367,8 @@ function brancherCompletion(champ, liste, dossiersSeulement) {
   });
 }
 
-brancherCompletion($('roster-chemin'), $('suggestions-roster'), false);
-brancherCompletion($('etudiants-chemin'), $('suggestions-etudiants'), false);
+brancherCompletion($('nouveau-chemin'), $('suggestions-roster'), false);
 brancherCompletion($('reglage-starter'), $('suggestions-starter'), true);
-
-// ------------------------------------------------------ liste dans l'assistant
-
-$('roster-lire').addEventListener('click', async () => {
-  const texte = $('roster-texte').value;
-  if (!texte.trim()) { message('La zone de texte est vide.', 'alerte'); return; }
-  const liste = await tenter(() => api('POST', '/api/roster/parse', { text: texte }), 'Liste');
-  if (liste) appliquerListe(liste);
-});
-
-$('roster-charger').addEventListener('click', async () => {
-  const chemin = $('roster-chemin').value.trim();
-  if (!chemin) { message('Indiquez un chemin de fichier.', 'alerte'); return; }
-  const liste = await tenter(() => api('POST', '/api/roster/load', { path: chemin }), 'Fichier');
-  if (!liste) return;
-  etat.reglages.roster_path = liste.path;
-  appliquerListe(liste);
-});
-
-$('roster-fichier').addEventListener('change', async (evenement) => {
-  const fichier = evenement.target.files[0];
-  if (!fichier) return;
-  const texte = await fichier.text();
-  $('roster-texte').value = texte;
-  const liste = await tenter(() => api('POST', '/api/roster/parse', { text: texte }), 'Liste');
-  if (liste) appliquerListe(liste);
-});
-
-$('roster-enregistrer').addEventListener('click', async () => {
-  if (!etat.personnes.length) { message('Aucun étudiant à enregistrer.', 'alerte'); return; }
-  const chemin = el('input', {
-    type: 'text', classe: 'champ',
-    value: $('roster-chemin').value.trim() || 'cohorte.csv',
-  });
-  const confirme = await demander('Enregistrer la liste', el('label', { classe: 'champ-bloc' },
-    el('span', { classe: 'etiquette', texte: 'Chemin du fichier CSV' }), chemin), 'Enregistrer');
-  if (!confirme) return;
-  const bilan = await tenter(() => api('POST', '/api/roster/save',
-    { path: chemin.value.trim(), people: etat.personnes }), 'Enregistrement');
-  if (!bilan) return;
-  etat.reglages.roster_path = bilan.path;
-  $('roster-chemin').value = bilan.path;
-  message(`Liste enregistrée : ${bilan.path}`);
-});
-
-function appliquerListe(liste) {
-  etat.personnes = liste.people || [];
-  etat.rejets = liste.issues || [];
-  if (liste.path) $('roster-chemin').value = liste.path;
-
-  $('roster-resume').textContent =
-    `${etat.personnes.length} étudiant(s) retenu(s)` +
-    (etat.rejets.length ? `, ${etat.rejets.length} ligne(s) rejetée(s)` : '');
-
-  const rejets = $('roster-rejets');
-  vider(rejets);
-  if (etat.rejets.length) {
-    const details = el('details', {},
-      el('summary', { texte: `${etat.rejets.length} ligne(s) rejetée(s)` }));
-    const corps = el('div', { classe: 'corps' });
-    for (const rejet of etat.rejets.slice(0, 30)) {
-      corps.append(el('div', { classe: 'note',
-        texte: (rejet.line > 0 ? `ligne ${rejet.line}` : 'fichier') + ` : ${rejet.message}` }));
-    }
-    details.append(corps);
-    rejets.append(details);
-  }
-  planifierApercu();
-}
-
-// ------------------------------------------------------------ modèle et départ
-
-$('template-verifier').addEventListener('click', async () => {
-  const reference = $('reglage-template').value.trim();
-  if (!reference) { message('Aucun modèle : les dépôts seront créés neufs.'); return; }
-  const bilan = await tenter(() => api('POST', '/api/template/check', { template: reference }), 'Modèle');
-  if (!bilan) return;
-  $('reglage-template').value = bilan.template;
-  etat.reglages.template = bilan.template;
-  if (bilan.warning) message(bilan.warning, 'alerte', 12000);
-  else message(`Modèle vérifié : ${bilan.template}.`);
-});
-
-$('starter-inspecter').addEventListener('click', async () => {
-  const chemin = $('reglage-starter').value.trim();
-  const resume = $('starter-resume');
-  vider(resume);
-  if (!chemin) { etat.reglages.starter_dir = ''; return; }
-
-  const bundle = await tenter(() =>
-    api('POST', '/api/starter/inspect', { path: chemin }), 'Fichiers de départ');
-  if (!bundle) return;
-  $('reglage-starter').value = bundle.root;
-  etat.reglages.starter_dir = bundle.root;
-
-  resume.append(el('div', { classe: 'avis', texte: `${bundle.summary} depuis ${bundle.root}` }));
-  if (bundle.warning) resume.append(el('div', { classe: 'avis alerte', texte: bundle.warning }));
-  if (bundle.large) {
-    resume.append(el('div', { classe: 'avis alerte',
-      texte: "Envoi volumineux : un fichier par appel d'API. Un dépôt modèle serait plus rapide." }));
-  }
-  const details = el('details', {}, el('summary', { texte: `${bundle.files.length} fichier(s)` }));
-  const corps = el('div', { classe: 'corps' });
-  for (const fichier of bundle.files) {
-    corps.append(el('div', { classe: 'note', texte: `${fichier.path} — ${fichier.label}` }));
-  }
-  for (const ecarte of bundle.skipped.slice(0, 10)) {
-    corps.append(el('div', { classe: 'note', texte: `écarté : ${ecarte.path} (${ecarte.reason})` }));
-  }
-  details.append(corps);
-  resume.append(details);
-});
-
-// -------------------------------------------------------------------- aperçu
-
-let minuterieApercu = null;
-
-function planifierApercu() {
-  clearTimeout(minuterieApercu);
-  minuterieApercu = setTimeout(rafraichirApercu, 350);
-}
-
-async function rafraichirApercu() {
-  const erreur = $('plan-erreur');
-  vider(erreur);
-  const table = $('plan-table');
-  const corps = table.querySelector('tbody');
-  vider(corps);
-  table.hidden = true;
-  $('plan-resume').textContent = '';
-
-  if (!etat.personnes.length || !etat.organisation) return;
-  try {
-    const plan = await api('POST', '/api/plan',
-      { settings: lireReglages(), people: etat.personnes });
-    for (const item of plan.items) {
-      corps.append(el('tr', {},
-        el('td', {}, el('code', { texte: item.name })),
-        el('td', { texte: item.full_name }),
-        el('td', {}, el('code', { texte: '@' + item.username })),
-        el('td', { classe: 'note', texte: item.description })));
-    }
-    table.hidden = plan.items.length === 0;
-    $('plan-resume').textContent = `${plan.items.length} dépôt(s) dans « ${etat.organisation} »` +
-      (etat.ajoutAuTravail ? ` — ajout au travail « ${etat.ajoutAuTravail} »` : '');
-  } catch (probleme) {
-    erreur.append(el('div', { classe: 'avis erreur', texte: probleme.message }));
-  }
-}
-
-// ---------------------------------------------------- vérification et création
-
-$('comptes-verifier').addEventListener('click', async () => {
-  if (!etat.personnes.length) { message('Aucun étudiant à vérifier.', 'alerte'); return; }
-  const fiche = await tenter(() =>
-    api('POST', '/api/accounts/verify', { people: etat.personnes }), 'Vérification');
-  if (!fiche) return;
-  const bilan = await suivre(fiche);
-  if (!bilan || !bilan.missing) return;
-
-  if (bilan.missing.length === 0) {
-    journaliser(`${bilan.checked} compte(s) vérifié(s), aucun manquant.`, 'ok');
-    message(`${bilan.checked} compte(s) vérifié(s).`);
-    return;
-  }
-  const liste = el('div', {}, bilan.missing.map((personne) =>
-    el('div', { classe: 'note', texte: `${personne.full_name} → @${personne.username}` })));
-  const retirer = await demander(`${bilan.missing.length} compte(s) introuvable(s)`,
-    el('div', {}, liste, el('p', { classe: 'note',
-      texte: 'Retirer ces étudiants de la liste, ou poursuivre malgré tout ' +
-        '(les invitations échoueront) ?' })), 'Retirer ces étudiants');
-  if (!retirer) return;
-  const exclus = new Set(bilan.missing.map((personne) => personne.username.toLowerCase()));
-  etat.personnes = etat.personnes.filter((personne) => !exclus.has(personne.username.toLowerCase()));
-  appliquerListe({ people: etat.personnes, issues: etat.rejets });
-});
-
-// visibiliteEnMots met la visibilité dans la langue de l'interface.
-function visibiliteEnMots(valeur) {
-  return valeur === 'public' ? 'public' : 'privé';
-}
-
-$('lancer-simulation').addEventListener('click', () => lancer(true));
-$('lancer-creation').addEventListener('click', () => lancer(false));
-
-async function lancer(simulation) {
-  if (!etat.personnes.length) { message('Aucun étudiant dans la liste.', 'alerte'); return; }
-  const reglages = lireReglages();
-
-  if (!simulation) {
-    const confirme = await demander('Confirmer la création', el('div', {},
-      el('p', { texte: `${etat.personnes.length} étudiant(s) — organisation « ${reglages.org} », ` +
-        `travail « ${reglages.assignment} ».` }),
-      el('p', { classe: 'note', texte: `Visibilité : ${visibiliteEnMots(reglages.visibility)}. ` +
-        (reglages.add_collaborator ? `Invitations : oui (${reglages.permission}).` : 'Invitations : non.') +
-        (reglages.template ? ` Modèle : ${reglages.template}.` : ' Dépôts neufs.') })),
-      'Créer les dépôts');
-    if (!confirme) return;
-  }
-
-  const fiche = await tenter(() => api('POST', '/api/create', {
-    settings: reglages,
-    people: etat.personnes,
-    dry_run: simulation,
-    force_starter: $('creer-force').checked,
-    group: etat.ajoutAuTravail,
-  }), simulation ? 'Simulation' : 'Création');
-  if (!fiche) return;
-
-  const bilan = await suivre(fiche);
-  if (!bilan || !bilan.report) return;
-
-  journaliser(`${bilan.created} ${simulation ? 'à créer' : 'créé(s)'} · ` +
-    `${bilan.existing} déjà présent(s) · ${bilan.failed} en échec`, bilan.failed ? 'warn' : 'ok');
-  if (bilan.skipped && bilan.skipped.length) {
-    journaliser(`${bilan.skipped.length} étudiant(s) avaient déjà un dépôt.`, 'dim');
-  }
-  if (bilan.json_path) journaliser(`Bilan : ${bilan.json_path}`, 'dim');
-  if (simulation) return;
-
-  // Après une création réelle, le travail s'ouvre sur ses dépôts, comme
-  // Classroom mène à la page du devoir une fois créé.
-  const prefixe = reglages.assignment;
-  etat.ajoutAuTravail = '';
-  $('assistant-ajout').hidden = true;
-  await chargerTravaux(true);
-  await ouvrirTravail(prefixe, true);
-}
-
-// ------------------------------------------------------------------ étudiants
-
-async function ouvrirEtudiants() {
-  if (etat.etudiants.length === 0 && etat.reglages.roster_path) {
-    $('etudiants-chemin').value = etat.reglages.roster_path;
-    await chargerEtudiants(etat.reglages.roster_path);
-    return;
-  }
-  await croiserEtudiants();
-}
-
-$('etudiants-charger').addEventListener('click', () => chargerEtudiants($('etudiants-chemin').value.trim()));
-$('etudiants-recharger').addEventListener('click', () => croiserEtudiants());
-
-async function chargerEtudiants(chemin) {
-  if (!chemin) { message('Indiquez le chemin de la liste.', 'alerte'); return; }
-  const liste = await tenter(() => api('POST', '/api/roster/load', { path: chemin }), 'Liste');
-  if (!liste) return;
-  etat.etudiants = liste.people || [];
-  etat.reglages.roster_path = liste.path;
-  $('etudiants-chemin').value = liste.path;
-  $('roster-chemin').value = liste.path;
-  await croiserEtudiants(liste.issues);
-}
-
-async function croiserEtudiants(rejets) {
-  const corps = $('etudiants-table').querySelector('tbody');
-  vider(corps);
-  const vide = $('etudiants-vide');
-  if (etat.etudiants.length === 0) {
-    $('etudiants-table').hidden = true;
-    vide.hidden = false;
-    $('etudiants-resume').textContent = '';
-    return;
-  }
-  $('etudiants-table').hidden = false;
-  vide.hidden = true;
-
-  const croisement = await tenter(() => api('POST',
-    `/api/orgs/${encode(etat.organisation)}/students`, { people: etat.etudiants }), 'Étudiants');
-  const lignes = (croisement && croisement.students) || etat.etudiants.map((personne) => ({
-    full_name: personne.full_name, username: personne.username, assignments: [],
-  }));
-
-  let servis = 0;
-  for (const ligne of lignes) {
-    if (ligne.assignments.length > 0) servis++;
-    corps.append(el('tr', {},
-      el('td', { texte: ligne.full_name }),
-      el('td', {}, el('code', { texte: '@' + ligne.username })),
-      el('td', {}, ligne.assignments.length === 0
-        ? el('span', { classe: 'vide', texte: 'aucun dépôt' })
-        : el('span', { classe: 'etiquettes' }, ligne.assignments.map((travail) =>
-            el('a', {
-              classe: 'jeton lien', href: travail.url,
-              target: '_blank', rel: 'noreferrer noopener', texte: travail.prefix,
-            }))))));
-  }
-
-  $('etudiants-resume').textContent =
-    `${lignes.length} étudiant(s) · ${servis} ayant au moins un dépôt` +
-    (rejets && rejets.length ? ` · ${rejets.length} ligne(s) rejetée(s)` : '');
-}
 
 // -------------------------------------------------------------------- quitter
 
@@ -1185,25 +1393,27 @@ async function demarrer() {
   etat.reglages = contexte.settings;
 
   $('version').textContent = contexte.version;
-  $('compte').textContent = `@${contexte.viewer}`;
+  $('compte').textContent = `@${contexte.viewer} sur ${contexte.host}`;
   $('aide-champs').textContent = 'Champs disponibles : ' +
     contexte.placeholders.map((nom) => `{${nom}}`).join(', ');
 
-  const droits = $('reglage-permission');
-  vider(droits);
-  for (const option of contexte.permissions) {
-    droits.append(el('option', { value: option.value, texte: option.label }));
+  for (const id of ['reglage-permission', 'gr-permission']) {
+    const droits = $(id);
+    vider(droits);
+    for (const option of contexte.permissions) {
+      droits.append(el('option', { value: option.value, texte: option.label }));
+    }
   }
 
   dessinerPortees(contexte.scopes);
   dessinerChemins(contexte.paths);
+  $('reglage-delay').value = etat.reglages.delay_seconds ?? 1;
   if (!contexte.save_config) {
     $('reglages-etat').textContent = 'Mémorisation désactivée (--no-save-config)';
   }
 
-  ecrireReglages();
-  afficherEtape(1);
-  await chargerOrganisations();
+  await chargerGroupes();
+  afficherVue('groupes');
 }
 
 demarrer();

@@ -10,6 +10,7 @@ import (
 	"net/http/cookiejar"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -145,6 +146,25 @@ func (h *harnais) json(methode, chemin string, corps any, cible any) {
 	if err := json.Unmarshal(contenu, cible); err != nil {
 		h.t.Fatalf("réponse illisible (%s) : %v", contenu, err)
 	}
+}
+
+// groupe déclare un groupe et renvoie son identifiant.
+func (h *harnais) groupe(prefixe string, comptes ...string) string {
+	h.t.Helper()
+	etudiants := make([]map[string]string, 0, len(comptes))
+	for _, compte := range comptes {
+		etudiants = append(etudiants, map[string]string{"username": compte, "full_name": compte})
+	}
+	var cree struct {
+		ID string `json:"id"`
+	}
+	h.json(http.MethodPost, "/api/classrooms", map[string]any{
+		"org": "acme", "prefix": prefixe, "name": prefixe, "students": etudiants,
+	}, &cree)
+	if cree.ID == "" {
+		h.t.Fatal("groupe sans identifiant")
+	}
+	return cree.ID
 }
 
 // travail lance une opération en arrière-plan et attend son bilan.
@@ -310,7 +330,7 @@ func TestGroupeInconnuRefuse(t *testing.T) {
 	}
 }
 
-func TestListeCollectiveLueEtPlanifiee(t *testing.T) {
+func TestListeCollectiveLue(t *testing.T) {
 	h := nouveau(t, nil)
 
 	var liste struct {
@@ -331,32 +351,143 @@ func TestListeCollectiveLueEtPlanifiee(t *testing.T) {
 	if len(liste.Issues) != 1 {
 		t.Fatalf("%d rejet(s), attendu 1", len(liste.Issues))
 	}
+}
 
-	reglages := config.Default()
-	reglages.Org, reglages.Assignment = "acme", "tp1"
-	var plan struct {
-		Items []struct {
+// ------------------------------------------------------------------- groupes
+
+func TestGroupeDeclareEtRelu(t *testing.T) {
+	h := nouveau(t, nil)
+	id := h.groupe("a26-5n6", "jlpicard", "emilie-cote")
+
+	var fiche struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Prefix   string `json:"prefix"`
+		Students []struct {
+			Username string `json:"username"`
+		} `json:"students"`
+		Assignments []struct {
+			Name string `json:"name"`
+		} `json:"assignments"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id, nil, &fiche)
+	if fiche.Prefix != "a26-5n6" || len(fiche.Students) != 2 {
+		t.Fatalf("groupe relu : %+v", fiche)
+	}
+
+	// Le fichier vit à côté des réglages, et se relit d'une session à l'autre.
+	var liste struct {
+		Classrooms []struct {
+			ID string `json:"id"`
+		} `json:"classrooms"`
+	}
+	h.json(http.MethodGet, "/api/classrooms", nil, &liste)
+	if len(liste.Classrooms) != 1 || liste.Classrooms[0].ID != id {
+		t.Fatalf("liste des groupes : %+v", liste)
+	}
+}
+
+func TestGroupeRetrouveSesTravauxExistants(t *testing.T) {
+	// La nomenclature déjà en place doit continuer de fonctionner sans rien
+	// renommer : session, cours, puis nom du travail.
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26-5n6-travailsession-jlpicard", "a26-5n6-travailsession-emilie-cote",
+		"a26-4w6-tp1-jlpicard", "a26-4w6-tp1-emilie-cote",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	id := h.groupe("a26-5n6", "jlpicard", "emilie-cote")
+
+	var fiche struct {
+		Assignments []struct {
+			Name     string `json:"name"`
+			ID       string `json:"id"`
+			Repos    int    `json:"repos"`
+			Students int    `json:"students"`
+		} `json:"assignments"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id, nil, &fiche)
+	if len(fiche.Assignments) != 1 {
+		t.Fatalf("travaux du groupe : %+v", fiche.Assignments)
+	}
+	travail := fiche.Assignments[0]
+	if travail.Name != "travailsession" || travail.ID != "a26-5n6-travailsession" {
+		t.Fatalf("travail : %+v", travail)
+	}
+	if travail.Repos != 2 || travail.Students != 2 {
+		t.Fatalf("comptage : %+v", travail)
+	}
+}
+
+func TestCandidatsProposesDepuisLesDepots(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26-5n6-travailsession-jlpicard", "a26-5n6-travailsession-emilie-cote",
+		"a26-4w6-tp1-jlpicard", "a26-4w6-tp1-emilie-cote",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+
+	var reponse struct {
+		Candidates []struct {
+			Prefix      string   `json:"prefix"`
+			Assignments []string `json:"assignments"`
+			Students    []string `json:"students"`
+		} `json:"candidates"`
+	}
+	h.json(http.MethodGet, "/api/orgs/acme/candidates", nil, &reponse)
+	trouves := map[string]int{}
+	for _, candidat := range reponse.Candidates {
+		trouves[candidat.Prefix] = len(candidat.Students)
+	}
+	if trouves["a26-5n6"] != 2 || trouves["a26-4w6"] != 2 {
+		t.Fatalf("candidats : %+v", reponse.Candidates)
+	}
+
+	// Une fois le groupe déclaré, son préfixe n'est plus proposé.
+	h.groupe("a26-5n6", "jlpicard")
+	h.json(http.MethodGet, "/api/orgs/acme/candidates", nil, &reponse)
+	for _, candidat := range reponse.Candidates {
+		if candidat.Prefix == "a26-5n6" {
+			t.Fatalf("le préfixe déjà couvert est encore proposé : %+v", reponse.Candidates)
+		}
+	}
+}
+
+func TestApercuAvantDistribution(t *testing.T) {
+	h := nouveau(t, nil)
+	id := h.groupe("a26-5n6", "jlpicard", "emilie-cote")
+
+	var apercu struct {
+		Assignment string `json:"assignment"`
+		ShortName  string `json:"short_name"`
+		Items      []struct {
 			Name string `json:"name"`
 		} `json:"items"`
 	}
-	h.json(http.MethodPost, "/api/plan", map[string]any{
-		"settings": reglages, "people": liste.People,
-	}, &plan)
-	if len(plan.Items) != 2 || plan.Items[0].Name != "tp1-jlpicard" {
-		t.Fatalf("plan inattendu : %+v", plan.Items)
+	h.json(http.MethodPost, "/api/classrooms/"+id+"/assignments/preview",
+		map[string]any{"name": "tp1"}, &apercu)
+
+	if apercu.Assignment != "a26-5n6-tp1" || apercu.ShortName != "tp1" {
+		t.Fatalf("aperçu : %+v", apercu)
+	}
+	if len(apercu.Items) != 2 || apercu.Items[0].Name != "a26-5n6-tp1-jlpicard" {
+		t.Fatalf("dépôts prévus : %+v", apercu.Items)
 	}
 }
 
 func TestGabaritSansChampDistinctifRefuse(t *testing.T) {
 	h := nouveau(t, nil)
-	reglages := config.Default()
-	reglages.Org, reglages.Assignment = "acme", "tp1"
-	reglages.NamePattern = "{assignment}"
+	id := h.groupe("a26-5n6", "jlpicard")
 
-	reponse, contenu := h.requete(http.MethodPost, "/api/plan", map[string]any{
-		"settings": reglages,
-		"people":   []map[string]string{{"full_name": "Jean-Luc Picard", "username": "jlpicard"}},
-	})
+	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/assignments/preview",
+		map[string]any{
+			"name":     "tp1",
+			"settings": map[string]any{"name_pattern": "{assignment}"},
+		})
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d, attendu 400", reponse.StatusCode)
 	}
@@ -367,18 +498,12 @@ func TestGabaritSansChampDistinctifRefuse(t *testing.T) {
 
 // ------------------------------------------------------------------ écriture
 
-func TestCreationDesDepots(t *testing.T) {
+func TestDistributionAToutLeGroupe(t *testing.T) {
 	h := nouveau(t, nil)
-	reglages := config.Default()
-	reglages.Org, reglages.Assignment, reglages.DelaySeconds = "acme", "tp1", 0
+	id := h.groupe("a26-5n6", "jlpicard", "emilie-cote")
 
-	bilan := h.travail(http.MethodPost, "/api/create", map[string]any{
-		"settings": reglages,
-		"people": []map[string]string{
-			{"full_name": "Jean-Luc Picard", "username": "jlpicard"},
-			{"full_name": "Émilie Côté", "username": "emilie-cote"},
-		},
-	})
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/assignments",
+		map[string]any{"name": "tp1"})
 	if bilan["status"] != "terminé" {
 		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
 	}
@@ -387,21 +512,19 @@ func TestCreationDesDepots(t *testing.T) {
 		t.Fatalf("%v dépôt(s) créé(s), attendu 2", resultat["created"])
 	}
 	noms := h.State.RepoNames("acme")
-	if len(noms) != 2 {
+	sort.Strings(noms)
+	attendu := "a26-5n6-tp1-emilie-cote,a26-5n6-tp1-jlpicard"
+	if strings.Join(noms, ",") != attendu {
 		t.Fatalf("dépôts créés : %v", noms)
 	}
 }
 
 func TestSimulationNeCreeRien(t *testing.T) {
 	h := nouveau(t, nil)
-	reglages := config.Default()
-	reglages.Org, reglages.Assignment, reglages.DelaySeconds = "acme", "tp1", 0
+	id := h.groupe("a26-5n6", "jlpicard")
 
-	bilan := h.travail(http.MethodPost, "/api/create", map[string]any{
-		"settings": reglages,
-		"people":   []map[string]string{{"full_name": "Jean-Luc Picard", "username": "jlpicard"}},
-		"dry_run":  true,
-	})
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/assignments",
+		map[string]any{"name": "tp1", "dry_run": true})
 	if bilan["status"] != "terminé" {
 		t.Fatalf("travail %v", bilan["status"])
 	}
@@ -410,28 +533,92 @@ func TestSimulationNeCreeRien(t *testing.T) {
 	}
 }
 
-func TestAjoutAuGroupeEcarteLesPersonnesDejaServies(t *testing.T) {
+func TestRedistributionEcarteLesDejaServis(t *testing.T) {
 	state := fakegh.NewState()
-	state.AddRepo("acme", "tp1-jlpicard", true)
+	state.AddRepo("acme", "a26-5n6-tp1-jlpicard", true)
 	h := nouveau(t, state)
+	id := h.groupe("a26-5n6", "jlpicard", "emilie-cote")
 
-	reglages := config.Default()
-	reglages.Org, reglages.Assignment, reglages.DelaySeconds = "acme", "tp1", 0
-	bilan := h.travail(http.MethodPost, "/api/create", map[string]any{
-		"settings": reglages,
-		"people": []map[string]string{
-			{"full_name": "Jean-Luc Picard", "username": "jlpicard"},
-			{"full_name": "Émilie Côté", "username": "emilie-cote"},
-		},
-		"group": "tp1",
-	})
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/assignments",
+		map[string]any{"name": "tp1"})
 	resultat, _ := bilan["result"].(map[string]any)
 	if resultat["created"] != float64(1) {
 		t.Fatalf("%v dépôt(s) créé(s), attendu 1", resultat["created"])
 	}
-	ecartees, _ := resultat["skipped"].([]any)
-	if len(ecartees) != 1 {
-		t.Fatalf("%d personne(s) écartée(s), attendu 1", len(ecartees))
+	ecartes, _ := resultat["skipped"].([]any)
+	if len(ecartes) != 1 {
+		t.Fatalf("%d étudiant(s) écarté(s), attendu 1", len(ecartes))
+	}
+
+	// Tout le monde servi : il n'y a plus rien à distribuer.
+	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/assignments",
+		map[string]any{"name": "tp1"})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d, attendu 400 — %s", reponse.StatusCode, contenu)
+	}
+}
+
+func TestDistributionRestreinteAQuelquesEtudiants(t *testing.T) {
+	h := nouveau(t, nil)
+	id := h.groupe("a26-5n6", "jlpicard", "emilie-cote")
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/assignments",
+		map[string]any{"name": "rattrapage", "usernames": []string{"emilie-cote"}})
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["created"] != float64(1) {
+		t.Fatalf("%v dépôt(s) créé(s), attendu 1", resultat["created"])
+	}
+	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+		noms[0] != "a26-5n6-rattrapage-emilie-cote" {
+		t.Fatalf("dépôts créés : %v", noms)
+	}
+}
+
+func TestSelectionVideNeSertPersonne(t *testing.T) {
+	h := nouveau(t, nil)
+	id := h.groupe("a26-5n6", "jlpicard", "emilie-cote")
+
+	// Une sélection explicitement vide ne doit pas être lue comme « tout le
+	// groupe » : décocher tout le monde ne crée rien.
+	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/assignments",
+		map[string]any{"name": "tp1", "usernames": []string{}})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d, attendu 400 — %s", reponse.StatusCode, contenu)
+	}
+	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+		t.Fatalf("des dépôts ont été créés : %v", noms)
+	}
+}
+
+func TestEtudiantsDuGroupeCroisesAvecLesTravaux(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26-5n6-tp1-jlpicard", "a26-5n6-tp1-emilie-cote", "a26-5n6-travailsession-jlpicard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	id := h.groupe("a26-5n6", "jlpicard", "emilie-cote", "aminata-d")
+
+	var reponse struct {
+		Students []struct {
+			Username    string `json:"username"`
+			Assignments []struct {
+				Name string `json:"name"`
+				Repo string `json:"repo"`
+			} `json:"assignments"`
+		} `json:"students"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id+"/students", nil, &reponse)
+	if len(reponse.Students) != 3 {
+		t.Fatalf("%d étudiant(s), attendu 3", len(reponse.Students))
+	}
+	compte := map[string]int{}
+	for _, etudiant := range reponse.Students {
+		compte[etudiant.Username] = len(etudiant.Assignments)
+	}
+	if compte["jlpicard"] != 2 || compte["emilie-cote"] != 1 || compte["aminata-d"] != 0 {
+		t.Fatalf("travaux par étudiant : %v", compte)
 	}
 }
 
@@ -665,45 +852,5 @@ func TestPageServie(t *testing.T) {
 	reponse, _ = h.requete(http.MethodGet, "/groupes", nil)
 	if reponse.StatusCode != http.StatusOK {
 		t.Fatalf("statut %d pour une adresse inconnue", reponse.StatusCode)
-	}
-}
-
-func TestListeDesEtudiantsCroiseeAvecLesTravaux(t *testing.T) {
-	state := fakegh.NewState()
-	for _, nom := range []string{"tp1-jlpicard", "tp1-emilie-cote", "tp2-jlpicard", "tp2-emilie-cote"} {
-		state.AddRepo("acme", nom, true)
-	}
-	h := nouveau(t, state)
-
-	var reponse struct {
-		Students []struct {
-			FullName    string `json:"full_name"`
-			Username    string `json:"username"`
-			Assignments []struct {
-				Prefix string `json:"prefix"`
-				Repo   string `json:"repo"`
-				URL    string `json:"url"`
-			} `json:"assignments"`
-		} `json:"students"`
-	}
-	h.json(http.MethodPost, "/api/orgs/acme/students", map[string]any{
-		"people": []map[string]string{
-			{"full_name": "Jean-Luc Picard", "username": "jlpicard"},
-			{"full_name": "Aminata Diallo", "username": "aminata-d"},
-		},
-	}, &reponse)
-
-	if len(reponse.Students) != 2 {
-		t.Fatalf("%d étudiant(s), attendu 2", len(reponse.Students))
-	}
-	if len(reponse.Students[0].Assignments) != 2 {
-		t.Fatalf("travaux de @jlpicard : %+v", reponse.Students[0].Assignments)
-	}
-	if reponse.Students[0].Assignments[0].Repo != "tp1-jlpicard" {
-		t.Fatalf("dépôt inattendu : %+v", reponse.Students[0].Assignments[0])
-	}
-	// Une personne sans dépôt reste dans la liste, sans travail.
-	if len(reponse.Students[1].Assignments) != 0 {
-		t.Fatalf("@aminata-d n'a aucun dépôt : %+v", reponse.Students[1].Assignments)
 	}
 }
