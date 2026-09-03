@@ -1405,10 +1405,16 @@ const champsGroupe = {
 
 function ecrireReglagesGroupe() {
   const groupe = etat.groupe;
+  const herite = !groupe.course && groupe.prefix;
   $('gr-nom').value = groupe.name || '';
   $('gr-org').value = groupe.org || '';
   $('gr-cours').value = groupe.course || '';
   $('gr-section').value = groupe.group || '';
+  // Un groupe hérité ne change pas de place à la main : renommer ses dépôts
+  // fait partie de la migration.
+  $('gr-cours').disabled = !!herite;
+  $('gr-section').disabled = !!herite;
+  preparerMigration(herite ? groupe.prefix : '');
   const defauts = groupe.defaults || {};
   for (const [cle, id] of Object.entries(champsGroupe)) {
     $(id).value = defauts[cle] || '';
@@ -1436,6 +1442,94 @@ $('gr-enregistrer').addEventListener('click', async () => {
   if (!modifie) return;
   message('Réglages du groupe enregistrés.');
   await ouvrirGroupe(modifie.id, true);
+  afficherVue('groupe-reglages');
+});
+
+// ------------------------------------------------------------------ migration
+
+function preparerMigration(prefixe) {
+  $('migration-boite').hidden = !prefixe;
+  $('mig-table').hidden = true;
+  $('mig-resume').textContent = '';
+  $('mig-lancer').disabled = true;
+  vider($('mig-avis'));
+  if (!prefixe) return;
+
+  // « a26-5n6 » suit l'habitude « session-cours » : le dernier segment fait le
+  // cours, ce qui précède fait le groupe. C'est une proposition, pas une règle.
+  const segments = prefixe.split('-');
+  $('mig-cours').value = segments.length > 1 ? segments[segments.length - 1] : prefixe;
+  $('mig-section').value = segments.length > 1
+    ? segments.slice(0, -1).join('-')
+    : '';
+}
+
+function corpsMigration() {
+  return {
+    course: $('mig-cours').value.trim(),
+    group: $('mig-section').value.trim(),
+    skip_blocked: $('mig-ignorer').checked,
+  };
+}
+
+$('mig-apercu').addEventListener('click', async () => {
+  const apercu = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.id)}/migration/preview`, corpsMigration()), 'Migration');
+  vider($('mig-avis'));
+  if (!apercu) return;
+
+  const corps = $('mig-table').querySelector('tbody');
+  vider(corps);
+  for (const ligne of apercu.rows) {
+    corps.append(el('tr', {},
+      el('td', {}, el('code', { texte: ligne.repo })),
+      ligne.target
+        ? el('td', {}, el('code', { texte: ligne.target }))
+        : el('td', { classe: 'vide', texte: ligne.problem })));
+  }
+  $('mig-table').hidden = apercu.rows.length === 0;
+  $('mig-resume').textContent = `${apercu.ready} dépôt(s) à renommer` +
+    (apercu.blocked ? `, ${apercu.blocked} bloqué(s)` : '');
+  if (apercu.blocked) {
+    $('mig-avis').append(el('div', { classe: 'avis alerte',
+      texte: `${apercu.blocked} dépôt(s) ne peuvent pas être renommés. Complétez la liste des ` +
+        "étudiants — comptes manquants, noms complets à retrouver — ou acceptez de les laisser " +
+        'en place.' }));
+  }
+  $('mig-lancer').disabled = apercu.ready === 0;
+});
+
+for (const id of ['mig-cours', 'mig-section', 'mig-ignorer']) {
+  $(id).addEventListener('change', () => {
+    $('mig-table').hidden = true;
+    $('mig-resume').textContent = '';
+    $('mig-lancer').disabled = true;
+  });
+}
+
+$('mig-lancer').addEventListener('click', async () => {
+  const corps = corpsMigration();
+  const confirme = await demander('Renommer les dépôts', el('div', {},
+    el('p', { texte: `Les dépôts de « ${etat.groupe.name} » seront renommés en ` +
+      `« ${corps.course}.${corps.group}.travail.étudiant ».` }),
+    el('p', { classe: 'note',
+      texte: 'GitHub garde une redirection depuis chaque ancien nom : les clones et les liens ' +
+        'déjà distribués continuent de fonctionner.' })), 'Renommer');
+  if (!confirme) return;
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.id)}/migration/apply`, corps), 'Migration');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (!bilan) return;
+
+  journaliser(`${bilan.renamed} renommé(s) · ${bilan.skipped} laissé(s) en place · ` +
+    `${bilan.failed} en échec`, bilan.failed ? 'warn' : 'ok');
+  if (!bilan.switched) {
+    journaliser('Le groupe reste sur l\'ancienne nomenclature : des dépôts sont restés en ' +
+      'arrière.', 'warn');
+  }
+  await ouvrirGroupe(etat.groupe.id, true);
   afficherVue('groupe-reglages');
 });
 

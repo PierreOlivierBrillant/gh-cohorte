@@ -401,6 +401,42 @@
       </div>
     </div>
 
+    <div class="boite" id="migration-boite" hidden>
+      <div class="boite-entete"><strong>Migrer vers la nomenclature à quatre niveaux</strong></div>
+      <div class="boite-corps">
+        <p class="note">Les dépôts de ce groupe sont nommés à l'ancienne, tout en tirets. Les
+          migrer les renomme en <code>cours.groupe.travail.étudiant</code>. GitHub garde une
+          redirection depuis l'ancien nom : les clones et les liens déjà distribués continuent
+          de fonctionner.</p>
+        <div class="rangee">
+          <label class="champ-bloc">
+            <span class="etiquette">Cours</span>
+            <input type="text" id="mig-cours" class="champ" placeholder="5n6">
+          </label>
+          <label class="champ-bloc">
+            <span class="etiquette">Groupe</span>
+            <input type="text" id="mig-section" class="champ" placeholder="a26-01">
+          </label>
+        </div>
+        <div class="actions">
+          <button type="button" id="mig-apercu" class="bouton">Prévisualiser le renommage</button>
+          <span class="note" id="mig-resume"></span>
+        </div>
+        <div id="mig-avis"></div>
+        <table class="tableau" id="mig-table" hidden>
+          <thead><tr><th>Dépôt actuel</th><th>Nouveau nom</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <label class="case"><input type="checkbox" id="mig-ignorer">
+          <span>Laisser en place les dépôts qui ne peuvent pas être renommés
+            <span class="aide">Le groupe ne bascule alors pas : il continue de les voir.</span></span></label>
+      </div>
+      <div class="boite-pied">
+        <span class="espace"></span>
+        <button type="button" id="mig-lancer" class="bouton vert" disabled>Renommer les dépôts</button>
+      </div>
+    </div>
+
     <div class="boite">
       <div class="boite-entete"><strong>Réglages par défaut des travaux</strong></div>
       <div class="boite-corps">

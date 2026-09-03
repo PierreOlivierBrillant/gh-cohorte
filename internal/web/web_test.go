@@ -935,3 +935,139 @@ func TestPageServie(t *testing.T) {
 		t.Fatalf("statut %d pour une adresse inconnue", reponse.StatusCode)
 	}
 }
+
+// ----------------------------------------------------------------- migration
+
+func TestMigrationRenommeLesDepots(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26-5n6-travailsession-jlpicard", "a26-5n6-travailsession-emilie-cote",
+		"a26-5n6-tp1-jlpicard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	id := h.heritage("a26-5n6", "jlpicard", "emilie-cote")
+
+	// Les noms complets sont nécessaires : c'est eux qui nomment les dépôts.
+	h.travail(http.MethodPost, "/api/classrooms/"+id+"/students/names", nil)
+
+	var apercu struct {
+		Course  string `json:"course"`
+		Group   string `json:"group"`
+		Ready   int    `json:"ready"`
+		Blocked int    `json:"blocked"`
+		Rows    []struct {
+			Repo    string `json:"repo"`
+			Target  string `json:"target"`
+			Problem string `json:"problem"`
+		} `json:"rows"`
+	}
+	h.json(http.MethodPost, "/api/classrooms/"+id+"/migration/preview",
+		map[string]any{"course": "5n6", "group": "a26-01"}, &apercu)
+	if apercu.Ready != 3 || apercu.Blocked != 0 {
+		t.Fatalf("aperçu : %+v", apercu)
+	}
+	cibles := map[string]string{}
+	for _, ligne := range apercu.Rows {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if cibles["a26-5n6-tp1-jlpicard"] != "5n6.a26-01.tp1.jean-luc-picard" {
+		t.Fatalf("cibles : %v", cibles)
+	}
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
+		map[string]any{"course": "5n6", "group": "a26-01"})
+	if bilan["status"] != "terminé" {
+		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
+	}
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["renamed"] != float64(3) || resultat["switched"] != true {
+		t.Fatalf("bilan : %+v", resultat)
+	}
+
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	attendu := "5n6.a26-01.tp1.jean-luc-picard," +
+		"5n6.a26-01.travailsession.emilie-cote,5n6.a26-01.travailsession.jean-luc-picard"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts après migration : %v", noms)
+	}
+
+	// Le groupe suit désormais la nouvelle nomenclature, et redevient
+	// distribuable.
+	var fiche struct {
+		Course      string `json:"course"`
+		Group       string `json:"group"`
+		Prefix      string `json:"prefix"`
+		Assignments []struct {
+			ID string `json:"id"`
+		} `json:"assignments"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id+"?refresh=1", nil, &fiche)
+	if fiche.Course != "5n6" || fiche.Group != "a26-01" || fiche.Prefix != "" {
+		t.Fatalf("groupe après migration : %+v", fiche)
+	}
+	if len(fiche.Assignments) != 2 {
+		t.Fatalf("travaux après migration : %+v", fiche.Assignments)
+	}
+}
+
+func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "a26-5n6-tp1-jlpicard", true)
+	// « visiteur » n'est pas dans la liste du groupe : son dépôt ne peut pas
+	// être renommé sans savoir de qui il s'agit.
+	state.AddRepo("acme", "a26-5n6-tp1-visiteur", true)
+	h := nouveau(t, state)
+	id := h.heritage("a26-5n6", "jlpicard")
+	h.travail(http.MethodPost, "/api/classrooms/"+id+"/students/names", nil)
+
+	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
+		map[string]any{"course": "5n6", "group": "a26-01"})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d, attendu 400 — %s", reponse.StatusCode, contenu)
+	}
+	if noms := h.State.RepoNames("acme"); len(noms) != 2 ||
+		!strings.HasPrefix(noms[0], "a26-5n6-") {
+		t.Fatalf("des dépôts ont été renommés : %v", noms)
+	}
+
+	// En acceptant de les laisser en place, la migration passe — mais le
+	// groupe ne bascule pas tant qu'un dépôt reste en arrière.
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
+		map[string]any{"course": "5n6", "group": "a26-01", "skip_blocked": true})
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["renamed"] != float64(1) || resultat["skipped"] != float64(1) {
+		t.Fatalf("bilan : %+v", resultat)
+	}
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	if strings.Join(noms, ",") != "5n6.a26-01.tp1.jean-luc-picard,a26-5n6-tp1-visiteur" {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+func TestMigrationRefuseSansNomComplet(t *testing.T) {
+	state := fakegh.NewState()
+	// « aminata-d » a un profil GitHub sans nom complet.
+	state.AddRepo("acme", "a26-5n6-tp1-aminata-d", true)
+	h := nouveau(t, state)
+	id := h.heritage("a26-5n6", "aminata-d")
+
+	var apercu struct {
+		Ready   int `json:"ready"`
+		Blocked int `json:"blocked"`
+		Rows    []struct {
+			Problem string `json:"problem"`
+		} `json:"rows"`
+	}
+	h.json(http.MethodPost, "/api/classrooms/"+id+"/migration/preview",
+		map[string]any{"course": "5n6", "group": "a26-01"}, &apercu)
+	if apercu.Blocked != 1 || apercu.Ready != 0 {
+		t.Fatalf("aperçu : %+v", apercu)
+	}
+	if !strings.Contains(apercu.Rows[0].Problem, "aminata-d") {
+		t.Fatalf("raison : %q", apercu.Rows[0].Problem)
+	}
+}

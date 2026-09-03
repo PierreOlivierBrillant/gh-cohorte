@@ -629,6 +629,38 @@ func (s *Server) patch(writer http.ResponseWriter, request *http.Request, path s
 		s.send(writer, 200, map[string]any{"object": map[string]any{"sha": sha}})
 		return
 	}
+	if match := repoRe.FindStringSubmatch(path); match != nil {
+		full := match[1] + "/" + match[2]
+		repo, exists := state.Repos[full]
+		if !exists {
+			s.notFound(writer)
+			return
+		}
+		nom, _ := body["name"].(string)
+		if nom == "" || nom == repo.Name {
+			s.send(writer, 200, s.repoPayload(repo))
+			return
+		}
+		cible := repo.Org + "/" + nom
+		if _, pris := state.Repos[cible]; pris {
+			s.send(writer, 422, map[string]any{"message": "name already exists on this account"})
+			return
+		}
+		// Le renommage déplace le dépôt et tout ce qui s'y rattache.
+		delete(state.Repos, full)
+		repo.Name = nom
+		state.Repos[cible] = repo
+		if acces, connu := state.Collaborators[full]; connu {
+			state.Collaborators[cible] = acces
+			delete(state.Collaborators, full)
+		}
+		if invites, connu := state.Invitations[full]; connu {
+			state.Invitations[cible] = invites
+			delete(state.Invitations, full)
+		}
+		s.send(writer, 200, s.repoPayload(repo))
+		return
+	}
 	s.notFound(writer)
 }
 

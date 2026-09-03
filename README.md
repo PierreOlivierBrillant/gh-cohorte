@@ -382,6 +382,30 @@ Les préfixes de l'ancienne nomenclature sont signalés comme tels. Un groupe
 adopté ainsi **reste lisible** — ses dépôts, ses travaux, ses accès s'affichent
 — mais on ne lui distribue plus : il faut d'abord le migrer.
 
+### Migrer un groupe existant
+
+« Réglages du groupe » d'un groupe hérité propose de **renommer ses dépôts**.
+On y indique le cours et le groupe ; l'outil propose une découpe du préfixe
+(`a26-5n6` → cours `5n6`, groupe `a26`, à corriger au besoin) et montre le
+renommage avant d'écrire quoi que ce soit :
+
+```
+Dépôt actuel                          Nouveau nom
+a26-5n6-travailsession-jlpicard       5n6.a26-01.travailsession.jean-luc-picard
+a26-5n6-travailsession-emilie-cote    5n6.a26-01.travailsession.emilie-cote
+a26-5n6-tp1-visiteur                  compte « visiteur » absent de la liste du groupe
+```
+
+**GitHub garde une redirection depuis chaque ancien nom** : les clones déjà
+faits, les liens distribués et les scripts continuent de fonctionner.
+
+Un dépôt est bloqué quand son compte n'est pas dans la liste du groupe, quand
+son nom complet manque, ou quand le nom visé existe déjà. La migration refuse
+alors de démarrer, en les nommant — le temps de compléter la liste ou de
+retrouver les noms. On peut aussi accepter de **les laisser en place** : ils ne
+sont pas touchés, et le groupe ne bascule pas tant qu'il en reste, pour
+continuer de les voir.
+
 Le sélecteur d'organisation est à l'accueil, et non enfoui dans un formulaire :
 on choisit d'abord où regarder, la liste suit. L'organisation retenue est
 mémorisée, et la session suivante s'ouvre dessus.
