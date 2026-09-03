@@ -476,3 +476,10 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 .groupe-ligne .titre { font-size: 1.05rem; }
 .entete-cours .fil { margin-bottom: .5rem; }
 .entete-cours .ligne-cours { align-items: baseline; }
+
+/* L'écran d'entrée : rien d'autre n'est offert tant qu'une organisation
+   n'a pas été choisie. */
+.accueil-organisation { max-width: 34rem; margin: 3rem auto 0; }
+
+/* Le fil d'Ariane de la hiérarchie. */
+.fil .lien { font: inherit; }

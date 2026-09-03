@@ -148,8 +148,8 @@ func (h *harnais) json(methode, chemin string, corps any, cible any) {
 	}
 }
 
-// groupe déclare un groupe de la nomenclature à quatre niveaux.
-func (h *harnais) groupe(cours, section string, couples ...string) string {
+// groupe déclare un groupe de la nomenclature courante.
+func (h *harnais) groupe(session, cours, section string, couples ...string) string {
 	h.t.Helper()
 	etudiants := make([]map[string]string, 0, len(couples)/2)
 	for index := 0; index+1 < len(couples); index += 2 {
@@ -161,7 +161,7 @@ func (h *harnais) groupe(cours, section string, couples ...string) string {
 		ID string `json:"id"`
 	}
 	h.json(http.MethodPost, "/api/classrooms", map[string]any{
-		"org": "acme", "course": cours, "group": section,
+		"org": "acme", "session": session, "course": cours, "group": section,
 		"name": cours + " " + section, "students": etudiants,
 	}, &cree)
 	if cree.ID == "" {
@@ -335,10 +335,11 @@ func TestListeCollectiveLue(t *testing.T) {
 
 func TestGroupeDeclareEtRelu(t *testing.T) {
 	h := nouveau(t, nil)
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
 
 	var fiche struct {
 		ID       string `json:"id"`
+		Session  string `json:"session"`
 		Course   string `json:"course"`
 		Group    string `json:"group"`
 		Students []struct {
@@ -346,7 +347,7 @@ func TestGroupeDeclareEtRelu(t *testing.T) {
 		} `json:"students"`
 	}
 	h.json(http.MethodGet, "/api/classrooms/"+id, nil, &fiche)
-	if fiche.Course != "5n6" || fiche.Group != "a26-01" || len(fiche.Students) != 2 {
+	if fiche.Session != "a26" || fiche.Course != "5n6" || fiche.Group != "01" || len(fiche.Students) != 2 {
 		t.Fatalf("groupe relu : %+v", fiche)
 	}
 
@@ -363,17 +364,17 @@ func TestGroupeDeclareEtRelu(t *testing.T) {
 
 func TestPlusieursGroupesDansUnCours(t *testing.T) {
 	state := fakegh.NewState()
-	state.AddRepo("acme", "5n6.a26-01.tp1.jean-luc-picard", true)
-	state.AddRepo("acme", "5n6.a26-02.tp1.emilie-cote", true)
+	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
+	state.AddRepo("acme", "a26.5n6.02.tp1.emilie-cote", true)
 	h := nouveau(t, state)
 
-	premier := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard")
-	second := h.groupe("5n6", "a26-02", "Émilie Côté", "emilie-cote")
+	premier := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
+	second := h.groupe("a26", "5n6", "02", "Émilie Côté", "emilie-cote")
 
 	for _, cas := range []struct {
 		id      string
 		attendu string
-	}{{premier, "5n6.a26-01.tp1"}, {second, "5n6.a26-02.tp1"}} {
+	}{{premier, "a26.5n6.01.tp1"}, {second, "a26.5n6.02.tp1"}} {
 		var fiche struct {
 			Assignments []struct {
 				ID       string `json:"id"`
@@ -434,7 +435,7 @@ func TestGroupeHeriteResteLisibleMaisPasDistribuable(t *testing.T) {
 func TestCandidatsProposesDepuisLesDepots(t *testing.T) {
 	state := fakegh.NewState()
 	for _, nom := range []string{
-		"5n6.a26-01.tp1.jean-luc-picard", "5n6.a26-01.tp1.emilie-cote",
+		"a26.5n6.01.tp1.jean-luc-picard", "a26.5n6.01.tp1.emilie-cote",
 		"a26-4w6-tp1-jlpicard", "a26-4w6-tp1-emilie-cote",
 	} {
 		state.AddRepo("acme", nom, true)
@@ -444,6 +445,7 @@ func TestCandidatsProposesDepuisLesDepots(t *testing.T) {
 	var reponse struct {
 		Candidates []struct {
 			Prefix   string   `json:"prefix"`
+			Session  string   `json:"session"`
 			Course   string   `json:"course"`
 			Group    string   `json:"group"`
 			Legacy   bool     `json:"legacy"`
@@ -455,7 +457,7 @@ func TestCandidatsProposesDepuisLesDepots(t *testing.T) {
 	for _, candidat := range reponse.Candidates {
 		trouves[candidat.Prefix] = candidat.Legacy
 	}
-	if herite, present := trouves["5n6.a26-01"]; !present || herite {
+	if herite, present := trouves["a26.5n6.01"]; !present || herite {
 		t.Fatalf("candidat courant : %+v", reponse.Candidates)
 	}
 	if herite, present := trouves["a26-4w6"]; !present || !herite {
@@ -463,10 +465,10 @@ func TestCandidatsProposesDepuisLesDepots(t *testing.T) {
 	}
 
 	// Une fois le groupe déclaré, sa place n'est plus proposée.
-	h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard")
+	h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
 	h.json(http.MethodGet, "/api/orgs/acme/candidates", nil, &reponse)
 	for _, candidat := range reponse.Candidates {
-		if candidat.Prefix == "5n6.a26-01" {
+		if candidat.Prefix == "a26.5n6.01" {
 			t.Fatalf("la place déjà couverte est encore proposée : %+v", reponse.Candidates)
 		}
 	}
@@ -474,7 +476,7 @@ func TestCandidatsProposesDepuisLesDepots(t *testing.T) {
 
 func TestApercuAvantDistribution(t *testing.T) {
 	h := nouveau(t, nil)
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
 
 	var apercu struct {
 		Assignment string `json:"assignment"`
@@ -486,7 +488,7 @@ func TestApercuAvantDistribution(t *testing.T) {
 	h.json(http.MethodPost, "/api/classrooms/"+id+"/assignments/preview",
 		map[string]any{"name": "tp1"}, &apercu)
 
-	if apercu.Assignment != "5n6.a26-01.tp1" || apercu.ShortName != "tp1" {
+	if apercu.Assignment != "a26.5n6.01.tp1" || apercu.ShortName != "tp1" {
 		t.Fatalf("aperçu : %+v", apercu)
 	}
 	// Le nom du dépôt porte le nom de l'étudiant, plus son compte.
@@ -495,7 +497,7 @@ func TestApercuAvantDistribution(t *testing.T) {
 		noms = append(noms, item.Name)
 	}
 	sort.Strings(noms)
-	attendu := "5n6.a26-01.tp1.emilie-cote,5n6.a26-01.tp1.jean-luc-picard"
+	attendu := "a26.5n6.01.tp1.emilie-cote,a26.5n6.01.tp1.jean-luc-picard"
 	if strings.Join(noms, ",") != attendu {
 		t.Fatalf("dépôts prévus : %v", noms)
 	}
@@ -504,7 +506,7 @@ func TestApercuAvantDistribution(t *testing.T) {
 func TestNomCompletManquantBloqueLaDistribution(t *testing.T) {
 	h := nouveau(t, nil)
 	// « aminata-d » n'a pas de nom complet : son dépôt ne peut pas être nommé.
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard", "", "aminata-d")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "", "aminata-d")
 
 	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/assignments/preview",
 		map[string]any{"name": "tp1"})
@@ -518,7 +520,7 @@ func TestNomCompletManquantBloqueLaDistribution(t *testing.T) {
 
 func TestHomonymesRefusesAvantTouteEcriture(t *testing.T) {
 	h := nouveau(t, nil)
-	id := h.groupe("5n6", "a26-01",
+	id := h.groupe("a26", "5n6", "01",
 		"Jean Tremblay", "jtremblay", "Jean Tremblay", "jean-t")
 
 	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/assignments",
@@ -538,7 +540,7 @@ func TestHomonymesRefusesAvantTouteEcriture(t *testing.T) {
 
 func TestDistributionAToutLeGroupe(t *testing.T) {
 	h := nouveau(t, nil)
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
 
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/assignments",
 		map[string]any{"name": "tp1"})
@@ -551,7 +553,7 @@ func TestDistributionAToutLeGroupe(t *testing.T) {
 	}
 	noms := h.State.RepoNames("acme")
 	sort.Strings(noms)
-	attendu := "5n6.a26-01.tp1.emilie-cote,5n6.a26-01.tp1.jean-luc-picard"
+	attendu := "a26.5n6.01.tp1.emilie-cote,a26.5n6.01.tp1.jean-luc-picard"
 	if strings.Join(noms, ",") != attendu {
 		t.Fatalf("dépôts créés : %v", noms)
 	}
@@ -559,7 +561,7 @@ func TestDistributionAToutLeGroupe(t *testing.T) {
 
 func TestSimulationNeCreeRien(t *testing.T) {
 	h := nouveau(t, nil)
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
 
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/assignments",
 		map[string]any{"name": "tp1", "dry_run": true})
@@ -573,9 +575,9 @@ func TestSimulationNeCreeRien(t *testing.T) {
 
 func TestRedistributionEcarteLesDejaServis(t *testing.T) {
 	state := fakegh.NewState()
-	state.AddRepo("acme", "5n6.a26-01.tp1.jean-luc-picard", true)
+	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
 	h := nouveau(t, state)
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
 
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/assignments",
 		map[string]any{"name": "tp1"})
@@ -597,7 +599,7 @@ func TestRedistributionEcarteLesDejaServis(t *testing.T) {
 
 func TestDistributionRestreinteAQuelquesEtudiants(t *testing.T) {
 	h := nouveau(t, nil)
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
 
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/assignments",
 		map[string]any{"name": "rattrapage", "usernames": []string{"emilie-cote"}})
@@ -606,14 +608,14 @@ func TestDistributionRestreinteAQuelquesEtudiants(t *testing.T) {
 		t.Fatalf("%v dépôt(s) créé(s), attendu 1", resultat["created"])
 	}
 	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
-		noms[0] != "5n6.a26-01.rattrapage.emilie-cote" {
+		noms[0] != "a26.5n6.01.rattrapage.emilie-cote" {
 		t.Fatalf("dépôts créés : %v", noms)
 	}
 }
 
 func TestSelectionVideNeSertPersonne(t *testing.T) {
 	h := nouveau(t, nil)
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
 
 	// Une sélection explicitement vide ne doit pas être lue comme « tout le
 	// groupe » : décocher tout le monde ne crée rien.
@@ -630,12 +632,12 @@ func TestSelectionVideNeSertPersonne(t *testing.T) {
 func TestDetailDUnTravail(t *testing.T) {
 	state := fakegh.NewState()
 	for _, nom := range []string{
-		"5n6.a26-01.tp1.jean-luc-picard", "5n6.a26-01.tp1.visiteur-inconnu",
+		"a26.5n6.01.tp1.jean-luc-picard", "a26.5n6.01.tp1.visiteur-inconnu",
 	} {
 		state.AddRepo("acme", nom, true)
 	}
 	h := nouveau(t, state)
-	id := h.groupe("5n6", "a26-01", "Jean-Luc Picard", "jlpicard")
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
 
 	var detail struct {
 		ID    string `json:"id"`
@@ -648,7 +650,7 @@ func TestDetailDUnTravail(t *testing.T) {
 		} `json:"repos"`
 	}
 	h.json(http.MethodGet, "/api/classrooms/"+id+"/assignments/tp1", nil, &detail)
-	if detail.ID != "5n6.a26-01.tp1" || len(detail.Repos) != 2 {
+	if detail.ID != "a26.5n6.01.tp1" || len(detail.Repos) != 2 {
 		t.Fatalf("détail : %+v", detail)
 	}
 	// Le dépôt d'un étudiant inscrit porte son nom et son compte ; celui d'un
@@ -668,13 +670,13 @@ func TestDetailDUnTravail(t *testing.T) {
 func TestEtudiantsDuGroupeCroisesAvecLesTravaux(t *testing.T) {
 	state := fakegh.NewState()
 	for _, nom := range []string{
-		"5n6.a26-01.tp1.jean-luc-picard", "5n6.a26-01.tp1.emilie-cote",
-		"5n6.a26-01.travail-session.jean-luc-picard",
+		"a26.5n6.01.tp1.jean-luc-picard", "a26.5n6.01.tp1.emilie-cote",
+		"a26.5n6.01.travail-session.jean-luc-picard",
 	} {
 		state.AddRepo("acme", nom, true)
 	}
 	h := nouveau(t, state)
-	id := h.groupe("5n6", "a26-01",
+	id := h.groupe("a26", "5n6", "01",
 		"Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote", "Aminata Diallo", "aminata-d")
 
 	var reponse struct {
@@ -964,7 +966,7 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 		} `json:"rows"`
 	}
 	h.json(http.MethodPost, "/api/classrooms/"+id+"/migration/preview",
-		map[string]any{"course": "5n6", "group": "a26-01"}, &apercu)
+		map[string]any{"session": "a26", "course": "5n6", "group": "01"}, &apercu)
 	if apercu.Ready != 3 || apercu.Blocked != 0 {
 		t.Fatalf("aperçu : %+v", apercu)
 	}
@@ -972,12 +974,12 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 	for _, ligne := range apercu.Rows {
 		cibles[ligne.Repo] = ligne.Target
 	}
-	if cibles["a26-5n6-tp1-jlpicard"] != "5n6.a26-01.tp1.jean-luc-picard" {
+	if cibles["a26-5n6-tp1-jlpicard"] != "a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("cibles : %v", cibles)
 	}
 
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
-		map[string]any{"course": "5n6", "group": "a26-01"})
+		map[string]any{"session": "a26", "course": "5n6", "group": "01"})
 	if bilan["status"] != "terminé" {
 		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
 	}
@@ -988,8 +990,8 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 
 	noms := h.State.RepoNames("acme")
 	sort.Strings(noms)
-	attendu := "5n6.a26-01.tp1.jean-luc-picard," +
-		"5n6.a26-01.travailsession.emilie-cote,5n6.a26-01.travailsession.jean-luc-picard"
+	attendu := "a26.5n6.01.tp1.jean-luc-picard," +
+		"a26.5n6.01.travailsession.emilie-cote,a26.5n6.01.travailsession.jean-luc-picard"
 	if strings.Join(noms, ",") != attendu {
 		t.Fatalf("dépôts après migration : %v", noms)
 	}
@@ -997,6 +999,7 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 	// Le groupe suit désormais la nouvelle nomenclature, et redevient
 	// distribuable.
 	var fiche struct {
+		Session     string `json:"session"`
 		Course      string `json:"course"`
 		Group       string `json:"group"`
 		Prefix      string `json:"prefix"`
@@ -1005,7 +1008,7 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 		} `json:"assignments"`
 	}
 	h.json(http.MethodGet, "/api/classrooms/"+id+"?refresh=1", nil, &fiche)
-	if fiche.Course != "5n6" || fiche.Group != "a26-01" || fiche.Prefix != "" {
+	if fiche.Session != "a26" || fiche.Course != "5n6" || fiche.Group != "01" || fiche.Prefix != "" {
 		t.Fatalf("groupe après migration : %+v", fiche)
 	}
 	if len(fiche.Assignments) != 2 {
@@ -1024,7 +1027,7 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 	h.travail(http.MethodPost, "/api/classrooms/"+id+"/students/names", nil)
 
 	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
-		map[string]any{"course": "5n6", "group": "a26-01"})
+		map[string]any{"session": "a26", "course": "5n6", "group": "01"})
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d, attendu 400 — %s", reponse.StatusCode, contenu)
 	}
@@ -1036,14 +1039,14 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 	// En acceptant de les laisser en place, la migration passe — mais le
 	// groupe ne bascule pas tant qu'un dépôt reste en arrière.
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
-		map[string]any{"course": "5n6", "group": "a26-01", "skip_blocked": true})
+		map[string]any{"session": "a26", "course": "5n6", "group": "01", "skip_blocked": true})
 	resultat, _ := bilan["result"].(map[string]any)
 	if resultat["renamed"] != float64(1) || resultat["skipped"] != float64(1) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 	noms := h.State.RepoNames("acme")
 	sort.Strings(noms)
-	if strings.Join(noms, ",") != "5n6.a26-01.tp1.jean-luc-picard,a26-5n6-tp1-visiteur" {
+	if strings.Join(noms, ",") != "a26-5n6-tp1-visiteur,a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }
@@ -1063,7 +1066,7 @@ func TestMigrationRefuseSansNomComplet(t *testing.T) {
 		} `json:"rows"`
 	}
 	h.json(http.MethodPost, "/api/classrooms/"+id+"/migration/preview",
-		map[string]any{"course": "5n6", "group": "a26-01"}, &apercu)
+		map[string]any{"session": "a26", "course": "5n6", "group": "01"}, &apercu)
 	if apercu.Blocked != 1 || apercu.Ready != 0 {
 		t.Fatalf("aperçu : %+v", apercu)
 	}

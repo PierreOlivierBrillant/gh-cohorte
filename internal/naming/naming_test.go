@@ -9,8 +9,8 @@ import (
 )
 
 func TestComposeEtRelecture(t *testing.T) {
-	nom := naming.Compose("5n6", "a26-01", "tp1", "emilie-cote")
-	if nom != "5n6.a26-01.tp1.emilie-cote" {
+	nom := naming.Compose("a26", "5n6", "01", "tp1", "emilie-cote")
+	if nom != "a26.5n6.01.tp1.emilie-cote" {
 		t.Fatalf("nom composé : %q", nom)
 	}
 
@@ -18,7 +18,7 @@ func TestComposeEtRelecture(t *testing.T) {
 	if !reconnu {
 		t.Fatal("le nom composé ne se relit pas")
 	}
-	if parts.Course != "5n6" || parts.Group != "a26-01" ||
+	if parts.Session != "a26" || parts.Course != "5n6" || parts.Group != "01" ||
 		parts.Assignment != "tp1" || parts.Student != "emilie-cote" {
 		t.Fatalf("découpe : %+v", parts)
 	}
@@ -27,9 +27,9 @@ func TestComposeEtRelecture(t *testing.T) {
 func TestRelectureRefuseCeQuiNEstPasDeLaNomenclature(t *testing.T) {
 	refuses := []string{
 		"a26-5n6-tp1-emilie-cote", // ancienne nomenclature, tout en tirets
-		"5n6.a26-01.tp1",          // un niveau de trop peu
-		"5n6.a26-01.tp1.emilie.cote",
-		"5n6..tp1.emilie-cote", // un niveau vide
+		"5n6.01.tp1.emilie-cote",  // un niveau de trop peu
+		"a26.5n6.01.tp1.emilie.cote",
+		"a26.5n6..tp1.emilie-cote", // un niveau vide
 		"notes-du-cours",
 		"",
 	}
@@ -95,20 +95,23 @@ func TestNomCompletManquantRefuse(t *testing.T) {
 }
 
 func TestAppartenanceAuGroupe(t *testing.T) {
-	parts, _ := naming.Parse("5N6.A26-01.tp1.emilie-cote")
-	if !naming.Belongs(parts, "5n6", "a26-01") {
+	parts, _ := naming.Parse("A26.5N6.01.tp1.emilie-cote")
+	if !naming.Belongs(parts, "a26", "5n6", "01") {
 		t.Fatal("la casse ne devrait pas séparer un dépôt de son groupe")
 	}
-	if naming.Belongs(parts, "5n6", "a26-02") {
+	if naming.Belongs(parts, "a26", "5n6", "02") {
 		t.Fatal("un autre groupe a été reconnu")
+	}
+	if naming.Belongs(parts, "h27", "5n6", "01") {
+		t.Fatal("une autre session a été reconnue")
 	}
 }
 
 func TestIdentifiants(t *testing.T) {
-	if prefixe := naming.Prefix("5n6", "a26-01"); prefixe != "5n6.a26-01" {
+	if prefixe := naming.Prefix("a26", "5n6", "01"); prefixe != "a26.5n6.01" {
 		t.Fatalf("préfixe %q", prefixe)
 	}
-	if id := naming.AssignmentID("5n6", "a26-01", "tp1"); id != "5n6.a26-01.tp1" {
+	if id := naming.AssignmentID("a26", "5n6", "01", "tp1"); id != "a26.5n6.01.tp1" {
 		t.Fatalf("identifiant %q", id)
 	}
 }

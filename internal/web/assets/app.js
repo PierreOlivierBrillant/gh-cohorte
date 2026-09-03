@@ -76,7 +76,12 @@ const encode = encodeURIComponent;
 const etat = {
   contexte: null,
   reglages: {},
+  organisation: '',
   groupes: [],
+  sessions: [],
+  // parcours dit où l'on se trouve dans la hiérarchie : rien, une session, ou
+  // une session et un cours.
+  parcours: { session: '', cours: '' },
   groupe: null,
   travail: null,
   selection: new Set(),
@@ -237,8 +242,13 @@ for (const bouton of $('onglets').querySelectorAll('button')) {
 }
 
 function afficherVue(nom) {
+  // Tant qu'aucune organisation n'est choisie, rien d'autre n'est accessible :
+  // tout ce que fait l'outil s'y passe.
+  if (!etat.organisation && nom !== 'organisation') nom = 'organisation';
   const onglet = ongletDeLaVue[nom];
   $('entete-groupe').hidden = !onglet;
+  $('ouvrir-reglages').hidden = !etat.organisation;
+  $('accueil').disabled = !etat.organisation;
   for (const bouton of $('onglets').querySelectorAll('button')) {
     bouton.classList.toggle('actif', bouton.dataset.vue === onglet);
   }
@@ -248,7 +258,7 @@ function afficherVue(nom) {
   window.scrollTo(0, 0);
   // Les comptages d'une vue changent pendant qu'on est ailleurs : chaque
   // retour les redemande plutôt que de laisser voir un état périmé.
-  if (nom === 'groupes') chargerGroupes();
+  if (nom === 'parcours') chargerGroupes();
   if (nom === 'reglages') rafraichirEmplacements();
   if (nom === 'etudiants') chargerEtudiants();
   if (nom === 'groupe-reglages') ecrireReglagesGroupe();
@@ -259,50 +269,170 @@ function travaux(nombre) {
   return nombre === 1 ? '1 travail' : `${nombre} travaux`;
 }
 
-$('accueil').addEventListener('click', () => afficherVue('groupes'));
-$('retour-groupes').addEventListener('click', () => afficherVue('groupes'));
-$('nouveau-retour').addEventListener('click', () => afficherVue('groupes'));
-$('reglages-retour').addEventListener('click', () => afficherVue('groupes'));
+// groupes accorde le mot avec le nombre.
+function groupesEnMots(nombre) {
+  return nombre === 1 ? '1 groupe' : `${nombre} groupes`;
+}
+
+$('accueil').addEventListener('click', () => { etat.parcours = { session: '', cours: '' }; afficherVue('parcours'); });
+$('retour-groupes').addEventListener('click', () => afficherVue('parcours'));
+$('nouveau-retour').addEventListener('click', () => afficherVue('parcours'));
+$('reglages-retour').addEventListener('click', () => afficherVue('parcours'));
 $('ouvrir-reglages').addEventListener('click', () => afficherVue('reglages'));
 $('travail-retour').addEventListener('click', () => afficherVue('travaux'));
 $('assistant-retour').addEventListener('click', () => afficherVue('travaux'));
+$('parcours-recharger').addEventListener('click', () => chargerGroupes(true));
 
-// --------------------------------------------------------- liste des groupes
+// ------------------------------------------------ parcours de la hiérarchie
 
-async function chargerGroupes() {
+async function chargerGroupes(force) {
+  if (!etat.organisation) return;
   const donnees = await tenter(() => api('GET', '/api/classrooms'), 'Groupes');
   if (!donnees) return;
-  etat.groupes = donnees.classrooms || [];
-  dessinerGroupes();
-  await chargerAccueilOrganisations();
+  // Seuls les groupes de l'organisation choisie sont montrés : c'est elle qui
+  // cadre tout ce que l'interface propose.
+  etat.groupes = (donnees.classrooms || []).filter((groupe) =>
+    groupe.org.toLowerCase() === etat.organisation.toLowerCase());
+  etat.sessions = donnees.sessions || [];
+  dessinerParcours();
+  await montrerCandidats(etat.organisation, force);
 }
 
-function dessinerGroupes() {
-  const conteneur = $('groupes-liste');
+// nomDeSession retrouve le nom long d'une session.
+function nomDeSession(court) {
+  const trouve = etat.sessions.find((session) =>
+    session.short.toLowerCase() === court.toLowerCase());
+  return trouve ? trouve.name : court;
+}
+
+// dessinerParcours montre le niveau courant : les sessions, les cours d'une
+// session, ou les groupes d'un cours.
+function dessinerParcours() {
+  const { session, cours } = etat.parcours;
+  const fil = $('parcours-fil');
+  vider(fil);
+  fil.append(el('button', {
+    classe: 'lien', type: 'button', texte: 'Sessions',
+    onclick: () => { etat.parcours = { session: '', cours: '' }; dessinerParcours(); },
+  }));
+  if (session) {
+    fil.append(el('span', { classe: 'separateur', texte: '/' }));
+    fil.append(el('button', {
+      classe: 'lien', type: 'button', texte: nomDeSession(session),
+      onclick: () => { etat.parcours = { session, cours: '' }; dessinerParcours(); },
+    }));
+  }
+  if (cours) {
+    fil.append(el('span', { classe: 'separateur', texte: '/' }));
+    fil.append(el('span', { texte: cours }));
+  }
+
+  $('candidats-accueil').hidden = !!(session || cours);
+  const conteneur = $('parcours-liste');
   vider(conteneur);
-  if (etat.groupes.length === 0) {
+
+  if (!session) {
+    dessinerSessions(conteneur);
+  } else if (!cours) {
+    dessinerCours(conteneur, session);
+  } else {
+    dessinerGroupesDuCours(conteneur, session, cours);
+  }
+}
+
+// herites rassemble les groupes qui n'ont pas encore de session : ils suivent
+// l'ancienne nomenclature et attendent leur migration.
+function herites() {
+  return etat.groupes.filter((groupe) => !groupe.session);
+}
+
+function dessinerSessions(conteneur) {
+  $('parcours-titre').textContent = 'Sessions';
+  $('parcours-note').textContent =
+    `Organisation ${etat.organisation} · session, cours, groupe, travail`;
+
+  const parSession = new Map();
+  for (const groupe of etat.groupes) {
+    if (!groupe.session) continue;
+    const cle = groupe.session.toLowerCase();
+    if (!parSession.has(cle)) parSession.set(cle, { court: groupe.session, groupes: [] });
+    parSession.get(cle).groupes.push(groupe);
+  }
+
+  if (parSession.size === 0 && herites().length === 0) {
     conteneur.append(el('div', { classe: 'boite-vide' },
       el('p', { texte: 'Aucun groupe déclaré pour le moment.' }),
       el('p', { classe: 'note',
-        texte: 'Adoptez ci-dessous un groupe repéré dans une organisation, ' +
-          'ou déclarez-en un de toutes pièces.' })));
-    return;
+        texte: 'Adoptez ci-dessous un groupe repéré dans les dépôts, ou déclarez-en un de ' +
+          'toutes pièces.' })));
   }
+
+  const triees = [...parSession.values()].sort((a, b) => a.court.localeCompare(b.court));
+  for (const session of triees) {
+    const cours = new Set(session.groupes.map((groupe) => groupe.course.toLowerCase()));
+    conteneur.append(ligneParcours(
+      nomDeSession(session.court),
+      `${cours.size} cours · ${groupesEnMots(session.groupes.length)}`,
+      [el('span', { classe: 'jeton', texte: session.court })],
+      () => { etat.parcours = { session: session.court, cours: '' }; dessinerParcours(); }));
+  }
+
+  for (const groupe of herites()) {
+    conteneur.append(ligneParcours(groupe.name, 'ancienne nomenclature — à migrer',
+      [el('span', { classe: 'jeton non', texte: groupe.prefix + '-…' })],
+      () => ouvrirGroupe(groupe.id)));
+  }
+}
+
+function dessinerCours(conteneur, session) {
+  $('parcours-titre').textContent = nomDeSession(session);
+  $('parcours-note').textContent = `Cours de la session « ${session} »`;
+
+  const parCours = new Map();
   for (const groupe of etat.groupes) {
-    const sesTravaux = groupe.assignments || [];
-    conteneur.append(el('button', {
-      classe: 'travail-ligne groupe-ligne', type: 'button',
-      onclick: () => ouvrirGroupe(groupe.id),
-    },
-      el('span', { classe: 'travail-infos' },
-        el('span', { classe: 'titre', texte: groupe.name }),
-        el('span', { classe: 'detail',
-          texte: `${groupe.org}${groupe.prefix ? ' · ' + groupe.prefix + '-…' : ''}` })),
-      el('span', { classe: 'espace' }),
-      el('span', { classe: 'jeton', texte: `${(groupe.students || []).length} étudiant(s)` }),
-      el('span', { classe: 'jeton', texte: travaux(sesTravaux.length) }),
-      el('span', { classe: 'chevron', texte: '›' })));
+    if (!groupe.session || groupe.session.toLowerCase() !== session.toLowerCase()) continue;
+    const cle = groupe.course.toLowerCase();
+    if (!parCours.has(cle)) parCours.set(cle, { code: groupe.course, groupes: [] });
+    parCours.get(cle).groupes.push(groupe);
   }
+  const triees = [...parCours.values()].sort((a, b) => a.code.localeCompare(b.code));
+  for (const cours of triees) {
+    const etudiants = cours.groupes.reduce(
+      (total, groupe) => total + (groupe.students || []).length, 0);
+    conteneur.append(ligneParcours(cours.code,
+      `${groupesEnMots(cours.groupes.length)} · ${etudiants} étudiant(s)`, [],
+      () => {
+        etat.parcours = { session, cours: cours.code };
+        dessinerParcours();
+      }));
+  }
+}
+
+function dessinerGroupesDuCours(conteneur, session, cours) {
+  $('parcours-titre').textContent = `${cours} — ${nomDeSession(session)}`;
+  $('parcours-note').textContent = 'Groupes du cours';
+
+  const retenus = etat.groupes.filter((groupe) =>
+    groupe.session && groupe.session.toLowerCase() === session.toLowerCase() &&
+    groupe.course.toLowerCase() === cours.toLowerCase());
+  for (const groupe of retenus) {
+    const sesTravaux = groupe.assignments || [];
+    conteneur.append(ligneParcours(groupe.name,
+      `${(groupe.students || []).length} étudiant(s) · ${travaux(sesTravaux.length)}`,
+      [el('span', { classe: 'jeton', texte: groupe.group })],
+      () => ouvrirGroupe(groupe.id)));
+  }
+}
+
+// ligneParcours est une ligne cliquable de la hiérarchie.
+function ligneParcours(titre, detail, jetons, action) {
+  return el('button', { classe: 'travail-ligne', type: 'button', onclick: action },
+    el('span', { classe: 'travail-infos' },
+      el('span', { classe: 'titre', texte: titre }),
+      el('span', { classe: 'detail', texte: detail })),
+    el('span', { classe: 'espace' }),
+    jetons,
+    el('span', { classe: 'chevron', texte: '›' }));
 }
 
 async function ouvrirGroupe(id, force) {
@@ -312,14 +442,17 @@ async function ouvrirGroupe(id, force) {
   etat.groupe = groupe;
   etat.travail = null;
   etat.etudiants = [];
+  if (groupe.session) etat.parcours = { session: groupe.session, cours: groupe.course };
 
-  const herite = !groupe.course && groupe.prefix;
+  const herite = !groupe.session && groupe.prefix;
   $('groupe-titre').textContent = groupe.name;
   $('groupe-prefixe').textContent = herite
     ? groupe.prefix + '-…'
-    : `${groupe.course}.${groupe.group}.…`;
-  $('groupe-sous-titre').textContent =
-    `Organisation ${groupe.org} · ${(groupe.students || []).length} étudiant(s)`;
+    : `${groupe.session}.${groupe.course}.${groupe.group}.…`;
+  $('groupe-sous-titre').textContent = herite
+    ? `Organisation ${groupe.org} · ${(groupe.students || []).length} étudiant(s)`
+    : `${groupe.session_name || groupe.session} · ${groupe.course} · groupe ${groupe.group}` +
+      ` · ${(groupe.students || []).length} étudiant(s)`;
 
   const avis = $('groupe-avis');
   vider(avis);
@@ -350,18 +483,18 @@ async function organisations() {
   return organisationsConnues;
 }
 
-// remplirSelecteur pose les organisations du compte dans une liste déroulante,
-// et retient celle de la dernière fois.
-function remplirSelecteur(selecteur, liste) {
-  if (selecteur.options.length > 0) return selecteur.value;
+// remplirSelecteur pose les organisations du compte dans une liste déroulante.
+function remplirSelecteur(selecteur, liste, choisie) {
+  vider(selecteur);
   for (const acces of liste) {
     selecteur.append(el('option', { value: acces.login, texte: acces.label }));
   }
   selecteur.append(el('option', { value: '__saisir', texte: 'Saisir un autre nom…' }));
 
-  const memorisee = etat.reglages.org;
-  if (memorisee && liste.some((acces) => acces.login.toLowerCase() === memorisee.toLowerCase())) {
-    selecteur.value = memorisee;
+  if (choisie && liste.some((acces) => acces.login.toLowerCase() === choisie.toLowerCase())) {
+    selecteur.value = choisie;
+  } else if (choisie) {
+    selecteur.value = '__saisir';
   } else if (liste.length > 0) {
     selecteur.value = liste[0].login;
   } else {
@@ -370,52 +503,53 @@ function remplirSelecteur(selecteur, liste) {
   return selecteur.value;
 }
 
-async function chargerAccueilOrganisations() {
+// --- l'écran d'entrée : choisir une organisation
+
+async function demanderOrganisation() {
   const info = await organisations();
-  const choisie = remplirSelecteur($('accueil-org'), info.orgs || []);
-  await choisirOrgAccueil(choisie);
+  const choisie = remplirSelecteur($('org-choix'), info.orgs || [], etat.reglages.org);
+  $('org-libre-bloc').hidden = choisie !== '__saisir';
+  $('org-libre').value = etat.reglages.org || '';
+  afficherVue('organisation');
 }
 
-$('accueil-org').addEventListener('change', async () => {
-  await choisirOrgAccueil($('accueil-org').value);
-  memoriserOrganisation($('accueil-org').value);
-});
-$('accueil-org-libre').addEventListener('change', async () => {
-  const saisie = $('accueil-org-libre').value.trim();
-  if (!saisie) return;
-  await montrerCandidats(saisie);
-  memoriserOrganisation(saisie);
+$('org-choix').addEventListener('change', () => {
+  $('org-libre-bloc').hidden = $('org-choix').value !== '__saisir';
 });
 
-// memoriserOrganisation retient l'organisation regardée, pour rouvrir dessus la
-// prochaine fois. L'écriture n'a lieu que si le choix a vraiment changé.
-function memoriserOrganisation(org) {
-  if (!org || org === '__saisir' || org === etat.reglages.org) return;
-  etat.reglages.org = org;
-  api('PUT', '/api/settings', etat.reglages).catch(() => {});
-}
-$('accueil-recharger').addEventListener('click', () => {
-  const org = $('accueil-org-libre').hidden
-    ? $('accueil-org').value : $('accueil-org-libre').value.trim();
-  if (org && org !== '__saisir') montrerCandidats(org, true);
-});
+$('org-valider').addEventListener('click', async () => {
+  const saisie = $('org-choix').value === '__saisir'
+    ? $('org-libre').value.trim()
+    : $('org-choix').value;
+  if (!saisie) { message('Indiquez une organisation.', 'alerte'); return; }
 
-async function choisirOrgAccueil(valeur) {
-  const libre = valeur === '__saisir';
-  $('accueil-org-libre').hidden = !libre;
-  if (libre) {
-    $('accueil-org-libre').value = etat.reglages.org || '';
-    vider($('accueil-candidats'));
-    return;
+  const avis = $('org-avis');
+  vider(avis);
+  const details = await tenter(() => api('GET', `/api/orgs/${encode(saisie)}`), 'Organisation');
+  if (!details) return;
+  if (details.warning) {
+    avis.append(el('div', { classe: 'avis alerte', texte: details.warning }));
   }
-  await montrerCandidats(valeur);
+  await retenirOrganisation(details.login);
+  etat.parcours = { session: '', cours: '' };
+  afficherVue('parcours');
+});
+
+// retenirOrganisation fixe l'organisation de la session et la mémorise.
+async function retenirOrganisation(org) {
+  etat.organisation = org;
+  if (etat.reglages.org !== org) {
+    etat.reglages.org = org;
+    await api('PUT', '/api/settings', etat.reglages).catch(() => {});
+  }
 }
+
+// --- les groupes repérés dans les dépôts
 
 async function montrerCandidats(org, force) {
-  const avis = $('accueil-org-avis');
   const conteneur = $('accueil-candidats');
-  vider(avis);
   vider(conteneur);
+  if (!org) return;
   conteneur.append(el('div', { classe: 'boite-vide', texte: 'Lecture des dépôts…' }));
 
   const donnees = await tenter(() => api('GET',
@@ -429,8 +563,8 @@ async function montrerCandidats(org, force) {
       el('p', { texte: `Aucun groupe repéré dans « ${org} ».` }),
       el('p', { classe: 'note',
         texte: `${donnees.total} dépôt(s) lus. Soit ils appartiennent déjà à un groupe ` +
-          'déclaré, soit leurs noms ne laissent pas deviner de préfixe commun : ' +
-          '« Nouveau groupe » permet alors de le déclarer à la main.' })));
+          'déclaré, soit leurs noms ne laissent pas deviner de découpe : ' +
+          '« Nouveau groupe » permet alors de la déclarer à la main.' })));
     return;
   }
   for (const candidat of candidats) {
@@ -453,7 +587,7 @@ async function montrerCandidats(org, force) {
   }
 }
 
-// adopter déclare un groupe à partir d'un préfixe repéré : le nom est la seule
+// adopter déclare un groupe à partir d'une place repérée : le nom est la seule
 // chose à décider, le reste vient des dépôts.
 async function adopter(candidat, org) {
   const nom = el('input', {
@@ -462,7 +596,7 @@ async function adopter(candidat, org) {
   });
   const confirme = await demander(`Adopter « ${candidat.prefix || org} »`, el('div', {},
     el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Nom du groupe' }), nom),
+      el('span', { classe: 'etiquette', texte: 'Nom affiché du groupe' }), nom),
     el('p', { classe: 'note',
       texte: candidat.legacy
         ? `${travaux(candidat.assignments.length)} et ${candidat.students.length} ` +
@@ -474,15 +608,15 @@ async function adopter(candidat, org) {
   if (!confirme) return;
 
   // Un candidat hérité garde son préfixe en attendant sa migration ; un
-  // candidat de la nomenclature courante s'adopte par son cours et son groupe.
-  // Les noms lus dans les dépôts ne sont pas des comptes GitHub : seuls ceux
-  // d'un groupe hérité peuvent servir de liste d'étudiants.
+  // candidat de la nomenclature courante s'adopte par sa place.
   const cree = await tenter(() => api('POST', '/api/classrooms', {
     org,
+    session: candidat.legacy ? '' : candidat.session,
     course: candidat.legacy ? '' : candidat.course,
     group: candidat.legacy ? '' : candidat.group,
     prefix: candidat.legacy ? candidat.prefix : '',
     name: nom.value.trim() || candidat.prefix || org,
+    session_name: '',
     students: candidat.legacy
       ? candidat.students.map((compte) => ({ username: compte, full_name: '' }))
       : [],
@@ -496,9 +630,12 @@ async function adopter(candidat, org) {
 
 // --------------------------------------------------- déclaration d'un groupe
 
-$('groupes-nouveau').addEventListener('click', async () => {
-  etat.nouveau = { org: '', etudiants: [], rejets: [] };
-  $('nouveau-cours').value = '';
+$('groupes-nouveau').addEventListener('click', () => {
+  etat.nouveau = { etudiants: [], rejets: [] };
+  $('nouveau-session').value = etat.parcours.session || '';
+  $('nouveau-session-nom').value = etat.parcours.session
+    ? nomDeSession(etat.parcours.session) : '';
+  $('nouveau-cours').value = etat.parcours.cours || '';
   $('nouveau-section').value = '';
   $('nouveau-nom').value = '';
   $('nouveau-chemin').value = etat.reglages.roster_path || '';
@@ -506,97 +643,36 @@ $('groupes-nouveau').addEventListener('click', async () => {
   $('nouveau-resume').textContent = '';
   vider($('nouveau-rejets'));
   $('nouveau-table').hidden = true;
+
+  // Les sessions déjà connues se proposent à la saisie.
+  const suggestions = $('suggestions-sessions');
+  vider(suggestions);
+  for (const session of etat.sessions) {
+    suggestions.append(el('option', { value: session.short, texte: session.name }));
+  }
   majApercuPrefixe();
   afficherVue('nouveau-groupe');
-  await chargerOrganisations();
+  $('nouveau-session').focus();
 });
 
-async function chargerOrganisations() {
-  const info = await organisations();
-  const choisie = remplirSelecteur($('nouveau-org'), info.orgs || []);
-  await choisirOrganisation(choisie);
-}
-
-$('nouveau-org').addEventListener('change', () => choisirOrganisation($('nouveau-org').value));
-$('nouveau-org-libre').addEventListener('change', () => {
-  const saisie = $('nouveau-org-libre').value.trim();
-  if (saisie) retenirOrganisation(saisie);
-});
-
-async function choisirOrganisation(valeur) {
-  const libre = valeur === '__saisir';
-  $('nouveau-org-libre').hidden = !libre;
-  if (libre) {
-    $('nouveau-org-libre').value = etat.nouveau.org || '';
-    $('nouveau-org-libre').focus();
-    return;
-  }
-  await retenirOrganisation(valeur);
-}
-
-async function retenirOrganisation(org) {
-  const avis = $('nouveau-org-avis');
-  vider(avis);
-  const details = await tenter(() => api('GET', `/api/orgs/${encode(org)}`), 'Organisation');
-  if (!details) return;
-  etat.nouveau.org = details.login;
-  if (details.warning) {
-    avis.append(el('div', { classe: 'avis alerte', texte: details.warning }));
-  }
-  await chargerCandidats(details.login);
-}
-
-async function chargerCandidats(org) {
-  const bloc = $('candidats-bloc');
-  const conteneur = $('candidats-liste');
-  vider(conteneur);
-  bloc.hidden = true;
-
-  const donnees = await tenter(() =>
-    api('GET', `/api/orgs/${encode(org)}/candidates`), 'Inventaire');
-  if (!donnees || !donnees.candidates || donnees.candidates.length === 0) return;
-
-  bloc.hidden = false;
-  for (const candidat of donnees.candidates) {
-    const libelle = candidat.prefix || 'racine de l\'organisation';
-    conteneur.append(el('button', {
-      classe: 'travail-ligne', type: 'button',
-      onclick: () => adopterCandidat(candidat),
-    },
-      el('span', { classe: 'travail-infos' },
-        el('span', { classe: 'titre', texte: libelle }),
-        el('span', { classe: 'detail',
-          texte: candidat.assignments.join(', ') || 'aucun travail' })),
-      el('span', { classe: 'espace' }),
-      el('span', { classe: 'jeton', texte: `${candidat.students.length} compte(s)` }),
-      el('span', { classe: 'jeton', texte: `${candidat.repos} dépôt(s)` })));
-  }
-}
-
-// adopterCandidat reprend un préfixe déjà en place et les comptes qu'on y trouve.
-function adopterCandidat(candidat) {
-  $('nouveau-cours').value = candidat.course || '';
-  $('nouveau-section').value = candidat.group || '';
-  if (!$('nouveau-nom').value.trim()) {
-    $('nouveau-nom').value = candidat.prefix || etat.nouveau.org;
-  }
-  majApercuPrefixe();
-  appliquerListeNouveau({
-    people: candidat.students.map((compte) => ({ username: compte, full_name: '' })),
-    issues: [],
-  });
-  message(`Préfixe « ${candidat.prefix || 'racine' } » repris, ` +
-    `${candidat.students.length} compte(s) trouvé(s) dans les dépôts existants.`);
-}
-
-for (const id of ['nouveau-cours', 'nouveau-section']) {
+for (const id of ['nouveau-session', 'nouveau-cours', 'nouveau-section']) {
   $(id).addEventListener('input', majApercuPrefixe);
 }
 
+// Choisir une session déjà connue reprend son nom long.
+$('nouveau-session').addEventListener('change', () => {
+  const court = $('nouveau-session').value.trim();
+  if (!court || $('nouveau-session-nom').value.trim()) return;
+  const connue = etat.sessions.find((session) =>
+    session.short.toLowerCase() === court.toLowerCase());
+  if (connue) $('nouveau-session-nom').value = connue.name;
+});
+
 function majApercuPrefixe() {
+  const session = $('nouveau-session').value.trim() || 'session';
   const cours = $('nouveau-cours').value.trim() || 'cours';
   const section = $('nouveau-section').value.trim() || 'groupe';
-  $('nouveau-apercu').textContent = `${cours}.${section}.travail.prenom-nom`;
+  $('nouveau-apercu').textContent = `${session}.${cours}.${section}.travail.prenom-nom`;
 }
 
 $('nouveau-lire').addEventListener('click', async () => {
@@ -660,15 +736,12 @@ function dessinerRejets(conteneur, rejets) {
 }
 
 $('nouveau-creer').addEventListener('click', async () => {
-  const org = $('nouveau-org-libre').hidden
-    ? $('nouveau-org').value
-    : $('nouveau-org-libre').value.trim();
-  if (!org || org === '__saisir') { message('Choisissez une organisation.', 'alerte'); return; }
-
   const cree = await tenter(() => api('POST', '/api/classrooms', {
-    org,
+    org: etat.organisation,
+    session: $('nouveau-session').value.trim(),
     course: $('nouveau-cours').value.trim(),
     group: $('nouveau-section').value.trim(),
+    session_name: $('nouveau-session-nom').value.trim(),
     prefix: '',
     name: $('nouveau-nom').value.trim(),
     students: etat.nouveau.etudiants,
@@ -1103,12 +1176,12 @@ $('travail-nom').addEventListener('input', majApercuDuNom);
 $('travail-nom').addEventListener('change', planifierApercu);
 
 // Le nom des dépôts se lit avant qu'ils existent. Il n'est plus réglable : les
-// quatre niveaux sont la nomenclature elle-même.
+// cinq niveaux sont la nomenclature elle-même.
 function majApercuDuNom() {
   const groupe = etat.groupe || {};
-  const portee = groupe.course
-    ? `${groupe.course}.${groupe.group}`
-    : (groupe.prefix || 'cours.groupe');
+  const portee = groupe.session
+    ? `${groupe.session}.${groupe.course}.${groupe.group}`
+    : (groupe.prefix || 'session.cours.groupe');
   const travail = $('travail-nom').value.trim() || 'travail';
   $('apercu-nom').textContent = `${portee}.${travail}.prenom-nom`;
 }
@@ -1396,7 +1469,6 @@ $('etudiants-importer').addEventListener('click', async () => {
 // -------------------------------------------------------- réglages du groupe
 
 const champsGroupe = {
-  name_pattern: 'gr-pattern',
   description_pattern: 'gr-description',
   template: 'gr-template',
   visibility: 'gr-visibilite',
@@ -1405,15 +1477,18 @@ const champsGroupe = {
 
 function ecrireReglagesGroupe() {
   const groupe = etat.groupe;
-  const herite = !groupe.course && groupe.prefix;
+  const herite = !groupe.session && groupe.prefix;
   $('gr-nom').value = groupe.name || '';
   $('gr-org').value = groupe.org || '';
+  $('gr-session').value = groupe.session || '';
+  $('gr-session-nom').value = groupe.session_name || '';
   $('gr-cours').value = groupe.course || '';
   $('gr-section').value = groupe.group || '';
   // Un groupe hérité ne change pas de place à la main : renommer ses dépôts
   // fait partie de la migration.
-  $('gr-cours').disabled = !!herite;
-  $('gr-section').disabled = !!herite;
+  for (const id of ['gr-session', 'gr-session-nom', 'gr-cours', 'gr-section']) {
+    $(id).disabled = !!herite;
+  }
   preparerMigration(herite ? groupe.prefix : '');
   const defauts = groupe.defaults || {};
   for (const [cle, id] of Object.entries(champsGroupe)) {
@@ -1432,6 +1507,8 @@ $('gr-enregistrer').addEventListener('click', async () => {
   const modifie = await tenter(() => api('PUT', `/api/classrooms/${encode(etat.groupe.id)}`, {
     name: $('gr-nom').value.trim(),
     org: $('gr-org').value.trim(),
+    session: $('gr-session').value.trim(),
+    session_name: $('gr-session-nom').value.trim(),
     course: $('gr-cours').value.trim(),
     group: $('gr-section').value.trim(),
     prefix: '',
@@ -1455,17 +1532,17 @@ function preparerMigration(prefixe) {
   vider($('mig-avis'));
   if (!prefixe) return;
 
-  // « a26-5n6 » suit l'habitude « session-cours » : le dernier segment fait le
-  // cours, ce qui précède fait le groupe. C'est une proposition, pas une règle.
+  // « a26-5n6 » suit l'habitude « session-cours » : le premier segment fait la
+  // session, le dernier le cours. C'est une proposition, pas une règle.
   const segments = prefixe.split('-');
+  $('mig-session').value = segments.length > 1 ? segments[0] : '';
   $('mig-cours').value = segments.length > 1 ? segments[segments.length - 1] : prefixe;
-  $('mig-section').value = segments.length > 1
-    ? segments.slice(0, -1).join('-')
-    : '';
+  $('mig-section').value = '01';
 }
 
 function corpsMigration() {
   return {
+    session: $('mig-session').value.trim(),
     course: $('mig-cours').value.trim(),
     group: $('mig-section').value.trim(),
     skip_blocked: $('mig-ignorer').checked,
@@ -1499,7 +1576,7 @@ $('mig-apercu').addEventListener('click', async () => {
   $('mig-lancer').disabled = apercu.ready === 0;
 });
 
-for (const id of ['mig-cours', 'mig-section', 'mig-ignorer']) {
+for (const id of ['mig-session', 'mig-cours', 'mig-section', 'mig-ignorer']) {
   $(id).addEventListener('change', () => {
     $('mig-table').hidden = true;
     $('mig-resume').textContent = '';
@@ -1511,7 +1588,7 @@ $('mig-lancer').addEventListener('click', async () => {
   const corps = corpsMigration();
   const confirme = await demander('Renommer les dépôts', el('div', {},
     el('p', { texte: `Les dépôts de « ${etat.groupe.name} » seront renommés en ` +
-      `« ${corps.course}.${corps.group}.travail.étudiant ».` }),
+      `« ${corps.session}.${corps.course}.${corps.group}.travail.étudiant ».` }),
     el('p', { classe: 'note',
       texte: 'GitHub garde une redirection depuis chaque ancien nom : les clones et les liens ' +
         'déjà distribués continuent de fonctionner.' })), 'Renommer');
@@ -1552,12 +1629,44 @@ $('gr-supprimer').addEventListener('click', async () => {
 // ------------------------------------------------------- réglages généraux
 
 async function rafraichirEmplacements() {
+  const info = await organisations();
+  remplirSelecteur($('reglages-org'), info.orgs || [], etat.organisation);
+  $('reglages-org-libre-bloc').hidden = $('reglages-org').value !== '__saisir';
+  $('reglages-org-libre').value = etat.organisation || '';
+
   const contexte = await api('GET', '/api/context').catch(() => null);
   if (!contexte) return;
   etat.contexte = contexte;
   dessinerPortees(contexte.scopes);
   dessinerChemins(contexte.paths);
   $('reglage-delay').value = etat.reglages.delay_seconds ?? 1;
+}
+
+$('reglages-org').addEventListener('change', () => {
+  const choisie = $('reglages-org').value;
+  $('reglages-org-libre-bloc').hidden = choisie !== '__saisir';
+  if (choisie !== '__saisir') changerOrganisation(choisie);
+});
+
+$('reglages-org-libre').addEventListener('change', () => {
+  const saisie = $('reglages-org-libre').value.trim();
+  if (saisie) changerOrganisation(saisie);
+});
+
+// changerOrganisation remet la navigation à zéro : les groupes déclarés
+// ailleurs restent en place, mais ne concernent plus cet écran.
+async function changerOrganisation(org) {
+  const avis = $('reglages-org-avis');
+  vider(avis);
+  const details = await tenter(() => api('GET', `/api/orgs/${encode(org)}`), 'Organisation');
+  if (!details) return;
+  if (details.warning) {
+    avis.append(el('div', { classe: 'avis alerte', texte: details.warning }));
+  }
+  await retenirOrganisation(details.login);
+  etat.parcours = { session: '', cours: '' };
+  etat.groupe = null;
+  message(`Organisation : ${details.name}.`);
 }
 
 $('reglages-enregistrer').addEventListener('click', async () => {
@@ -1660,8 +1769,15 @@ async function demarrer() {
     $('reglages-etat').textContent = 'Mémorisation désactivée (--no-save-config)';
   }
 
+  // Rien n'est accessible tant qu'une organisation n'a pas été choisie : si
+  // aucune n'a été mémorisée, c'est la première chose demandée.
+  if (!etat.reglages.org) {
+    await demanderOrganisation();
+    return;
+  }
+  etat.organisation = etat.reglages.org;
   // Afficher la vue suffit à la remplir : elle recharge ce qu'elle montre.
-  afficherVue('groupes');
+  afficherVue('parcours');
 }
 
 demarrer();

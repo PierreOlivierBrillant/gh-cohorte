@@ -36,35 +36,56 @@
 
 <main>
 
-  <!-- --------------------------------------------------- accueil : les groupes -->
-  <section id="vue-groupes" class="vue">
+  <!-- ------------------------------------------------- choix de l'organisation -->
+  <section id="vue-organisation" class="vue" hidden>
+    <div class="boite accueil-organisation">
+      <div class="boite-entete"><strong>Choisissez une organisation GitHub</strong></div>
+      <div class="boite-corps">
+        <p class="note">Tout ce que fait l'outil — sessions, cours, groupes, travaux — se passe
+          dans une organisation. Choisissez-la pour commencer ; elle sera mémorisée, et se
+          changera ensuite depuis les réglages.</p>
+        <label class="champ-bloc">
+          <span class="etiquette">Organisation</span>
+          <select id="org-choix" class="champ"></select>
+        </label>
+        <label class="champ-bloc" id="org-libre-bloc" hidden>
+          <span class="etiquette">Nom de l'organisation</span>
+          <input type="text" id="org-libre" class="champ" placeholder="acme">
+        </label>
+        <div id="org-avis"></div>
+      </div>
+      <div class="boite-pied">
+        <span class="espace"></span>
+        <button type="button" id="org-valider" class="bouton vert">Continuer</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------- parcours : session, cours, groupe -->
+  <section id="vue-parcours" class="vue" hidden>
+    <nav class="fil" id="parcours-fil"></nav>
     <div class="barre-outils">
       <div>
-        <h2>Vos groupes</h2>
-        <p class="note">Un groupe rassemble des étudiants et les travaux qu'on leur distribue.</p>
+        <h2 id="parcours-titre">Sessions</h2>
+        <p class="note" id="parcours-note"></p>
       </div>
       <div class="actions">
+        <button type="button" id="parcours-recharger" class="bouton">Recharger</button>
         <button type="button" id="groupes-nouveau" class="bouton vert">Nouveau groupe</button>
       </div>
     </div>
-    <div class="boite" id="groupes-liste"></div>
+    <div class="boite" id="parcours-liste"></div>
 
-    <div class="barre-outils">
-      <div>
-        <h2>Groupes repérés dans l'organisation</h2>
-        <p class="note">Déduits des dépôts déjà présents. En adopter un reprend son préfixe et
-          les comptes qu'on y trouve — rien n'est renommé.</p>
+    <div id="candidats-accueil" hidden>
+      <div class="barre-outils">
+        <div>
+          <h2>Groupes repérés dans l'organisation</h2>
+          <p class="note">Déduits des dépôts déjà présents. En adopter un reprend sa place et
+            les comptes qu'on y trouve — rien n'est renommé.</p>
+        </div>
       </div>
-      <div class="actions">
-        <label class="etiquette" for="accueil-org">Organisation</label>
-        <select id="accueil-org" class="champ"></select>
-        <input type="text" id="accueil-org-libre" class="champ"
-          placeholder="nom de l'organisation" hidden>
-        <button type="button" id="accueil-recharger" class="bouton">Recharger</button>
-      </div>
+      <div class="boite" id="accueil-candidats"></div>
     </div>
-    <div id="accueil-org-avis"></div>
-    <div class="boite" id="accueil-candidats"></div>
   </section>
 
   <!-- --------------------------------------------- déclaration d'un groupe -->
@@ -73,28 +94,22 @@
       <span class="separateur">/</span><span id="fil-nouveau">Nouveau groupe</span></nav>
 
     <div class="boite">
-      <div class="boite-entete"><strong>Où sont les dépôts ?</strong></div>
+      <div class="boite-entete"><strong>Sa place dans la hiérarchie</strong></div>
       <div class="boite-corps">
-        <label class="champ-bloc etroit-champ">
-          <span class="etiquette">Organisation GitHub</span>
-          <select id="nouveau-org" class="champ"></select>
-        </label>
-        <input type="text" id="nouveau-org-libre" class="champ etroit-champ"
-          placeholder="nom de l'organisation" hidden>
-        <div id="nouveau-org-avis"></div>
-
-        <div id="candidats-bloc" hidden>
-          <h3>Groupes repérés dans l'organisation</h3>
-          <p class="note">Déduits des dépôts déjà présents. En choisir un reprend son préfixe
-            et les comptes qu'on y trouve — rien n'est renommé.</p>
-          <div class="boite" id="candidats-liste"></div>
+        <div class="rangee">
+          <label class="champ-bloc">
+            <span class="etiquette">Session</span>
+            <input type="text" id="nouveau-session" class="champ" placeholder="a26"
+              list="suggestions-sessions">
+            <datalist id="suggestions-sessions"></datalist>
+          </label>
+          <label class="champ-bloc">
+            <span class="etiquette">Nom de la session</span>
+            <input type="text" id="nouveau-session-nom" class="champ" placeholder="Automne 2026">
+            <span class="aide">Pour l'affichage seulement : les dépôts ne portent que le nom
+              court.</span>
+          </label>
         </div>
-      </div>
-    </div>
-
-    <div class="boite">
-      <div class="boite-entete"><strong>Le groupe</strong></div>
-      <div class="boite-corps">
         <div class="rangee">
           <label class="champ-bloc">
             <span class="etiquette">Cours</span>
@@ -102,17 +117,17 @@
           </label>
           <label class="champ-bloc">
             <span class="etiquette">Groupe</span>
-            <input type="text" id="nouveau-section" class="champ" placeholder="a26-01">
+            <input type="text" id="nouveau-section" class="champ" placeholder="01">
             <span class="aide">Un cours peut avoir plusieurs groupes.</span>
           </label>
         </div>
         <p class="aide">Les dépôts du groupe s'appelleront
-          <code id="nouveau-apercu">5n6.a26-01.travail.prenom-nom</code>. Le point sépare les
-          quatre niveaux et ne peut apparaître nulle part ailleurs : tout ce qui est saisi en est
+          <code id="nouveau-apercu">a26.5n6.01.travail.prenom-nom</code>. Le point sépare les
+          cinq niveaux et ne peut apparaître nulle part ailleurs : tout ce qui est saisi en est
           nettoyé.</p>
         <label class="champ-bloc">
-          <span class="etiquette">Nom affiché</span>
-          <input type="text" id="nouveau-nom" class="champ" placeholder="5N6 — Automne 2026, groupe 01">
+          <span class="etiquette">Nom affiché du groupe</span>
+          <input type="text" id="nouveau-nom" class="champ" placeholder="5N6 — groupe 01">
         </label>
       </div>
     </div>
@@ -388,6 +403,14 @@
             <input type="text" id="gr-org" class="champ">
           </label>
           <label class="champ-bloc">
+            <span class="etiquette">Session</span>
+            <input type="text" id="gr-session" class="champ">
+          </label>
+          <label class="champ-bloc">
+            <span class="etiquette">Nom de la session</span>
+            <input type="text" id="gr-session-nom" class="champ" placeholder="Automne 2026">
+          </label>
+          <label class="champ-bloc">
             <span class="etiquette">Cours</span>
             <input type="text" id="gr-cours" class="champ">
           </label>
@@ -402,7 +425,7 @@
     </div>
 
     <div class="boite" id="migration-boite" hidden>
-      <div class="boite-entete"><strong>Migrer vers la nomenclature à quatre niveaux</strong></div>
+      <div class="boite-entete"><strong>Migrer vers la nomenclature courante</strong></div>
       <div class="boite-corps">
         <p class="note">Les dépôts de ce groupe sont nommés à l'ancienne, tout en tirets. Les
           migrer les renomme en <code>cours.groupe.travail.étudiant</code>. GitHub garde une
@@ -410,12 +433,16 @@
           de fonctionner.</p>
         <div class="rangee">
           <label class="champ-bloc">
+            <span class="etiquette">Session</span>
+            <input type="text" id="mig-session" class="champ" placeholder="a26">
+          </label>
+          <label class="champ-bloc">
             <span class="etiquette">Cours</span>
             <input type="text" id="mig-cours" class="champ" placeholder="5n6">
           </label>
           <label class="champ-bloc">
             <span class="etiquette">Groupe</span>
-            <input type="text" id="mig-section" class="champ" placeholder="a26-01">
+            <input type="text" id="mig-section" class="champ" placeholder="01">
           </label>
         </div>
         <div class="actions">
@@ -440,16 +467,11 @@
     <div class="boite">
       <div class="boite-entete"><strong>Réglages par défaut des travaux</strong></div>
       <div class="boite-corps">
-        <div class="rangee">
-          <label class="champ-bloc">
-            <span class="etiquette">Gabarit de nom</span>
-            <input type="text" id="gr-pattern" class="champ">
-          </label>
-          <label class="champ-bloc">
-            <span class="etiquette">Gabarit de description</span>
-            <input type="text" id="gr-description" class="champ">
-          </label>
-        </div>
+        <label class="champ-bloc">
+          <span class="etiquette">Gabarit de description</span>
+          <input type="text" id="gr-description" class="champ">
+          <span class="aide">Le nom des dépôts, lui, suit la nomenclature et ne se règle pas.</span>
+        </label>
         <div class="rangee">
           <label class="champ-bloc">
             <span class="etiquette">Dépôt modèle</span>
@@ -487,6 +509,23 @@
       <div>
         <h2>Réglages</h2>
         <p class="note">Ce que l'outil retient d'une session à l'autre, et où il l'écrit.</p>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>Organisation</strong></div>
+      <div class="boite-corps">
+        <label class="champ-bloc etroit-champ">
+          <span class="etiquette">Organisation GitHub</span>
+          <select id="reglages-org" class="champ"></select>
+        </label>
+        <label class="champ-bloc etroit-champ" id="reglages-org-libre-bloc" hidden>
+          <span class="etiquette">Nom de l'organisation</span>
+          <input type="text" id="reglages-org-libre" class="champ">
+        </label>
+        <p class="note">En changer remet la navigation à zéro : les groupes déclarés dans une
+          autre organisation restent en place, mais ne s'affichent plus ici.</p>
+        <div id="reglages-org-avis"></div>
       </div>
     </div>
 

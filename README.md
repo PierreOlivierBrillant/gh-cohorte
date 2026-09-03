@@ -114,7 +114,7 @@ continue d'être lu.
 ## Nommage des dépôts
 
 Cette section décrit l'assistant du **terminal**, qui compose encore les noms
-par gabarit. L'interface web suit la nomenclature à quatre niveaux décrite plus
+par gabarit. L'interface web suit la nomenclature à cinq niveaux décrite plus
 bas, qui n'est pas réglable.
 
 Gabarit par défaut : `{assignment}-{username}`.
@@ -307,12 +307,24 @@ Interface web
   Ctrl-C pour fermer, ou « Quitter » dans le navigateur.
 ```
 
-L'interface reprend le modèle de GitHub Classroom : des **groupes**, chacun
-avec ses **étudiants**, à qui l'on **distribue des travaux**.
+**Tout commence par le choix d'une organisation.** Au premier lancement, c'est
+la seule chose que l'interface propose : rien d'autre n'est accessible tant
+qu'elle n'est pas faite. Le choix est mémorisé, et se change ensuite depuis les
+réglages.
+
+Vient ensuite une hiérarchie, parcourue de haut en bas :
+
+```
+session  →  cours  →  groupe  →  travail
+a26         5n6        01        tp1
+```
+
+L'interface reprend le modèle de GitHub Classroom : un **groupe** rassemble des
+**étudiants**, à qui l'on **distribue des travaux**.
 
 | GitHub Classroom | Ici |
 | --- | --- |
-| Classroom | un **groupe** : un cours, une section, des étudiants |
+| Classroom | un **groupe** : une session, un cours, une section, des étudiants |
 | Roster | la liste des étudiants du groupe |
 | Assignment | un **travail** distribué au groupe |
 | « a accepté le devoir » | a un dépôt pour ce travail |
@@ -324,12 +336,17 @@ correction automatique, pas de travail en équipe.
 
 ### La nomenclature des dépôts
 
-Un dépôt porte **quatre niveaux, séparés par un point** :
+Un dépôt porte **cinq niveaux, séparés par un point** :
 
 ```
-cours . groupe . travail . étudiant
-5n6.a26-01.tp1.emilie-cote
+session . cours . groupe . travail . étudiant
+a26.5n6.01.tp1.emilie-cote
 ```
+
+Une session a un **nom court**, celui qui entre dans les dépôts (`a26`), et un
+**nom long** pour l'affichage (`Automne 2026`). Le nom long est partagé par tous
+les groupes de la session et vit dans le fichier local : le renommer ne touche
+aucun dépôt.
 
 Le point est **réservé** à cette découpe, et rien d'autre ne peut en produire :
 la slugification remplace tout caractère non alphanumérique par un tiret, si
@@ -337,7 +354,7 @@ bien qu'un nom de cours, de travail ou d'étudiant venu d'un CSV en est nettoyé
 sans qu'on ait à s'en occuper — « J.-P. Tremblay » devient `j-p-tremblay`. Un
 compte GitHub, lui, n'en contient jamais.
 
-Un nom se relit donc **sans rien deviner** : quatre parties, pas une de plus.
+Un nom se relit donc **sans rien deviner** : cinq parties, pas une de plus.
 C'est ce qui distingue cette nomenclature de la précédente, tout en tirets :
 `a26-5n6-tp1-emilie-cote` ne disait pas où finissait le travail et où commençait
 la personne.
@@ -349,8 +366,10 @@ avant toute écriture, en nommant les deux personnes en cause. Le lien entre un
 étudiant et son compte GitHub vit désormais dans la liste du groupe, et sur le
 dépôt lui-même sous forme d'invitation — plus dans son nom.
 
-Un cours peut avoir **plusieurs groupes** : `5n6.a26-01` et `5n6.a26-02` sont
-deux groupes du même cours, chacun avec sa liste et ses travaux.
+Un cours peut avoir **plusieurs groupes** : `a26.5n6.01` et `a26.5n6.02` sont
+deux groupes du même cours, chacun avec sa liste et ses travaux. Et le même
+cours revient d'une session à l'autre : `a26.5n6.01` et `h27.5n6.01` ne se
+mélangent pas.
 
 ### Comment un groupe tient sans serveur
 
@@ -369,14 +388,18 @@ vos groupes déclarés et, en dessous, les **groupes repérés dans l'organisati
 choisie**.
 
 ```
-Vos groupes                                              [Nouveau groupe]
-  (aucun pour le moment)
+Sessions                                       [Recharger] [Nouveau groupe]
+  Automne 2026        2 cours · 3 groupes                          a26  ›
+  Hiver 2027          1 cours · 2 groupes                          h27  ›
 
-Groupes repérés dans l'organisation      Organisation [acme ▾]  [Recharger]
-  5n6.a26-02   tp1                              22 étudiant(s)  22 dépôts  Adopter
+Groupes repérés dans l'organisation
+  a26.4w6.02   tp1                              22 étudiant(s)  22 dépôts  Adopter
   a26-5n6      travailsession, tp1  ancienne    24 compte(s)    48 dépôts  Adopter
   a26-4w6      tp1                  ancienne    22 compte(s)    22 dépôts  Adopter
 ```
+
+Cliquer une session donne ses cours, un cours donne ses groupes, un groupe donne
+ses travaux. Un fil d'Ariane remonte à chaque niveau.
 
 Les préfixes de l'ancienne nomenclature sont signalés comme tels. Un groupe
 adopté ainsi **reste lisible** — ses dépôts, ses travaux, ses accès s'affichent
@@ -385,14 +408,14 @@ adopté ainsi **reste lisible** — ses dépôts, ses travaux, ses accès s'affi
 ### Migrer un groupe existant
 
 « Réglages du groupe » d'un groupe hérité propose de **renommer ses dépôts**.
-On y indique le cours et le groupe ; l'outil propose une découpe du préfixe
-(`a26-5n6` → cours `5n6`, groupe `a26`, à corriger au besoin) et montre le
-renommage avant d'écrire quoi que ce soit :
+On y indique la session, le cours et le groupe ; l'outil propose une découpe du
+préfixe (`a26-5n6` → session `a26`, cours `5n6`, à corriger au besoin) et montre
+le renommage avant d'écrire quoi que ce soit :
 
 ```
 Dépôt actuel                          Nouveau nom
-a26-5n6-travailsession-jlpicard       5n6.a26-01.travailsession.jean-luc-picard
-a26-5n6-travailsession-emilie-cote    5n6.a26-01.travailsession.emilie-cote
+a26-5n6-travailsession-jlpicard       a26.5n6.01.travailsession.jean-luc-picard
+a26-5n6-travailsession-emilie-cote    a26.5n6.01.travailsession.emilie-cote
 a26-5n6-tp1-visiteur                  compte « visiteur » absent de la liste du groupe
 ```
 
@@ -406,12 +429,9 @@ retrouver les noms. On peut aussi accepter de **les laisser en place** : ils ne
 sont pas touchés, et le groupe ne bascule pas tant qu'il en reste, pour
 continuer de les voir.
 
-Le sélecteur d'organisation est à l'accueil, et non enfoui dans un formulaire :
-on choisit d'abord où regarder, la liste suit. L'organisation retenue est
-mémorisée, et la session suivante s'ouvre dessus.
-
 Pour les cas que la détection ne devine pas, **Nouveau groupe** déclare un
-groupe à la main : organisation, cours, groupe, liste d'étudiants.
+groupe à la main : session, cours, groupe, liste d'étudiants. Le nom du dépôt
+s'affiche au fil de la frappe.
 
 ### Travaux
 
@@ -455,8 +475,9 @@ retrouvés, ils sont retenus), et remplacer la liste.
 
 ### Réglages du groupe
 
-Nom, organisation, préfixe, et les réglages par défaut de ses travaux. Changer
-le préfixe ne renomme aucun dépôt : il change ce que le groupe regarde.
+Nom affiché, session — nom court et nom long —, cours, groupe, et les réglages
+par défaut de ses travaux. Les changer ne renomme aucun dépôt : ils changent ce
+que le groupe regarde.
 
 ---
 
@@ -651,7 +672,7 @@ tranché, et pourquoi.
   d'écritures que personne n'a demandées ; elle reste ouverte.
 - **Un séparateur réservé rend les noms de dépôts relisibles.** GitHub
   n'autorise que `.`, `-` et `_` en plus des lettres et des chiffres ; le tiret
-  servant déjà à l'intérieur des noms, le **point** sépare les quatre niveaux.
+  servant déjà à l'intérieur des noms, le **point** sépare les cinq niveaux.
   Il est impossible à saisir sans effort particulier : la slugification remplace
   déjà tout caractère non alphanumérique par un tiret, si bien qu'un CSV ponctué
   est nettoyé et qu'un compte GitHub n'en contient jamais. Un nom se découpe donc

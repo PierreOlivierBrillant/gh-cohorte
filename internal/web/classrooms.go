@@ -19,8 +19,20 @@ import (
 // classroomPayload est un groupe accompagné de ce que les dépôts en disent.
 type classroomPayload struct {
 	classroom.Classroom
+	// SessionName est le nom long de la session : « Automne 2026 ». Il ne sert
+	// qu'à l'affichage, et vit dans le magasin plutôt que dans chaque groupe.
+	SessionName string                 `json:"session_name,omitempty"`
 	Assignments []classroom.Assignment `json:"assignments"`
 	Source      string                 `json:"source,omitempty"`
+}
+
+// fiche habille un groupe de son nom de session.
+func (s *Server) fiche(cours classroom.Classroom) classroomPayload {
+	return classroomPayload{
+		Classroom:   cours,
+		SessionName: s.classrooms.SessionName(cours.Session),
+		Assignments: []classroom.Assignment{},
+	}
 }
 
 // handleClassrooms liste les groupes déclarés, avec le nombre de leurs travaux
@@ -29,22 +41,28 @@ func (s *Server) handleClassrooms(writer http.ResponseWriter, _ *http.Request) {
 	declares := s.classrooms.List()
 	liste := make([]classroomPayload, 0, len(declares))
 	for _, cours := range declares {
-		fiche := classroomPayload{Classroom: cours, Assignments: []classroom.Assignment{}}
+		fiche := s.fiche(cours)
 		if repos, source, err := s.repos(cours.Org, false); err == nil {
 			fiche.Assignments = cours.Assignments(repos)
 			fiche.Source = source
 		}
 		liste = append(liste, fiche)
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{"classrooms": liste})
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"classrooms": liste, "sessions": s.classrooms.Sessions(),
+	})
 }
 
 // classroomInput est ce que l'interface envoie pour déclarer ou modifier un groupe.
 type classroomInput struct {
-	Name   string `json:"name"`
-	Org    string `json:"org"`
-	Course string `json:"course"`
-	Group  string `json:"group"`
+	Name    string `json:"name"`
+	Org     string `json:"org"`
+	Session string `json:"session"`
+	Course  string `json:"course"`
+	Group   string `json:"group"`
+	// SessionName est le nom long de la session, retenu pour toutes celles qui
+	// portent le même nom court.
+	SessionName string `json:"session_name"`
 	// Prefix n'est renseigné que pour adopter un groupe de l'ancienne
 	// nomenclature, en attendant sa migration.
 	Prefix     string             `json:"prefix"`
@@ -62,7 +80,7 @@ func (s *Server) handleCreateClassroom(writer http.ResponseWriter, request *http
 		return
 	}
 	cree, err := s.classrooms.Add(classroom.Classroom{
-		Name: body.Name, Org: body.Org,
+		Name: body.Name, Org: body.Org, Session: body.Session,
 		Course: body.Course, Group: body.Group, LegacyPrefix: body.Prefix,
 		Students: body.Students, RosterPath: body.RosterPath,
 		Defaults: s.defaultsOr(body.Defaults),
@@ -71,9 +89,13 @@ func (s *Server) handleCreateClassroom(writer http.ResponseWriter, request *http
 		fail(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusCreated, classroomPayload{
-		Classroom: cree, Assignments: []classroom.Assignment{},
-	})
+	if strings.TrimSpace(body.SessionName) != "" && cree.Session != "" {
+		if err := s.classrooms.SetSessionName(cree.Session, body.SessionName); err != nil {
+			fail(writer, err)
+			return
+		}
+	}
+	writeJSON(writer, http.StatusCreated, s.fiche(cree))
 }
 
 // defaultsOr complète des réglages absents par ceux de la session.
@@ -96,9 +118,10 @@ func (s *Server) handleClassroom(writer http.ResponseWriter, request *http.Reque
 		fail(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, classroomPayload{
-		Classroom: cours, Assignments: cours.Assignments(repos), Source: source,
-	})
+	fiche := s.fiche(cours)
+	fiche.Assignments = cours.Assignments(repos)
+	fiche.Source = source
+	writeJSON(writer, http.StatusOK, fiche)
 }
 
 // handleUpdateClassroom modifie le nom, le préfixe ou les réglages d'un groupe.
@@ -114,9 +137,9 @@ func (s *Server) handleUpdateClassroom(writer http.ResponseWriter, request *http
 		return
 	}
 	cours.Name, cours.Org = body.Name, body.Org
-	cours.Course, cours.Group = body.Course, body.Group
-	if strings.TrimSpace(body.Course) != "" {
-		// Le groupe rejoint la nomenclature à quatre niveaux : son préfixe
+	cours.Session, cours.Course, cours.Group = body.Session, body.Course, body.Group
+	if strings.TrimSpace(body.Session) != "" {
+		// Le groupe rejoint la nomenclature courante : son préfixe
 		// hérité n'a plus cours.
 		cours.LegacyPrefix = ""
 	}
@@ -133,9 +156,13 @@ func (s *Server) handleUpdateClassroom(writer http.ResponseWriter, request *http
 		fail(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, classroomPayload{
-		Classroom: modifie, Assignments: []classroom.Assignment{},
-	})
+	if modifie.Session != "" {
+		if err := s.classrooms.SetSessionName(modifie.Session, body.SessionName); err != nil {
+			fail(writer, err)
+			return
+		}
+	}
+	writeJSON(writer, http.StatusOK, s.fiche(modifie))
 }
 
 // handleDeleteClassroom retire un groupe de la liste, sans toucher aux dépôts.
@@ -263,8 +290,7 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"classroom": classroomPayload{Classroom: modifie, Assignments: []classroom.Assignment{}},
-		"issues":    issues,
+		"classroom": s.fiche(modifie), "issues": issues,
 	})
 }
 

@@ -10,8 +10,8 @@ import (
 )
 
 // Migrer un groupe, c'est renommer ses dépôts pour qu'ils suivent la
-// nomenclature à quatre niveaux. GitHub garde une redirection depuis l'ancien
-// nom : les clones et les liens déjà distribués continuent de fonctionner.
+// nomenclature courante. GitHub garde une redirection depuis l'ancien nom : les
+// clones et les liens déjà distribués continuent de fonctionner.
 
 // migrationRow est un dépôt à renommer, ou la raison qui l'en empêche.
 type migrationRow struct {
@@ -28,8 +28,9 @@ func (r migrationRow) Ready() bool { return r.Problem == "" && r.Target != "" }
 // migrationInput est ce que l'interface envoie pour préparer ou lancer une
 // migration.
 type migrationInput struct {
-	Course string `json:"course"`
-	Group  string `json:"group"`
+	Session string `json:"session"`
+	Course  string `json:"course"`
+	Group   string `json:"group"`
 	// SkipBlocked laisse en place les dépôts qui ne peuvent pas être renommés,
 	// au lieu de refuser la migration entière.
 	SkipBlocked bool `json:"skip_blocked"`
@@ -37,27 +38,34 @@ type migrationInput struct {
 
 // migrationPlan compose le renommage de tous les dépôts d'un groupe hérité.
 func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
-	classroom.Classroom, string, string, []migrationRow, error) {
+	classroom.Classroom, classroom.Classroom, []migrationRow, error) {
+	var vide classroom.Classroom
 	cours, ok := s.classrooms.Get(request.PathValue("id"))
 	if !ok {
-		return cours, "", "", nil, valid.Errorf("Groupe inconnu.")
+		return cours, vide, nil, valid.Errorf("Groupe inconnu.")
 	}
 	if !cours.Legacy() {
-		return cours, "", "", nil, valid.Errorf(
-			"« %s » suit déjà la nomenclature à quatre niveaux.", cours.Name)
+		return cours, vide, nil, valid.Errorf(
+			"« %s » suit déjà la nomenclature courante.", cours.Name)
+	}
+	cible := cours
+	session, err := naming.Fragment(body.Session, "Session")
+	if err != nil {
+		return cours, vide, nil, err
 	}
 	course, err := naming.Fragment(body.Course, "Cours")
 	if err != nil {
-		return cours, "", "", nil, err
+		return cours, vide, nil, err
 	}
 	group, err := naming.Fragment(body.Group, "Groupe")
 	if err != nil {
-		return cours, "", "", nil, err
+		return cours, vide, nil, err
 	}
+	cible.Session, cible.Course, cible.Group, cible.LegacyPrefix = session, course, group, ""
 
 	repos, _, err := s.repos(cours.Org, false)
 	if err != nil {
-		return cours, "", "", nil, err
+		return cours, vide, nil, err
 	}
 	existants := map[string]bool{}
 	for _, repo := range repos {
@@ -87,7 +95,7 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 					break
 				}
 				ligne.Student = fragment
-				ligne.Target = naming.Compose(course, group, nom, fragment)
+				ligne.Target = naming.Compose(session, course, group, nom, fragment)
 			}
 
 			if ligne.Target != "" {
@@ -106,7 +114,7 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 			lignes = append(lignes, ligne)
 		}
 	}
-	return cours, course, group, lignes, nil
+	return cours, cible, lignes, nil
 }
 
 // handleMigrationPreview montre le renommage sans rien écrire.
@@ -116,7 +124,7 @@ func (s *Server) handleMigrationPreview(writer http.ResponseWriter, request *htt
 		fail(writer, err)
 		return
 	}
-	cours, course, group, lignes, err := s.migrationPlan(request, body)
+	cours, cible, lignes, err := s.migrationPlan(request, body)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -130,7 +138,8 @@ func (s *Server) handleMigrationPreview(writer http.ResponseWriter, request *htt
 		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"prefix": cours.LegacyPrefix, "course": course, "group": group,
+		"prefix": cours.LegacyPrefix, "scope": cible.Scope(),
+		"session": cible.Session, "course": cible.Course, "group": cible.Group,
 		"rows": lignes, "ready": prets, "blocked": bloques,
 	})
 }
@@ -143,7 +152,7 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 		fail(writer, err)
 		return
 	}
-	cours, course, group, lignes, err := s.migrationPlan(request, body)
+	cours, cible, lignes, err := s.migrationPlan(request, body)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -169,7 +178,7 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	label := "Migration de « " + cours.Name + " » vers " + naming.Prefix(course, group)
+	label := "Migration de « " + cours.Name + " » vers " + cible.Scope()
 	job := s.jobs.Start("migration", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
 		for index, ligne := range prets {
@@ -197,14 +206,13 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 		// sinon il cesserait de voir les dépôts restés en arrière.
 		bascule := echecs == 0 && !job.Canceled()
 		if bascule {
-			cours.Course, cours.Group, cours.LegacyPrefix = course, group, ""
-			if _, err := s.classrooms.Update(cours); err != nil {
+			if _, err := s.classrooms.Update(cible); err != nil {
 				return nil, err
 			}
 		}
 		return map[string]any{
 			"renamed": renommes, "failed": echecs, "skipped": len(bloques),
-			"switched": bascule, "course": course, "group": group,
+			"switched": bascule, "scope": cible.Scope(),
 		}, nil
 	})
 	writeJSON(writer, http.StatusAccepted, job.State())

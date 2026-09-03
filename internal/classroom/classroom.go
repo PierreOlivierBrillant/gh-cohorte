@@ -2,13 +2,13 @@
 // la nomenclature des dépôts, et les réglages que ses travaux reprennent.
 //
 // GitHub reste la source de vérité. Un travail n'est pas une fiche enregistrée
-// quelque part : c'est l'ensemble des dépôts nommés « cours.groupe.travail.étudiant »,
-// lus dans l'organisation. Le groupe ne retient que ce que les noms de dépôts
+// quelque part : c'est l'ensemble des dépôts nommés
+// « session.cours.groupe.travail.étudiant », lus dans l'organisation. Le groupe ne retient que ce que les noms de dépôts
 // ne savent pas dire — qui sont les étudiants, et avec quels réglages leurs
 // dépôts sont créés. Un groupe se déclare donc sans rien écrire sur GitHub, et
 // se supprime sans rien y effacer.
 //
-// Les groupes déclarés avant la nomenclature à quatre niveaux gardent leur
+// Les groupes déclarés avant cette nomenclature gardent leur
 // préfixe tout en tirets. Ils restent lisibles — leurs dépôts s'affichent — mais
 // on ne leur distribue plus : il faut d'abord les migrer.
 package classroom
@@ -76,15 +76,18 @@ func (d Defaults) normalized() Defaults {
 	return d
 }
 
-// Classroom est un groupe : un cours, une organisation, des étudiants.
+// Classroom est un groupe : une session, un cours, une organisation, des
+// étudiants. Seul le nom court de la session entre dans les dépôts ; son nom
+// long vit dans le magasin, partagé par tous les groupes de la session.
 type Classroom struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Org    string `json:"org"`
-	Course string `json:"course"`
-	Group  string `json:"group"`
-	// LegacyPrefix est le préfixe tout en tirets d'un groupe déclaré avant la
-	// nomenclature à quatre niveaux. Sa présence dit qu'il reste à migrer.
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Org     string `json:"org"`
+	Session string `json:"session"`
+	Course  string `json:"course"`
+	Group   string `json:"group"`
+	// LegacyPrefix est le préfixe tout en tirets d'un groupe déclaré avant cette
+	// nomenclature. Sa présence dit qu'il reste à migrer.
 	LegacyPrefix string          `json:"prefix,omitempty"`
 	Students     []roster.Person `json:"students"`
 	RosterPath   string          `json:"roster_path,omitempty"`
@@ -94,7 +97,7 @@ type Classroom struct {
 
 // Legacy dit si le groupe suit encore l'ancienne nomenclature.
 func (c Classroom) Legacy() bool {
-	return strings.TrimSpace(c.Course) == "" && strings.TrimSpace(c.LegacyPrefix) != ""
+	return strings.TrimSpace(c.Session) == "" && strings.TrimSpace(c.LegacyPrefix) != ""
 }
 
 // Validate met le groupe en forme et refuse ce qui ne peut pas nommer un dépôt.
@@ -112,6 +115,10 @@ func (c Classroom) Validate() (Classroom, error) {
 		}
 		c.LegacyPrefix = prefix
 	} else {
+		session, err := naming.Fragment(c.Session, "Session")
+		if err != nil {
+			return c, err
+		}
 		course, err := naming.Fragment(c.Course, "Cours")
 		if err != nil {
 			return c, err
@@ -120,7 +127,7 @@ func (c Classroom) Validate() (Classroom, error) {
 		if err != nil {
 			return c, err
 		}
-		c.Course, c.Group, c.LegacyPrefix = course, group, ""
+		c.Session, c.Course, c.Group, c.LegacyPrefix = session, course, group, ""
 	}
 
 	c.Name = strings.TrimSpace(c.Name)
@@ -146,12 +153,19 @@ func (c Classroom) Label() string {
 	return c.Course + " " + c.Group
 }
 
+// Session identifie une session : un nom court pour les dépôts, un nom long
+// pour l'affichage.
+type Session struct {
+	Short string `json:"short"`
+	Name  string `json:"name"`
+}
+
 // Scope est ce qui précède le nom d'un travail dans les dépôts du groupe.
 func (c Classroom) Scope() string {
 	if c.Legacy() {
 		return c.LegacyPrefix
 	}
-	return naming.Prefix(c.Course, c.Group)
+	return naming.Prefix(c.Session, c.Course, c.Group)
 }
 
 // AssignmentID compose l'identifiant complet d'un travail du groupe : c'est lui
@@ -161,7 +175,7 @@ func (c Classroom) AssignmentID(name string) string {
 	if c.Legacy() {
 		return strings.Trim(c.LegacyPrefix+groups.Separator+name, groups.Separator)
 	}
-	return naming.AssignmentID(c.Course, c.Group, name)
+	return naming.AssignmentID(c.Session, c.Course, c.Group, name)
 }
 
 // ShortName retire du travail ce qui désigne le groupe.
@@ -260,7 +274,7 @@ type Assignment struct {
 }
 
 // Assignments retrouve les travaux du groupe parmi les dépôts de l'organisation.
-// La nomenclature à quatre niveaux se relit sans rien deviner : un dépôt est du
+// La nomenclature courante se relit sans rien deviner : un dépôt est du
 // groupe, ou il ne l'est pas.
 func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
 	if c.Legacy() {
@@ -271,14 +285,14 @@ func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
 
 	for _, repo := range repos {
 		parts, reconnu := naming.Parse(repo.Name)
-		if !reconnu || !naming.Belongs(parts, c.Course, c.Group) {
+		if !reconnu || !naming.Belongs(parts, c.Session, c.Course, c.Group) {
 			continue
 		}
 		cle := strings.ToLower(parts.Assignment)
 		travail, deja := parNom[cle]
 		if !deja {
 			travail = &Assignment{
-				ID:   naming.AssignmentID(c.Course, c.Group, parts.Assignment),
+				ID:   naming.AssignmentID(c.Session, c.Course, c.Group, parts.Assignment),
 				Name: parts.Assignment,
 			}
 			parNom[cle] = travail
@@ -330,7 +344,7 @@ func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[stri
 		if !reconnu {
 			continue
 		}
-		id := naming.AssignmentID(parts.Course, parts.Group, parts.Assignment)
+		id := naming.AssignmentID(parts.Session, parts.Course, parts.Group, parts.Assignment)
 		if !strings.EqualFold(id, assignmentID) {
 			continue
 		}
@@ -352,7 +366,7 @@ func (c Classroom) Repos(assignmentID string, repos []groups.RepoInfo) []groups.
 		if !reconnu {
 			continue
 		}
-		id := naming.AssignmentID(parts.Course, parts.Group, parts.Assignment)
+		id := naming.AssignmentID(parts.Session, parts.Course, parts.Group, parts.Assignment)
 		if !strings.EqualFold(id, assignmentID) {
 			continue
 		}
@@ -388,6 +402,7 @@ func (c Classroom) StudentOf(repoName string) (roster.Person, bool) {
 
 // Candidate est un groupe possible, deviné des dépôts déjà présents.
 type Candidate struct {
+	Session     string   `json:"session"`
 	Course      string   `json:"course"`
 	Group       string   `json:"group"`
 	Prefix      string   `json:"prefix"`
@@ -400,7 +415,7 @@ type Candidate struct {
 }
 
 // Candidates propose les groupes lisibles dans les dépôts : d'abord ceux qui
-// suivent la nomenclature à quatre niveaux, puis les préfixes hérités.
+// suivent la nomenclature courante, puis les préfixes hérités.
 func Candidates(repos []groups.RepoInfo) []Candidate {
 	proposes := append(currentCandidates(repos), legacyCandidates(repos)...)
 	sort.SliceStable(proposes, func(i, j int) bool {
@@ -426,12 +441,13 @@ func currentCandidates(repos []groups.RepoInfo) []Candidate {
 		if !reconnu {
 			continue
 		}
-		prefixe := naming.Prefix(parts.Course, parts.Group)
+		prefixe := naming.Prefix(parts.Session, parts.Course, parts.Group)
 		cle := strings.ToLower(prefixe)
 		candidat, deja := parPrefixe[cle]
 		if !deja {
 			candidat = &Candidate{
-				Course: parts.Course, Group: parts.Group, Prefix: prefixe,
+				Session: parts.Session, Course: parts.Course, Group: parts.Group,
+				Prefix: prefixe,
 			}
 			parPrefixe[cle] = candidat
 			travaux[cle] = map[string]bool{}

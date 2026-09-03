@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -20,8 +21,12 @@ const FileName = "groupes.json"
 
 // document est ce qui est écrit sur le disque.
 type document struct {
-	Version    int         `json:"version"`
-	Classrooms []Classroom `json:"classrooms"`
+	Version int `json:"version"`
+	// Sessions donne le nom long d'une session — « a26 » → « Automne 2026 ».
+	// Il est partagé par tous les groupes de la session, et ne sert qu'à
+	// l'affichage : seul le nom court entre dans les dépôts.
+	Sessions   map[string]string `json:"sessions,omitempty"`
+	Classrooms []Classroom       `json:"classrooms"`
 }
 
 // PathNextTo place le fichier des groupes à côté du fichier de réglages, pour
@@ -35,13 +40,14 @@ func PathNextTo(configFile string) string {
 type Store struct {
 	path string
 
-	mutex sync.Mutex
-	items []Classroom
+	mutex    sync.Mutex
+	items    []Classroom
+	sessions map[string]string
 }
 
 // Open lit le fichier des groupes ; son absence donne un magasin vide.
 func Open(path string) *Store {
-	store := &Store{path: path}
+	store := &Store{path: path, sessions: map[string]string{}}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return store
@@ -51,7 +57,63 @@ func Open(path string) *Store {
 		return store
 	}
 	store.items = lu.Classrooms
+	for court, long := range lu.Sessions {
+		store.sessions[strings.ToLower(court)] = long
+	}
 	return store
+}
+
+// SessionName renvoie le nom long d'une session, ou son nom court à défaut.
+func (s *Store) SessionName(short string) string {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if long := s.sessions[strings.ToLower(short)]; long != "" {
+		return long
+	}
+	return short
+}
+
+// Sessions renvoie les sessions qui portent au moins un groupe, de la plus
+// récente à la plus ancienne — les noms courts se trient bien : a26, h27, e27.
+func (s *Store) Sessions() []Session {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	vues := map[string]bool{}
+	liste := make([]Session, 0, len(s.items))
+	for _, item := range s.items {
+		court := item.Session
+		if court == "" || vues[strings.ToLower(court)] {
+			continue
+		}
+		vues[strings.ToLower(court)] = true
+		nom := s.sessions[strings.ToLower(court)]
+		if nom == "" {
+			nom = court
+		}
+		liste = append(liste, Session{Short: court, Name: nom})
+	}
+	sort.Slice(liste, func(i, j int) bool {
+		return strings.ToLower(liste[i].Short) < strings.ToLower(liste[j].Short)
+	})
+	return liste
+}
+
+// SetSessionName retient le nom long d'une session. Vide, il est oublié : la
+// session s'affiche alors par son nom court.
+func (s *Store) SetSessionName(short, name string) error {
+	court, err := naming.Fragment(short, "Session")
+	if err != nil {
+		return err
+	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	name = strings.TrimSpace(name)
+	if name == "" || strings.EqualFold(name, court) {
+		delete(s.sessions, strings.ToLower(court))
+	} else {
+		s.sessions[strings.ToLower(court)] = name
+	}
+	return s.saveLocked()
 }
 
 // Path renvoie l'emplacement du fichier.
@@ -168,7 +230,8 @@ func (s *Store) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return valid.Errorf("Groupes non enregistrés : %v", err)
 	}
-	payload, err := json.MarshalIndent(document{Version: 1, Classrooms: s.items}, "", "  ")
+	payload, err := json.MarshalIndent(
+		document{Version: 1, Sessions: s.sessions, Classrooms: s.items}, "", "  ")
 	if err != nil {
 		return valid.Errorf("Groupes non enregistrés : %v", err)
 	}
