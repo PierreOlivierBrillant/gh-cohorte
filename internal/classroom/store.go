@@ -104,7 +104,7 @@ func (s *Store) Add(classroom Classroom) (Classroom, error) {
 	defer s.mutex.Unlock()
 
 	for _, item := range s.items {
-		if strings.EqualFold(item.Org, valide.Org) && strings.EqualFold(item.Prefix, valide.Prefix) {
+		if strings.EqualFold(item.Org, valide.Org) && strings.EqualFold(item.Scope(), valide.Scope()) {
 			return classroom, valid.Errorf(
 				"Un groupe couvre déjà « %s » dans « %s ».", valide.Label(), valide.Org)
 		}
@@ -126,7 +126,7 @@ func (s *Store) Update(classroom Classroom) (Classroom, error) {
 
 	for position, item := range s.items {
 		if item.ID != valide.ID {
-			if strings.EqualFold(item.Org, valide.Org) && strings.EqualFold(item.Prefix, valide.Prefix) {
+			if strings.EqualFold(item.Org, valide.Org) && strings.EqualFold(item.Scope(), valide.Scope()) {
 				return classroom, valid.Errorf(
 					"Un autre groupe couvre déjà « %s » dans « %s ».", valide.Label(), valide.Org)
 			}

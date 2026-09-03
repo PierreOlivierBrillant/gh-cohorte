@@ -21,14 +21,29 @@ func depots(noms ...string) []groups.RepoInfo {
 	return inventaire
 }
 
-func etudiants(comptes ...string) []roster.Person {
-	return classroom.StudentsOf(comptes)
+// personnes construit une liste d'étudiants « nom complet / compte ».
+func personnes(couples ...string) []roster.Person {
+	liste := make([]roster.Person, 0, len(couples)/2)
+	for index := 0; index+1 < len(couples); index += 2 {
+		liste = append(liste, roster.Person{FullName: couples[index], Username: couples[index+1]})
+	}
+	return liste
 }
 
-func groupe(prefixe string, comptes ...string) classroom.Classroom {
+// groupe déclare un groupe de la nomenclature à quatre niveaux.
+func groupe(cours, section string, etudiants []roster.Person) classroom.Classroom {
 	return classroom.Classroom{
-		Org: "acme", Prefix: prefixe, Name: prefixe,
-		Students: etudiants(comptes...),
+		Org: "acme", Course: cours, Group: section, Name: cours + " " + section,
+		Students: etudiants,
+		Defaults: classroom.DefaultsFrom(config.Default()),
+	}
+}
+
+// heritage déclare un groupe resté à l'ancienne nomenclature.
+func heritage(prefixe string, comptes ...string) classroom.Classroom {
+	return classroom.Classroom{
+		Org: "acme", LegacyPrefix: prefixe, Name: prefixe,
+		Students: classroom.StudentsOf(comptes),
 		Defaults: classroom.DefaultsFrom(config.Default()),
 	}
 }
@@ -41,41 +56,58 @@ func noms(travaux []classroom.Assignment) []string {
 	return liste
 }
 
+var cohorte = personnes(
+	"Émilie Côté", "emilie-cote",
+	"Jean-Luc Picard", "jlpicard",
+	"Aminata Diallo", "aminata-d",
+)
+
 // ------------------------------------------------------------ identifiants
 
 func TestIdentifiantDeTravail(t *testing.T) {
-	cours := groupe("a26-5n6")
-	if id := cours.AssignmentID("tp1"); id != "a26-5n6-tp1" {
+	cours := groupe("5n6", "a26-01", cohorte)
+	if id := cours.AssignmentID("tp1"); id != "5n6.a26-01.tp1" {
 		t.Fatalf("identifiant %q", id)
 	}
-	if court := cours.ShortName("a26-5n6-travailsession"); court != "travailsession" {
+	if court := cours.ShortName("5n6.a26-01.travail-session"); court != "travail-session" {
 		t.Fatalf("nom court %q", court)
 	}
-	if !cours.Owns("a26-5n6-tp1") || cours.Owns("a26-4w6-tp1") || cours.Owns("a26-5n6") {
+	if !cours.Owns("5n6.a26-01.tp1") || cours.Owns("5n6.a26-02.tp1") || cours.Owns("5n6.a26-01") {
 		t.Fatal("le périmètre du groupe est mal délimité")
 	}
-
-	// Sans préfixe, le groupe couvre les travaux nommés à la racine.
-	racine := groupe("")
-	if id := racine.AssignmentID("tp1"); id != "tp1" {
-		t.Fatalf("identifiant sans préfixe %q", id)
+	if cours.Scope() != "5n6.a26-01" {
+		t.Fatalf("portée %q", cours.Scope())
 	}
-	if !racine.Owns("tp1") || racine.ShortName("tp1") != "tp1" {
-		t.Fatal("le groupe sans préfixe devrait tout couvrir")
+}
+
+func TestPlusieursGroupesDansUnMemeCours(t *testing.T) {
+	inventaire := depots(
+		"5n6.a26-01.tp1.emilie-cote",
+		"5n6.a26-02.tp1.jean-luc-picard",
+	)
+	premier := groupe("5n6", "a26-01", cohorte)
+	second := groupe("5n6", "a26-02", cohorte)
+
+	if travaux := premier.Assignments(inventaire); len(travaux) != 1 ||
+		travaux[0].Repos != 1 || travaux[0].Students != 1 {
+		t.Fatalf("groupe 01 : %+v", travaux)
+	}
+	if travaux := second.Assignments(inventaire); len(travaux) != 1 ||
+		travaux[0].Repos != 1 || travaux[0].Students != 1 {
+		t.Fatalf("groupe 02 : %+v", travaux)
 	}
 }
 
 // ---------------------------------------------------------------- travaux
 
-func TestTravauxDuGroupeExistant(t *testing.T) {
-	// La nomenclature réelle : session, cours, puis nom du travail.
+func TestTravauxDuGroupe(t *testing.T) {
 	inventaire := depots(
-		"a26-5n6-travailsession-emilie-cote", "a26-5n6-travailsession-jlpicard",
-		"a26-5n6-tp1-emilie-cote", "a26-5n6-tp1-jlpicard",
-		"a26-4w6-tp1-jlpicard", "a26-4w6-tp1-aminata-d",
-		"a26-notes",
+		"5n6.a26-01.travail-session.emilie-cote", "5n6.a26-01.travail-session.jean-luc-picard",
+		"5n6.a26-01.tp1.emilie-cote",
+		"4w6.a26-01.tp1.jean-luc-picard",
+		"notes-du-cours",
 	)
-	cours := groupe("a26-5n6", "emilie-cote", "jlpicard")
+	cours := groupe("5n6", "a26-01", cohorte)
 
 	travaux := cours.Assignments(inventaire)
 	if len(travaux) != 2 {
@@ -85,40 +117,27 @@ func TestTravauxDuGroupeExistant(t *testing.T) {
 	for _, travail := range travaux {
 		trouves[travail.Name] = travail
 	}
-	for _, attendu := range []string{"travailsession", "tp1"} {
-		travail, present := trouves[attendu]
-		if !present {
-			t.Fatalf("« %s » manquant : %v", attendu, noms(travaux))
-		}
-		if travail.Repos != 2 || travail.Students != 2 {
-			t.Fatalf("« %s » : %d dépôt(s), %d étudiant(s)", attendu, travail.Repos, travail.Students)
-		}
+	if trouves["travail-session"].Repos != 2 || trouves["travail-session"].Students != 2 {
+		t.Fatalf("travail-session : %+v", trouves["travail-session"])
+	}
+	// Un travail distribué à une seule personne se lit aussi bien : le
+	// séparateur réservé n'exige pas deux dépôts pour conclure.
+	if trouves["tp1"].Repos != 1 || trouves["tp1"].Students != 1 {
+		t.Fatalf("tp1 : %+v", trouves["tp1"])
 	}
 	// Le cours voisin ne déborde pas.
-	if _, present := trouves["a26-4w6-tp1"]; present {
-		t.Fatal("un travail d'un autre cours a été rattaché")
-	}
-}
-
-func TestTravailDistribueAUneSeulePersonne(t *testing.T) {
-	// La détection par préfixe exige deux dépôts ; la liste des étudiants, non.
-	inventaire := depots("a26-5n6-rattrapage-emilie-cote")
-	cours := groupe("a26-5n6", "emilie-cote", "jlpicard")
-
-	travaux := cours.Assignments(inventaire)
-	if len(travaux) != 1 || travaux[0].Name != "rattrapage" {
-		t.Fatalf("travaux trouvés : %v", noms(travaux))
-	}
-	if travaux[0].Students != 1 || travaux[0].Others != 0 {
-		t.Fatalf("comptage : %+v", travaux[0])
+	if _, present := trouves["4w6"]; present {
+		t.Fatalf("un dépôt d'un autre cours a été rattaché : %v", noms(travaux))
 	}
 }
 
 func TestDepotHorsListeCompteApart(t *testing.T) {
 	inventaire := depots(
-		"a26-5n6-tp1-emilie-cote", "a26-5n6-tp1-jlpicard", "a26-5n6-tp1-visiteur",
+		"5n6.a26-01.tp1.emilie-cote",
+		"5n6.a26-01.tp1.jean-luc-picard",
+		"5n6.a26-01.tp1.visiteur-inconnu",
 	)
-	cours := groupe("a26-5n6", "emilie-cote", "jlpicard")
+	cours := groupe("5n6", "a26-01", cohorte)
 
 	travaux := cours.Assignments(inventaire)
 	if len(travaux) != 1 {
@@ -129,48 +148,122 @@ func TestDepotHorsListeCompteApart(t *testing.T) {
 	}
 }
 
-func TestTravailSansAucunEtudiantInscrit(t *testing.T) {
-	// Aucun compte du groupe n'a de dépôt : la détection par préfixe rattrape.
-	inventaire := depots("a26-5n6-tp9-zoe", "a26-5n6-tp9-max")
-	cours := groupe("a26-5n6", "emilie-cote")
-
-	travaux := cours.Assignments(inventaire)
-	if len(travaux) != 1 || travaux[0].Name != "tp9" {
-		t.Fatalf("travaux trouvés : %v", noms(travaux))
-	}
-	if travaux[0].Students != 0 || travaux[0].Others != 2 {
-		t.Fatalf("comptage : %+v", travaux[0])
-	}
-}
-
-func TestLectureAmbigueRetientLeTravailLePlusPrecis(t *testing.T) {
-	// « tp1-final-cote » se lit de deux façons quand « cote » et « final-cote »
-	// sont tous deux inscrits. Un seul travail doit en sortir.
-	inventaire := depots("tp1-final-cote")
-	cours := groupe("", "cote", "final-cote")
-
-	travaux := cours.Assignments(inventaire)
-	if len(travaux) != 1 || travaux[0].Name != "tp1-final" {
-		t.Fatalf("travaux trouvés : %v", noms(travaux))
-	}
-}
-
 func TestServedRepereLesEtudiantsDejaServis(t *testing.T) {
-	inventaire := depots("a26-5n6-tp1-emilie-cote")
-	cours := groupe("a26-5n6", "emilie-cote", "jlpicard")
+	inventaire := depots("5n6.a26-01.tp1.emilie-cote")
+	cours := groupe("5n6", "a26-01", cohorte)
 
-	servis := cours.Served("a26-5n6-tp1", inventaire)
+	servis := cours.Served("5n6.a26-01.tp1", inventaire)
 	if !servis["emilie-cote"] || servis["jlpicard"] {
 		t.Fatalf("étudiants servis : %v", servis)
 	}
 }
 
-// --------------------------------------------------------------- candidats
+func TestDepotRattacheASonEtudiant(t *testing.T) {
+	cours := groupe("5n6", "a26-01", cohorte)
 
-func TestCandidatsDeduitsDesDepots(t *testing.T) {
+	student, inscrit := cours.StudentOf("5n6.a26-01.tp1.jean-luc-picard")
+	if !inscrit || student.Username != "jlpicard" {
+		t.Fatalf("étudiant retrouvé : %+v (%v)", student, inscrit)
+	}
+	if _, inscrit := cours.StudentOf("5n6.a26-01.tp1.inconnu"); inscrit {
+		t.Fatal("un dépôt hors liste a été rattaché")
+	}
+}
+
+func TestNomCompletManquantEmpecheDeNommer(t *testing.T) {
+	cours := groupe("5n6", "a26-01", append(
+		personnes("Émilie Côté", "emilie-cote"),
+		roster.Person{Username: "sans-nom"},
+	))
+	incomplets := cours.MissingNames()
+	if len(incomplets) != 1 || incomplets[0].Username != "sans-nom" {
+		t.Fatalf("étudiants incomplets : %+v", incomplets)
+	}
+}
+
+func TestReglagesDuTravailReprennentLeGroupe(t *testing.T) {
+	cours := groupe("5n6", "a26-01", cohorte)
+	cours.Defaults.Visibility = "public"
+	cours.Defaults.Template = "acme/modele"
+
+	reglages := cours.Settings("tp1")
+	if reglages.Assignment != "5n6.a26-01.tp1" {
+		t.Fatalf("travail %q", reglages.Assignment)
+	}
+	if reglages.NamePattern != classroom.NamePattern {
+		t.Fatalf("gabarit %q : il n'est pas réglable", reglages.NamePattern)
+	}
+	if reglages.Org != "acme" || reglages.Visibility != "public" ||
+		reglages.Template != "acme/modele" {
+		t.Fatalf("réglages : %+v", reglages)
+	}
+}
+
+// ------------------------------------------------------- ancienne nomenclature
+
+func TestGroupeHeriteResteLisible(t *testing.T) {
 	inventaire := depots(
 		"a26-5n6-travailsession-emilie-cote", "a26-5n6-travailsession-jlpicard",
+		"a26-5n6-tp1-emilie-cote", "a26-5n6-tp1-jlpicard",
 		"a26-4w6-tp1-jlpicard", "a26-4w6-tp1-aminata-d",
+	)
+	cours := heritage("a26-5n6", "emilie-cote", "jlpicard")
+	if !cours.Legacy() {
+		t.Fatal("le groupe devrait être reconnu comme hérité")
+	}
+
+	travaux := cours.Assignments(inventaire)
+	if len(travaux) != 2 {
+		t.Fatalf("travaux trouvés : %v", noms(travaux))
+	}
+	for _, travail := range travaux {
+		if travail.Repos != 2 || travail.Students != 2 {
+			t.Fatalf("« %s » : %+v", travail.Name, travail)
+		}
+	}
+}
+
+func TestGroupeHeriteRattacheSesDepotsParLeCompte(t *testing.T) {
+	cours := heritage("a26-5n6", "emilie-cote", "jlpicard")
+	cours.Students = personnes("Émilie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard")
+
+	student, inscrit := cours.StudentOf("a26-5n6-tp1-jlpicard")
+	if !inscrit || student.Username != "jlpicard" {
+		t.Fatalf("étudiant retrouvé : %+v (%v)", student, inscrit)
+	}
+}
+
+// --------------------------------------------------------------- candidats
+
+func TestCandidatsDeLaNouvelleNomenclature(t *testing.T) {
+	inventaire := depots(
+		"5n6.a26-01.tp1.emilie-cote", "5n6.a26-01.tp1.jean-luc-picard",
+		"5n6.a26-02.tp1.aminata-diallo",
+	)
+	candidats := classroom.Candidates(inventaire)
+	if len(candidats) != 2 {
+		t.Fatalf("candidats : %+v", candidats)
+	}
+	trouves := map[string]classroom.Candidate{}
+	for _, candidat := range candidats {
+		if candidat.Legacy {
+			t.Fatalf("un candidat de la nouvelle nomenclature est marqué hérité : %+v", candidat)
+		}
+		trouves[candidat.Prefix] = candidat
+	}
+	premier, present := trouves["5n6.a26-01"]
+	if !present || premier.Course != "5n6" || premier.Group != "a26-01" {
+		t.Fatalf("candidat : %+v", premier)
+	}
+	if premier.Repos != 2 || len(premier.Students) != 2 {
+		t.Fatalf("comptage : %+v", premier)
+	}
+}
+
+func TestCandidatsHeritesSignalesCommeTels(t *testing.T) {
+	inventaire := depots(
+		"a26-5n6-travailsession-emilie-cote", "a26-5n6-travailsession-jlpicard",
+		"5n6.a26-02.tp1.aminata-diallo", "5n6.a26-02.tp1.emilie-cote",
 	)
 	candidats := classroom.Candidates(inventaire)
 
@@ -178,30 +271,15 @@ func TestCandidatsDeduitsDesDepots(t *testing.T) {
 	for _, candidat := range candidats {
 		trouves[candidat.Prefix] = candidat
 	}
-	pour5n6, present := trouves["a26-5n6"]
-	if !present {
-		t.Fatalf("candidats : %+v", candidats)
+	if ancien, present := trouves["a26-5n6"]; !present || !ancien.Legacy {
+		t.Fatalf("le préfixe hérité n'est pas signalé : %+v", candidats)
 	}
-	if len(pour5n6.Assignments) != 1 || pour5n6.Assignments[0] != "travailsession" {
-		t.Fatalf("travaux du candidat : %+v", pour5n6)
+	if nouveau, present := trouves["5n6.a26-02"]; !present || nouveau.Legacy {
+		t.Fatalf("le candidat courant est mal classé : %+v", candidats)
 	}
-	if strings.Join(pour5n6.Students, ",") != "emilie-cote,jlpicard" {
-		t.Fatalf("étudiants devinés : %v", pour5n6.Students)
-	}
-	if _, present := trouves["a26-4w6"]; !present {
-		t.Fatalf("le second cours n'est pas proposé : %+v", candidats)
-	}
-}
-
-func TestCandidatSansPrefixePourUneNomenclaturePlate(t *testing.T) {
-	inventaire := depots("tp1-emilie-cote", "tp1-jlpicard", "tp2-jlpicard", "tp2-emilie-cote")
-	candidats := classroom.Candidates(inventaire)
-
-	if len(candidats) != 1 || candidats[0].Prefix != "" {
-		t.Fatalf("candidats : %+v", candidats)
-	}
-	if len(candidats[0].Assignments) != 2 {
-		t.Fatalf("travaux du candidat : %+v", candidats[0])
+	// Les candidats de la nomenclature courante passent devant.
+	if candidats[0].Legacy {
+		t.Fatalf("ordre des candidats : %+v", candidats)
 	}
 }
 
@@ -211,7 +289,7 @@ func TestMagasinEcritEtRelit(t *testing.T) {
 	chemin := filepath.Join(t.TempDir(), "groupes.json")
 	magasin := classroom.Open(chemin)
 
-	cree, err := magasin.Add(groupe("a26-5n6", "emilie-cote"))
+	cree, err := magasin.Add(groupe("5n6", "a26-01", cohorte))
 	if err != nil {
 		t.Fatalf("ajout : %v", err)
 	}
@@ -229,16 +307,17 @@ func TestMagasinEcritEtRelit(t *testing.T) {
 
 	relu := classroom.Open(chemin)
 	retrouve, present := relu.Get(cree.ID)
-	if !present || retrouve.Prefix != "a26-5n6" || len(retrouve.Students) != 1 {
+	if !present || retrouve.Course != "5n6" || retrouve.Group != "a26-01" ||
+		len(retrouve.Students) != 3 {
 		t.Fatalf("groupe relu : %+v", retrouve)
 	}
 
-	retrouve.Name = "5N6 — Automne 2026"
+	retrouve.Name = "5N6 — Automne 2026, groupe 01"
 	if _, err := relu.Update(retrouve); err != nil {
 		t.Fatalf("mise à jour : %v", err)
 	}
 	if encore := classroom.Open(chemin); len(encore.List()) != 1 ||
-		encore.List()[0].Name != "5N6 — Automne 2026" {
+		encore.List()[0].Name != "5N6 — Automne 2026, groupe 01" {
 		t.Fatalf("mise à jour non enregistrée : %+v", encore.List())
 	}
 
@@ -252,7 +331,7 @@ func TestMagasinEcritEtRelit(t *testing.T) {
 
 func TestMagasinNePartagePasSesTranches(t *testing.T) {
 	magasin := classroom.Open(filepath.Join(t.TempDir(), "groupes.json"))
-	cree, err := magasin.Add(groupe("a26-5n6", "emilie-cote"))
+	cree, err := magasin.Add(groupe("5n6", "a26-01", personnes("", "emilie-cote")))
 	if err != nil {
 		t.Fatalf("ajout : %v", err)
 	}
@@ -267,41 +346,34 @@ func TestMagasinNePartagePasSesTranches(t *testing.T) {
 	}
 }
 
-func TestMagasinRefuseDeuxGroupesSurLeMemePrefixe(t *testing.T) {
+func TestMagasinRefuseDeuxGroupesAuMemeEndroit(t *testing.T) {
 	magasin := classroom.Open(filepath.Join(t.TempDir(), "groupes.json"))
-	if _, err := magasin.Add(groupe("a26-5n6")); err != nil {
+	if _, err := magasin.Add(groupe("5n6", "a26-01", cohorte)); err != nil {
 		t.Fatalf("premier ajout : %v", err)
 	}
-	_, err := magasin.Add(groupe("a26-5n6"))
+	_, err := magasin.Add(groupe("5n6", "a26-01", cohorte))
 	if err == nil {
-		t.Fatal("le doublon de préfixe a été accepté")
+		t.Fatal("le doublon a été accepté")
 	}
-	if !strings.Contains(err.Error(), "a26-5n6") {
-		t.Fatalf("message : %v", err)
+	// Un autre groupe du même cours reste possible.
+	if _, err := magasin.Add(groupe("5n6", "a26-02", cohorte)); err != nil {
+		t.Fatalf("second groupe du cours : %v", err)
 	}
 }
 
-func TestMagasinRefuseUnGabaritSansChampDistinctif(t *testing.T) {
+func TestMagasinRefuseUnSeparateurDansUnNiveau(t *testing.T) {
 	magasin := classroom.Open(filepath.Join(t.TempDir(), "groupes.json"))
-	cours := groupe("a26-5n6")
-	cours.Defaults.NamePattern = "{assignment}"
 
-	if _, err := magasin.Add(cours); err == nil {
-		t.Fatal("un gabarit non distinctif a été accepté")
+	// Le point saisi dans un champ est slugifié, jamais conservé : le groupe
+	// « a26.01 » devient « a26-01 » et la nomenclature reste à quatre niveaux.
+	cree, err := magasin.Add(groupe("5n6", "a26.01", cohorte))
+	if err != nil {
+		t.Fatalf("ajout : %v", err)
 	}
-}
-
-func TestReglagesDuTravailReprennentLeGroupe(t *testing.T) {
-	cours := groupe("a26-5n6", "emilie-cote")
-	cours.Defaults.Visibility = "public"
-	cours.Defaults.Template = "acme/modele"
-
-	reglages := cours.Settings("tp1")
-	if reglages.Assignment != "a26-5n6-tp1" {
-		t.Fatalf("travail %q", reglages.Assignment)
+	if cree.Group != "a26-01" {
+		t.Fatalf("groupe enregistré : %q", cree.Group)
 	}
-	if reglages.Org != "acme" || reglages.Visibility != "public" ||
-		reglages.Template != "acme/modele" {
-		t.Fatalf("réglages : %+v", reglages)
+	if strings.Count(cree.Scope(), ".") != 1 {
+		t.Fatalf("portée à plus de deux niveaux : %q", cree.Scope())
 	}
 }

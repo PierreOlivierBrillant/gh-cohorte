@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
@@ -80,6 +81,26 @@ func (s *Server) handleSaveRoster(writer http.ResponseWriter, request *http.Requ
 
 // ------------------------------------------------------------------ paramètres
 
+// assignmentIdentifier valide un identifiant de travail déjà composé. Chaque
+// niveau est vérifié séparément : slugifier l'ensemble écraserait le point qui
+// les sépare, et « 5n6.a26-01.tp1 » redeviendrait « 5n6-a26-01-tp1 ».
+func assignmentIdentifier(value string) (string, error) {
+	cleaned := strings.TrimSpace(value)
+	if cleaned == "" {
+		return "", valid.Errorf("Travail : la valeur est vide.")
+	}
+	niveaux := strings.Split(cleaned, naming.Separator)
+	rendus := make([]string, 0, len(niveaux))
+	for _, niveau := range niveaux {
+		fragment, err := valid.SlugFragment(niveau, "Travail")
+		if err != nil {
+			return "", err
+		}
+		rendus = append(rendus, fragment)
+	}
+	return strings.Join(rendus, naming.Separator), nil
+}
+
 // normalize valide les réglages reçus du navigateur avant toute écriture.
 func normalize(settings config.Settings) (config.Settings, error) {
 	org, err := valid.Login(settings.Org, "Organisation")
@@ -88,7 +109,7 @@ func normalize(settings config.Settings) (config.Settings, error) {
 	}
 	settings.Org = org
 
-	assignment, err := valid.SlugFragment(settings.Assignment, "Travail")
+	assignment, err := assignmentIdentifier(settings.Assignment)
 	if err != nil {
 		return settings, err
 	}

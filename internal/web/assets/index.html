@@ -26,6 +26,7 @@
     <span class="jeton" id="groupe-prefixe"></span>
   </div>
   <p class="note" id="groupe-sous-titre"></p>
+  <div id="groupe-avis" hidden></div>
   <nav class="onglets" id="onglets">
     <button type="button" data-vue="travaux" class="actif">Travaux</button>
     <button type="button" data-vue="etudiants">Étudiants</button>
@@ -94,16 +95,24 @@
     <div class="boite">
       <div class="boite-entete"><strong>Le groupe</strong></div>
       <div class="boite-corps">
+        <div class="rangee">
+          <label class="champ-bloc">
+            <span class="etiquette">Cours</span>
+            <input type="text" id="nouveau-cours" class="champ" placeholder="5n6">
+          </label>
+          <label class="champ-bloc">
+            <span class="etiquette">Groupe</span>
+            <input type="text" id="nouveau-section" class="champ" placeholder="a26-01">
+            <span class="aide">Un cours peut avoir plusieurs groupes.</span>
+          </label>
+        </div>
+        <p class="aide">Les dépôts du groupe s'appelleront
+          <code id="nouveau-apercu">5n6.a26-01.travail.prenom-nom</code>. Le point sépare les
+          quatre niveaux et ne peut apparaître nulle part ailleurs : tout ce qui est saisi en est
+          nettoyé.</p>
         <label class="champ-bloc">
-          <span class="etiquette">Préfixe des dépôts</span>
-          <input type="text" id="nouveau-prefixe" class="champ" placeholder="a26-5n6">
-          <span class="aide">Les dépôts du groupe s'appelleront
-            <code id="nouveau-apercu">a26-5n6-travail-compte</code>. Laissez vide pour un groupe
-            dont les travaux sont nommés à la racine de l'organisation.</span>
-        </label>
-        <label class="champ-bloc">
-          <span class="etiquette">Nom du groupe</span>
-          <input type="text" id="nouveau-nom" class="champ" placeholder="5N6 — Automne 2026">
+          <span class="etiquette">Nom affiché</span>
+          <input type="text" id="nouveau-nom" class="champ" placeholder="5N6 — Automne 2026, groupe 01">
         </label>
       </div>
     </div>
@@ -223,16 +232,14 @@
         <label class="champ-bloc">
           <span class="etiquette">Nom du travail</span>
           <input type="text" id="travail-nom" class="champ" placeholder="tp1">
-          <span class="aide">Les dépôts s'appelleront <code id="apercu-nom">tp1-compte</code>.</span>
-        </label>
-        <label class="champ-bloc">
-          <span class="etiquette">Gabarit de nom des dépôts</span>
-          <input type="text" id="reglage-pattern" class="champ">
-          <span class="aide" id="aide-champs"></span>
+          <span class="aide">Chaque dépôt s'appellera
+            <code id="apercu-nom">cours.groupe.tp1.prenom-nom</code> — le nom de l'étudiant,
+            pas son compte GitHub.</span>
         </label>
         <label class="champ-bloc">
           <span class="etiquette">Gabarit de description</span>
           <input type="text" id="reglage-description" class="champ">
+          <span class="aide" id="aide-champs"></span>
         </label>
 
         <fieldset class="groupe-radio">
@@ -381,10 +388,14 @@
             <input type="text" id="gr-org" class="champ">
           </label>
           <label class="champ-bloc">
-            <span class="etiquette">Préfixe des dépôts</span>
-            <input type="text" id="gr-prefixe" class="champ">
-            <span class="aide">Le changer ne renomme aucun dépôt : il change ce que le groupe
-              regarde.</span>
+            <span class="etiquette">Cours</span>
+            <input type="text" id="gr-cours" class="champ">
+          </label>
+          <label class="champ-bloc">
+            <span class="etiquette">Groupe</span>
+            <input type="text" id="gr-section" class="champ">
+            <span class="aide">Les changer ne renomme aucun dépôt : ils changent ce que le
+              groupe regarde.</span>
           </label>
         </div>
       </div>

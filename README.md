@@ -113,6 +113,10 @@ continue d'être lu.
 
 ## Nommage des dépôts
 
+Cette section décrit l'assistant du **terminal**, qui compose encore les noms
+par gabarit. L'interface web suit la nomenclature à quatre niveaux décrite plus
+bas, qui n'est pas réglable.
+
 Gabarit par défaut : `{assignment}-{username}`.
 
 | Champ | Exemple pour « Émilie Côté / emilie-cote », travail `tp1` |
@@ -308,7 +312,7 @@ avec ses **étudiants**, à qui l'on **distribue des travaux**.
 
 | GitHub Classroom | Ici |
 | --- | --- |
-| Classroom | un **groupe** : une organisation, un préfixe, des étudiants |
+| Classroom | un **groupe** : un cours, une section, des étudiants |
 | Roster | la liste des étudiants du groupe |
 | Assignment | un **travail** distribué au groupe |
 | « a accepté le devoir » | a un dépôt pour ce travail |
@@ -318,53 +322,72 @@ Ce que Classroom faisait et que l'outil ne fait pas : pas de lien d'invitation �
 distribuer — les dépôts sont créés directement —, pas d'échéance, pas de
 correction automatique, pas de travail en équipe.
 
+### La nomenclature des dépôts
+
+Un dépôt porte **quatre niveaux, séparés par un point** :
+
+```
+cours . groupe . travail . étudiant
+5n6.a26-01.tp1.emilie-cote
+```
+
+Le point est **réservé** à cette découpe, et rien d'autre ne peut en produire :
+la slugification remplace tout caractère non alphanumérique par un tiret, si
+bien qu'un nom de cours, de travail ou d'étudiant venu d'un CSV en est nettoyé
+sans qu'on ait à s'en occuper — « J.-P. Tremblay » devient `j-p-tremblay`. Un
+compte GitHub, lui, n'en contient jamais.
+
+Un nom se relit donc **sans rien deviner** : quatre parties, pas une de plus.
+C'est ce qui distingue cette nomenclature de la précédente, tout en tirets :
+`a26-5n6-tp1-emilie-cote` ne disait pas où finissait le travail et où commençait
+la personne.
+
+Le dernier niveau est le **nom de l'étudiant**, pas son compte GitHub. Un dépôt
+se lit sans connaître le pseudonyme de personne — au prix d'une contrainte : le
+nom complet devient obligatoire, et deux homonymes font échouer la préparation
+avant toute écriture, en nommant les deux personnes en cause. Le lien entre un
+étudiant et son compte GitHub vit désormais dans la liste du groupe, et sur le
+dépôt lui-même sous forme d'invitation — plus dans son nom.
+
+Un cours peut avoir **plusieurs groupes** : `5n6.a26-01` et `5n6.a26-02` sont
+deux groupes du même cours, chacun avec sa liste et ses travaux.
+
 ### Comment un groupe tient sans serveur
 
-Le nom d'un dépôt porte tout : `préfixe-travail-compte`. Le groupe `a26-5n6`
-distribue `tp1` à `emilie-cote`, et le dépôt s'appelle `a26-5n6-tp1-emilie-cote`.
 **GitHub reste la seule source de vérité** : les travaux ne sont pas des fiches
 enregistrées quelque part, ils sont lus dans l'inventaire de l'organisation.
 Déclarer un groupe n'écrit rien sur GitHub, et le retirer n'y efface rien.
 
 Le fichier local `groupes.json`, voisin des réglages, ne retient que ce que les
-noms de dépôts ne savent pas dire : **qui sont les étudiants** et les réglages
-que les travaux du groupe reprennent.
-
-C'est aussi la liste des étudiants qui permet de **relire** un nom de dépôt.
-`a26-5n6-tp1-emilie-cote` ne se découpe en travail et en compte que si l'on sait
-déjà qu'`emilie-cote` est du groupe — sans quoi rien ne dit où finit le nom du
-travail. Cette relecture remplace le couplage « invitation → compte » de
-Classroom : un travail distribué à une seule personne est reconnu aussi bien
-qu'un travail distribué à trente.
+noms de dépôts ne savent pas dire : **qui sont les étudiants** — nom complet et
+compte GitHub — et les réglages que les travaux du groupe reprennent.
 
 ### Adopter ce qui existe déjà
 
 Une organisation en cours d'année n'a rien à renommer. L'écran d'accueil montre
 vos groupes déclarés et, en dessous, les **groupes repérés dans l'organisation
-choisie** : l'outil détecte les travaux, les regroupe par ce qui les précède, et
-propose le préfixe avec les comptes qu'on y trouve.
+choisie**.
 
 ```
 Vos groupes                                              [Nouveau groupe]
   (aucun pour le moment)
 
 Groupes repérés dans l'organisation      Organisation [acme ▾]  [Recharger]
-  a26-5n6    travailsession, tp1     24 compte(s)   48 dépôt(s)   Adopter
-  a26-4w6    tp1                     22 compte(s)   22 dépôt(s)   Adopter
+  5n6.a26-02   tp1                              22 étudiant(s)  22 dépôts  Adopter
+  a26-5n6      travailsession, tp1  ancienne    24 compte(s)    48 dépôts  Adopter
+  a26-4w6      tp1                  ancienne    22 compte(s)    22 dépôts  Adopter
 ```
 
-**Adopter** ne demande qu'un nom : le préfixe et la liste des étudiants viennent
-des dépôts existants ; il ne reste qu'à retrouver les noms complets. Un préfixe
-déjà couvert par un groupe cesse d'être proposé.
+Les préfixes de l'ancienne nomenclature sont signalés comme tels. Un groupe
+adopté ainsi **reste lisible** — ses dépôts, ses travaux, ses accès s'affichent
+— mais on ne lui distribue plus : il faut d'abord le migrer.
 
 Le sélecteur d'organisation est à l'accueil, et non enfoui dans un formulaire :
 on choisit d'abord où regarder, la liste suit. L'organisation retenue est
 mémorisée, et la session suivante s'ouvre dessus.
 
 Pour les cas que la détection ne devine pas, **Nouveau groupe** déclare un
-groupe à la main : organisation, préfixe, liste d'étudiants. Un groupe **sans
-préfixe** couvre les travaux nommés à la racine de l'organisation, pour une
-nomenclature plate du type `tp1-emilie-cote`.
+groupe à la main : organisation, cours, groupe, liste d'étudiants.
 
 ### Travaux
 
@@ -553,7 +576,8 @@ sortie propre hors terminal.
 | `internal/roster` | lecture et écriture des listes CSV |
 | `internal/plan` | gabarits et plan de génération |
 | `internal/groups` | détection des groupes de dépôts, sélections |
-| `internal/classroom` | groupes : étudiants, préfixe, travaux lus dans les dépôts |
+| `internal/naming` | la nomenclature des dépôts : composition et relecture |
+| `internal/classroom` | groupes : étudiants, place dans la nomenclature, travaux |
 | `internal/orgs` | inventaire des organisations : rôle et droit de créer |
 | `internal/starter` | lecture d'un dossier de fichiers de départ |
 | `internal/config`, `internal/cache` | réglages et cache disque |
@@ -601,13 +625,25 @@ tranché, et pourquoi.
   L'alternative — un dépôt de service dans l'organisation pour y stocker la
   liste — rendrait le groupe partageable entre plusieurs enseignants, au prix
   d'écritures que personne n'a demandées ; elle reste ouverte.
-- **La liste des étudiants sert à relire les noms de dépôts.** Découper
-  `a26-5n6-tp1-emilie-cote` en travail et en compte est impossible sans savoir
-  qu'`emilie-cote` existe : le gabarit est donc inversé en expression régulière,
-  personne par personne (`plan.Matcher`). C'est ce qui remplace le couplage
-  « invitation → compte » de Classroom, et ce qui permet de reconnaître un
-  travail distribué à une seule personne — là où la détection par préfixe seule
-  exige deux dépôts pour conclure.
+- **Un séparateur réservé rend les noms de dépôts relisibles.** GitHub
+  n'autorise que `.`, `-` et `_` en plus des lettres et des chiffres ; le tiret
+  servant déjà à l'intérieur des noms, le **point** sépare les quatre niveaux.
+  Il est impossible à saisir sans effort particulier : la slugification remplace
+  déjà tout caractère non alphanumérique par un tiret, si bien qu'un CSV ponctué
+  est nettoyé et qu'un compte GitHub n'en contient jamais. Un nom se découpe donc
+  sans rien deviner, là où `a26-5n6-tp1-emilie-cote` demandait de connaître
+  d'avance la liste des comptes.
+- **Le nom de l'étudiant, plutôt que son compte.** Un dépôt se lit sans
+  connaître le pseudonyme de personne. En contrepartie, le nom complet devient
+  obligatoire, les homonymes font échouer la préparation avant toute écriture, et
+  **le compte GitHub n'est plus déductible du nom du dépôt** : il vit dans la
+  liste du groupe, et sur le dépôt sous forme d'invitation.
+- **L'ancienne nomenclature reste lisible, isolée dans un fichier.**
+  `internal/classroom/legacy.go` rassemble tout ce qui ne sert qu'aux dépôts
+  nommés avant le séparateur — relecture par gabarit inversé (`plan.Matcher`),
+  détection par préfixe. Rien n'y est créé : ces groupes s'affichent et se
+  migrent, mais on ne leur distribue plus. Le jour où plus aucune organisation
+  n'en contient, le fichier disparaît d'un bloc.
 - **L'interface web est une API au-dessus des paquets du domaine, pas un
   terminal déguisé.** `internal/web` appelle `plan`, `groups`, `runner`, `clone`
   et `ghapi` directement : la validation, les gabarits, le refus des collisions

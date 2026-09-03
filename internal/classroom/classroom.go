@@ -1,16 +1,16 @@
-// Package classroom tient la notion de groupe : des étudiants, un préfixe de
-// dépôts, et les réglages que ses travaux reprennent.
+// Package classroom tient la notion de groupe : des étudiants, une place dans
+// la nomenclature des dépôts, et les réglages que ses travaux reprennent.
 //
 // GitHub reste la source de vérité. Un travail n'est pas une fiche enregistrée
-// quelque part : c'est l'ensemble des dépôts nommés « préfixe-travail-compte »,
+// quelque part : c'est l'ensemble des dépôts nommés « cours.groupe.travail.étudiant »,
 // lus dans l'organisation. Le groupe ne retient que ce que les noms de dépôts
 // ne savent pas dire — qui sont les étudiants, et avec quels réglages leurs
 // dépôts sont créés. Un groupe se déclare donc sans rien écrire sur GitHub, et
 // se supprime sans rien y effacer.
 //
-// C'est aussi la liste des étudiants qui permet de relire un nom de dépôt :
-// « a26-5n6-tp1-emilie-cote » ne se découpe en travail et en compte que si l'on
-// sait déjà que « emilie-cote » est du groupe.
+// Les groupes déclarés avant la nomenclature à quatre niveaux gardent leur
+// préfixe tout en tirets. Ils restent lisibles — leurs dépôts s'affichent — mais
+// on ne leur distribue plus : il faut d'abord les migrer.
 package classroom
 
 import (
@@ -19,14 +19,18 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
+// NamePattern est le gabarit des noms de dépôts. Il n'est pas réglable : c'est
+// la nomenclature elle-même, et tout le reste en dépend.
+const NamePattern = "{assignment}" + naming.Separator + "{name}"
+
 // Defaults rassemble les réglages que les travaux du groupe reprennent.
 type Defaults struct {
-	NamePattern        string  `json:"name_pattern"`
 	DescriptionPattern string  `json:"description_pattern"`
 	Template           string  `json:"template"`
 	Visibility         string  `json:"visibility"`
@@ -40,7 +44,6 @@ type Defaults struct {
 // DefaultsFrom reprend les réglages généraux comme point de départ d'un groupe.
 func DefaultsFrom(settings config.Settings) Defaults {
 	return Defaults{
-		NamePattern:        settings.NamePattern,
 		DescriptionPattern: settings.DescriptionPattern,
 		Template:           settings.Template,
 		Visibility:         settings.Visibility,
@@ -55,8 +58,8 @@ func DefaultsFrom(settings config.Settings) Defaults {
 // normalized comble les valeurs absentes par celles de l'outil.
 func (d Defaults) normalized() Defaults {
 	repli := config.Default()
-	if strings.TrimSpace(d.NamePattern) == "" {
-		d.NamePattern = repli.NamePattern
+	if strings.TrimSpace(d.DescriptionPattern) == "" {
+		d.DescriptionPattern = repli.DescriptionPattern
 	}
 	if strings.TrimSpace(d.Visibility) == "" {
 		d.Visibility = repli.Visibility
@@ -73,18 +76,25 @@ func (d Defaults) normalized() Defaults {
 	return d
 }
 
-// Classroom est un groupe : une organisation, un préfixe, des étudiants.
+// Classroom est un groupe : un cours, une organisation, des étudiants.
 type Classroom struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Org  string `json:"org"`
-	// Prefix précède le nom de chaque travail. Vide, le groupe couvre les
-	// travaux nommés directement à la racine de l'organisation.
-	Prefix     string          `json:"prefix"`
-	Students   []roster.Person `json:"students"`
-	RosterPath string          `json:"roster_path,omitempty"`
-	Defaults   Defaults        `json:"defaults"`
-	CreatedAt  string          `json:"created_at"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Org    string `json:"org"`
+	Course string `json:"course"`
+	Group  string `json:"group"`
+	// LegacyPrefix est le préfixe tout en tirets d'un groupe déclaré avant la
+	// nomenclature à quatre niveaux. Sa présence dit qu'il reste à migrer.
+	LegacyPrefix string          `json:"prefix,omitempty"`
+	Students     []roster.Person `json:"students"`
+	RosterPath   string          `json:"roster_path,omitempty"`
+	Defaults     Defaults        `json:"defaults"`
+	CreatedAt    string          `json:"created_at"`
+}
+
+// Legacy dit si le groupe suit encore l'ancienne nomenclature.
+func (c Classroom) Legacy() bool {
+	return strings.TrimSpace(c.Course) == "" && strings.TrimSpace(c.LegacyPrefix) != ""
 }
 
 // Validate met le groupe en forme et refuse ce qui ne peut pas nommer un dépôt.
@@ -95,22 +105,33 @@ func (c Classroom) Validate() (Classroom, error) {
 	}
 	c.Org = org
 
-	if strings.TrimSpace(c.Prefix) != "" {
-		prefix, err := valid.SlugFragment(c.Prefix, "Préfixe du groupe")
+	if c.Legacy() {
+		prefix, err := valid.SlugFragment(c.LegacyPrefix, "Préfixe du groupe")
 		if err != nil {
 			return c, err
 		}
-		c.Prefix = prefix
+		c.LegacyPrefix = prefix
 	} else {
-		c.Prefix = ""
+		course, err := naming.Fragment(c.Course, "Cours")
+		if err != nil {
+			return c, err
+		}
+		group, err := naming.Fragment(c.Group, "Groupe")
+		if err != nil {
+			return c, err
+		}
+		c.Course, c.Group, c.LegacyPrefix = course, group, ""
 	}
 
 	c.Name = strings.TrimSpace(c.Name)
 	if c.Name == "" {
 		c.Name = c.Label()
 	}
-	if _, err := plan.ValidatePattern(c.Defaults.NamePattern, "Gabarit de nom", true); err != nil {
-		return c, err
+	if strings.TrimSpace(c.Defaults.DescriptionPattern) != "" {
+		if _, err := plan.ValidatePattern(
+			c.Defaults.DescriptionPattern, "Gabarit de description", false); err != nil {
+			return c, err
+		}
 	}
 	c.Defaults = c.Defaults.normalized()
 	c.Students = dedupe(c.Students)
@@ -119,33 +140,40 @@ func (c Classroom) Validate() (Classroom, error) {
 
 // Label décrit le groupe quand il n'a pas de nom propre.
 func (c Classroom) Label() string {
-	if c.Prefix == "" {
-		return c.Org
+	if c.Legacy() {
+		return c.LegacyPrefix
 	}
-	return c.Prefix
+	return c.Course + " " + c.Group
+}
+
+// Scope est ce qui précède le nom d'un travail dans les dépôts du groupe.
+func (c Classroom) Scope() string {
+	if c.Legacy() {
+		return c.LegacyPrefix
+	}
+	return naming.Prefix(c.Course, c.Group)
 }
 
 // AssignmentID compose l'identifiant complet d'un travail du groupe : c'est lui
-// qui préfixe les dépôts, et qui sert d'identifiant de travail à l'outil.
+// qui précède le nom de l'étudiant dans le nom du dépôt.
 func (c Classroom) AssignmentID(name string) string {
-	name = strings.Trim(strings.TrimSpace(name), groups.Separator)
-	if c.Prefix == "" {
-		return name
+	name = strings.TrimSpace(name)
+	if c.Legacy() {
+		return strings.Trim(c.LegacyPrefix+groups.Separator+name, groups.Separator)
 	}
-	if name == "" {
-		return c.Prefix
-	}
-	return c.Prefix + groups.Separator + name
+	return naming.AssignmentID(c.Course, c.Group, name)
 }
 
-// ShortName retire le préfixe du groupe d'un identifiant de travail.
+// ShortName retire du travail ce qui désigne le groupe.
 func (c Classroom) ShortName(id string) string {
-	if c.Prefix == "" {
-		return id
+	scope := c.Scope()
+	separator := naming.Separator
+	if c.Legacy() {
+		separator = groups.Separator
 	}
-	if len(id) > len(c.Prefix)+1 &&
-		strings.EqualFold(id[:len(c.Prefix)+1], c.Prefix+groups.Separator) {
-		return id[len(c.Prefix)+1:]
+	if scope != "" && len(id) > len(scope)+1 &&
+		strings.EqualFold(id[:len(scope)+1], scope+separator) {
+		return id[len(scope)+1:]
 	}
 	return id
 }
@@ -155,11 +183,16 @@ func (c Classroom) Owns(id string) bool {
 	if strings.TrimSpace(id) == "" {
 		return false
 	}
-	if c.Prefix == "" {
-		return true
+	scope := c.Scope()
+	if scope == "" {
+		return false
 	}
-	return len(id) > len(c.Prefix)+1 &&
-		strings.EqualFold(id[:len(c.Prefix)+1], c.Prefix+groups.Separator)
+	separator := naming.Separator
+	if c.Legacy() {
+		separator = groups.Separator
+	}
+	return len(id) > len(scope)+1 &&
+		strings.EqualFold(id[:len(scope)+1], scope+separator)
 }
 
 // Settings compose les réglages d'un travail du groupe, prêts pour le plan.
@@ -168,7 +201,7 @@ func (c Classroom) Settings(assignmentName string) config.Settings {
 	settings := config.Default()
 	settings.Org = c.Org
 	settings.Assignment = c.AssignmentID(assignmentName)
-	settings.NamePattern = defauts.NamePattern
+	settings.NamePattern = NamePattern
 	settings.DescriptionPattern = defauts.DescriptionPattern
 	settings.Template = defauts.Template
 	settings.Visibility = defauts.Visibility
@@ -179,6 +212,29 @@ func (c Classroom) Settings(assignmentName string) config.Settings {
 	settings.DelaySeconds = defauts.DelaySeconds
 	settings.RosterPath = c.RosterPath
 	return settings
+}
+
+// MissingNames renvoie les étudiants dont le nom complet manque : leur dépôt ne
+// peut pas être nommé.
+func (c Classroom) MissingNames() []roster.Person {
+	var incomplets []roster.Person
+	for _, student := range c.Students {
+		if _, err := naming.Student(student.FullName); err != nil {
+			incomplets = append(incomplets, student)
+		}
+	}
+	return incomplets
+}
+
+// fragments associe à chaque étudiant le fragment qui le nomme dans un dépôt.
+func (c Classroom) fragments() map[string]roster.Person {
+	connus := map[string]roster.Person{}
+	for _, student := range c.Students {
+		if fragment, err := naming.Student(student.FullName); err == nil {
+			connus[strings.ToLower(fragment)] = student
+		}
+	}
+	return connus
 }
 
 // Has dit si un compte GitHub figure parmi les étudiants du groupe.
@@ -199,172 +255,157 @@ type Assignment struct {
 	Name     string `json:"name"`
 	Repos    int    `json:"repos"`
 	Students int    `json:"students"` // étudiants du groupe qui ont un dépôt
-	Others   int    `json:"others"`   // dépôts dont le compte n'est pas du groupe
+	Others   int    `json:"others"`   // dépôts dont l'étudiant n'est pas du groupe
 	PushedAt string `json:"pushed_at"`
 }
 
 // Assignments retrouve les travaux du groupe parmi les dépôts de l'organisation.
-//
-// Deux lectures se complètent : les dépôts des étudiants du groupe, relus par le
-// gabarit — exact, même pour un travail distribué à une seule personne —, et la
-// détection par préfixe, qui rattrape les travaux dont aucun étudiant inscrit
-// n'a de dépôt.
+// La nomenclature à quatre niveaux se relit sans rien deviner : un dépôt est du
+// groupe, ou il ne l'est pas.
 func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
-	identifiants := map[string]string{} // minuscules → identifiant tel qu'écrit
-	retenir := func(id string) {
-		if c.Owns(id) {
-			identifiants[strings.ToLower(id)] = id
-		}
+	if c.Legacy() {
+		return c.legacyAssignments(repos)
 	}
+	connus := c.fragments()
+	parNom := map[string]*Assignment{}
 
-	pattern := c.Defaults.normalized().NamePattern
-	for _, student := range c.Students {
-		expression := plan.Matcher(pattern, student)
-		if expression == nil {
-			break
-		}
-		for _, repo := range repos {
-			if id, found := plan.Assignment(expression, repo.Name); found {
-				retenir(id)
-			}
-		}
-	}
-
-	names := make([]string, 0, len(repos))
 	for _, repo := range repos {
-		names = append(names, repo.Name)
-	}
-	for _, detected := range groups.Detect(names, 2) {
-		retenir(detected.Prefix)
-	}
-
-	trouves := make([]Assignment, 0, len(identifiants))
-	for _, id := range identifiants {
-		group := groups.Build(id, repos)
-		if group.Len() == 0 {
+		parts, reconnu := naming.Parse(repo.Name)
+		if !reconnu || !naming.Belongs(parts, c.Course, c.Group) {
 			continue
 		}
-		travail := Assignment{ID: id, Name: c.ShortName(id), Repos: group.Len()}
-		for _, repo := range group.Repos {
-			if c.Has(repo.Suffix) {
-				travail.Students++
-			} else {
-				travail.Others++
+		cle := strings.ToLower(parts.Assignment)
+		travail, deja := parNom[cle]
+		if !deja {
+			travail = &Assignment{
+				ID:   naming.AssignmentID(c.Course, c.Group, parts.Assignment),
+				Name: parts.Assignment,
 			}
-			if repo.PushedAt > travail.PushedAt {
-				travail.PushedAt = repo.PushedAt
-			}
+			parNom[cle] = travail
 		}
-		trouves = append(trouves, travail)
+		travail.Repos++
+		if _, inscrit := connus[strings.ToLower(parts.Student)]; inscrit {
+			travail.Students++
+		} else {
+			travail.Others++
+		}
+		if repo.PushedAt > travail.PushedAt {
+			travail.PushedAt = repo.PushedAt
+		}
 	}
 
-	// Un travail dont les dépôts englobent ceux d'un autre n'en est pas un :
-	// « a26-5n6 » disparaît devant « a26-5n6-tp1 » quand tous ses dépôts y sont.
-	trouves = withoutUmbrellas(trouves)
-	sort.Slice(trouves, func(i, j int) bool {
-		if trouves[i].PushedAt != trouves[j].PushedAt {
-			return trouves[i].PushedAt > trouves[j].PushedAt
-		}
-		return strings.ToLower(trouves[i].Name) < strings.ToLower(trouves[j].Name)
-	})
+	trouves := make([]Assignment, 0, len(parNom))
+	for _, travail := range parNom {
+		trouves = append(trouves, *travail)
+	}
+	sortAssignments(trouves)
 	return trouves
 }
 
-// withoutUmbrellas écarte les identifiants qui ne font que chapeauter d'autres
-// travaux, sans dépôt propre.
-func withoutUmbrellas(found []Assignment) []Assignment {
-	couverts := map[string]int{}
-	for _, travail := range found {
-		for _, autre := range found {
-			if travail.ID == autre.ID {
-				continue
-			}
-			if strings.HasPrefix(strings.ToLower(autre.ID),
-				strings.ToLower(travail.ID)+groups.Separator) {
-				couverts[travail.ID] += autre.Repos
-			}
+func sortAssignments(found []Assignment) {
+	sort.Slice(found, func(i, j int) bool {
+		if found[i].PushedAt != found[j].PushedAt {
+			return found[i].PushedAt > found[j].PushedAt
 		}
-	}
-	gardes := make([]Assignment, 0, len(found))
-	for _, travail := range found {
-		if couverts[travail.ID] >= travail.Repos {
-			continue
-		}
-		gardes = append(gardes, travail)
-	}
-	return gardes
+		return strings.ToLower(found[i].Name) < strings.ToLower(found[j].Name)
+	})
 }
 
 // Served renvoie les comptes du groupe qui ont déjà un dépôt pour ce travail.
 func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[string]bool {
-	taken := groups.Build(assignmentID, repos).Suffixes()
 	servis := map[string]bool{}
-	for _, student := range c.Students {
-		if taken[strings.ToLower(student.Username)] {
+	if c.Legacy() {
+		taken := groups.Build(assignmentID, repos).Suffixes()
+		for _, student := range c.Students {
+			if taken[strings.ToLower(student.Username)] {
+				servis[strings.ToLower(student.Username)] = true
+			}
+		}
+		return servis
+	}
+
+	connus := c.fragments()
+	for _, repo := range repos {
+		parts, reconnu := naming.Parse(repo.Name)
+		if !reconnu {
+			continue
+		}
+		id := naming.AssignmentID(parts.Course, parts.Group, parts.Assignment)
+		if !strings.EqualFold(id, assignmentID) {
+			continue
+		}
+		if student, inscrit := connus[strings.ToLower(parts.Student)]; inscrit {
 			servis[strings.ToLower(student.Username)] = true
 		}
 	}
 	return servis
 }
 
+// Repos renvoie les dépôts d'un travail du groupe, du plus récent au plus ancien.
+func (c Classroom) Repos(assignmentID string, repos []groups.RepoInfo) []groups.Repo {
+	if c.Legacy() {
+		return groups.Build(assignmentID, repos).Repos
+	}
+	trouves := make([]groups.Repo, 0)
+	for _, repo := range repos {
+		parts, reconnu := naming.Parse(repo.Name)
+		if !reconnu {
+			continue
+		}
+		id := naming.AssignmentID(parts.Course, parts.Group, parts.Assignment)
+		if !strings.EqualFold(id, assignmentID) {
+			continue
+		}
+		pushed := repo.PushedAt
+		if len(pushed) > 10 {
+			pushed = pushed[:10]
+		}
+		trouves = append(trouves, groups.Repo{
+			Name: repo.Name, Suffix: parts.Student, Private: repo.Private,
+			URL: repo.HTMLURL, PushedAt: pushed,
+		})
+	}
+	sort.Slice(trouves, func(i, j int) bool {
+		return strings.ToLower(trouves[i].Name) < strings.ToLower(trouves[j].Name)
+	})
+	return trouves
+}
+
+// StudentOf retrouve l'étudiant du groupe auquel un dépôt appartient.
+func (c Classroom) StudentOf(repoName string) (roster.Person, bool) {
+	if c.Legacy() {
+		return c.legacyStudentOf(repoName)
+	}
+	parts, reconnu := naming.Parse(repoName)
+	if !reconnu {
+		return roster.Person{}, false
+	}
+	student, inscrit := c.fragments()[strings.ToLower(parts.Student)]
+	return student, inscrit
+}
+
 // ----------------------------------------------------------------- candidats
 
 // Candidate est un groupe possible, deviné des dépôts déjà présents.
 type Candidate struct {
+	Course      string   `json:"course"`
+	Group       string   `json:"group"`
 	Prefix      string   `json:"prefix"`
 	Assignments []string `json:"assignments"`
 	Repos       int      `json:"repos"`
 	Students    []string `json:"students"`
+	// Legacy dit que le candidat suit l'ancienne nomenclature : ses comptes
+	// sont des comptes GitHub, et il demande une migration avant distribution.
+	Legacy bool `json:"legacy"`
 }
 
-// Candidates propose des groupes à partir des dépôts de l'organisation : les
-// travaux détectés sont regroupés par ce qui les précède. « a26-5n6-tp1 » et
-// « a26-5n6-travailsession » proposent ainsi le groupe « a26-5n6 », avec les
-// comptes qu'on y trouve déjà.
+// Candidates propose les groupes lisibles dans les dépôts : d'abord ceux qui
+// suivent la nomenclature à quatre niveaux, puis les préfixes hérités.
 func Candidates(repos []groups.RepoInfo) []Candidate {
-	names := make([]string, 0, len(repos))
-	for _, repo := range repos {
-		names = append(names, repo.Name)
-	}
-
-	parents := map[string]*Candidate{}
-	comptes := map[string]map[string]bool{}
-	for _, detected := range groups.Detect(names, 2) {
-		segments := strings.Split(detected.Prefix, groups.Separator)
-		prefix := ""
-		if len(segments) > 1 {
-			prefix = strings.Join(segments[:len(segments)-1], groups.Separator)
-		}
-		court := segments[len(segments)-1]
-
-		candidat, connu := parents[prefix]
-		if !connu {
-			candidat = &Candidate{Prefix: prefix}
-			parents[prefix] = candidat
-			comptes[prefix] = map[string]bool{}
-		}
-		candidat.Assignments = append(candidat.Assignments, court)
-		group := groups.Build(detected.Prefix, repos)
-		candidat.Repos += group.Len()
-		for _, repo := range group.Repos {
-			comptes[prefix][strings.ToLower(repo.Suffix)] = true
-		}
-	}
-
-	proposes := make([]Candidate, 0, len(parents))
-	for prefix, candidat := range parents {
-		for compte := range comptes[prefix] {
-			candidat.Students = append(candidat.Students, compte)
-		}
-		sort.Strings(candidat.Students)
-		sort.Strings(candidat.Assignments)
-		proposes = append(proposes, *candidat)
-	}
-	// D'abord les préfixes qui rassemblent le plus de travaux : ce sont les plus
-	// susceptibles d'être de vrais groupes.
-	sort.Slice(proposes, func(i, j int) bool {
-		if len(proposes[i].Assignments) != len(proposes[j].Assignments) {
-			return len(proposes[i].Assignments) > len(proposes[j].Assignments)
+	proposes := append(currentCandidates(repos), legacyCandidates(repos)...)
+	sort.SliceStable(proposes, func(i, j int) bool {
+		if proposes[i].Legacy != proposes[j].Legacy {
+			return !proposes[i].Legacy
 		}
 		if proposes[i].Repos != proposes[j].Repos {
 			return proposes[i].Repos > proposes[j].Repos
@@ -372,6 +413,51 @@ func Candidates(repos []groups.RepoInfo) []Candidate {
 		return proposes[i].Prefix < proposes[j].Prefix
 	})
 	return proposes
+}
+
+// currentCandidates lit les couples cours/groupe présents dans les dépôts.
+func currentCandidates(repos []groups.RepoInfo) []Candidate {
+	parPrefixe := map[string]*Candidate{}
+	travaux := map[string]map[string]bool{}
+	etudiants := map[string]map[string]bool{}
+
+	for _, repo := range repos {
+		parts, reconnu := naming.Parse(repo.Name)
+		if !reconnu {
+			continue
+		}
+		prefixe := naming.Prefix(parts.Course, parts.Group)
+		cle := strings.ToLower(prefixe)
+		candidat, deja := parPrefixe[cle]
+		if !deja {
+			candidat = &Candidate{
+				Course: parts.Course, Group: parts.Group, Prefix: prefixe,
+			}
+			parPrefixe[cle] = candidat
+			travaux[cle] = map[string]bool{}
+			etudiants[cle] = map[string]bool{}
+		}
+		candidat.Repos++
+		travaux[cle][parts.Assignment] = true
+		etudiants[cle][parts.Student] = true
+	}
+
+	proposes := make([]Candidate, 0, len(parPrefixe))
+	for cle, candidat := range parPrefixe {
+		candidat.Assignments = triees(travaux[cle])
+		candidat.Students = triees(etudiants[cle])
+		proposes = append(proposes, *candidat)
+	}
+	return proposes
+}
+
+func triees(ensemble map[string]bool) []string {
+	liste := make([]string, 0, len(ensemble))
+	for valeur := range ensemble {
+		liste = append(liste, valeur)
+	}
+	sort.Strings(liste)
+	return liste
 }
 
 // StudentsOf construit une liste d'étudiants à partir de comptes GitHub seuls :

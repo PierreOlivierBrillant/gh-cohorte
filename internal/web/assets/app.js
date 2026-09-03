@@ -313,10 +313,24 @@ async function ouvrirGroupe(id, force) {
   etat.travail = null;
   etat.etudiants = [];
 
+  const herite = !groupe.course && groupe.prefix;
   $('groupe-titre').textContent = groupe.name;
-  $('groupe-prefixe').textContent = groupe.prefix ? groupe.prefix + '-…' : 'sans préfixe';
+  $('groupe-prefixe').textContent = herite
+    ? groupe.prefix + '-…'
+    : `${groupe.course}.${groupe.group}.…`;
   $('groupe-sous-titre').textContent =
     `Organisation ${groupe.org} · ${(groupe.students || []).length} étudiant(s)`;
+
+  const avis = $('groupe-avis');
+  vider(avis);
+  avis.hidden = !herite;
+  if (herite) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: "Ce groupe suit l'ancienne nomenclature, tout en tirets. Ses dépôts restent " +
+        "lisibles, mais on ne peut plus lui distribuer de travail : migrez-le depuis " +
+        '« Réglages du groupe ».' }));
+  }
+  $('travaux-nouveau').disabled = !!herite;
   dessinerTravaux();
   afficherVue('travaux');
 }
@@ -429,7 +443,11 @@ async function montrerCandidats(org, force) {
         el('span', { classe: 'detail',
           texte: candidat.assignments.join(', ') || 'aucun travail' })),
       el('span', { classe: 'espace' }),
-      el('span', { classe: 'jeton', texte: `${candidat.students.length} compte(s)` }),
+      candidat.legacy
+        ? el('span', { classe: 'jeton non', texte: 'ancienne nomenclature' })
+        : null,
+      el('span', { classe: 'jeton',
+        texte: `${candidat.students.length} ${candidat.legacy ? 'compte(s)' : 'étudiant(s)'}` }),
       el('span', { classe: 'jeton', texte: `${candidat.repos} dépôt(s)` }),
       el('span', { classe: 'jeton lien', texte: 'Adopter' })));
   }
@@ -446,16 +464,28 @@ async function adopter(candidat, org) {
     el('label', { classe: 'champ-bloc' },
       el('span', { classe: 'etiquette', texte: 'Nom du groupe' }), nom),
     el('p', { classe: 'note',
-      texte: `${travaux(candidat.assignments.length)} et ${candidat.students.length} ` +
-        'compte(s) trouvés dans les dépôts existants. Les comptes deviennent la liste ' +
-        "des étudiants ; aucun dépôt n'est touché." })), 'Adopter');
+      texte: candidat.legacy
+        ? `${travaux(candidat.assignments.length)} et ${candidat.students.length} ` +
+          'compte(s) trouvés dans les dépôts existants. Les comptes deviennent la liste ' +
+          "des étudiants ; aucun dépôt n'est touché."
+        : `${travaux(candidat.assignments.length)} trouvés dans les dépôts existants. ` +
+          "Les noms lus dans les dépôts ne sont pas des comptes GitHub : importez la " +
+          "liste des étudiants une fois le groupe créé." })), 'Adopter');
   if (!confirme) return;
 
+  // Un candidat hérité garde son préfixe en attendant sa migration ; un
+  // candidat de la nomenclature courante s'adopte par son cours et son groupe.
+  // Les noms lus dans les dépôts ne sont pas des comptes GitHub : seuls ceux
+  // d'un groupe hérité peuvent servir de liste d'étudiants.
   const cree = await tenter(() => api('POST', '/api/classrooms', {
     org,
-    prefix: candidat.prefix,
+    course: candidat.legacy ? '' : candidat.course,
+    group: candidat.legacy ? '' : candidat.group,
+    prefix: candidat.legacy ? candidat.prefix : '',
     name: nom.value.trim() || candidat.prefix || org,
-    students: candidat.students.map((compte) => ({ username: compte, full_name: '' })),
+    students: candidat.legacy
+      ? candidat.students.map((compte) => ({ username: compte, full_name: '' }))
+      : [],
     roster_path: '',
     defaults: {},
   }), 'Groupe');
@@ -468,7 +498,8 @@ async function adopter(candidat, org) {
 
 $('groupes-nouveau').addEventListener('click', async () => {
   etat.nouveau = { org: '', etudiants: [], rejets: [] };
-  $('nouveau-prefixe').value = '';
+  $('nouveau-cours').value = '';
+  $('nouveau-section').value = '';
   $('nouveau-nom').value = '';
   $('nouveau-chemin').value = etat.reglages.roster_path || '';
   $('nouveau-texte').value = '';
@@ -544,7 +575,8 @@ async function chargerCandidats(org) {
 
 // adopterCandidat reprend un préfixe déjà en place et les comptes qu'on y trouve.
 function adopterCandidat(candidat) {
-  $('nouveau-prefixe').value = candidat.prefix;
+  $('nouveau-cours').value = candidat.course || '';
+  $('nouveau-section').value = candidat.group || '';
   if (!$('nouveau-nom').value.trim()) {
     $('nouveau-nom').value = candidat.prefix || etat.nouveau.org;
   }
@@ -557,11 +589,14 @@ function adopterCandidat(candidat) {
     `${candidat.students.length} compte(s) trouvé(s) dans les dépôts existants.`);
 }
 
-$('nouveau-prefixe').addEventListener('input', majApercuPrefixe);
+for (const id of ['nouveau-cours', 'nouveau-section']) {
+  $(id).addEventListener('input', majApercuPrefixe);
+}
 
 function majApercuPrefixe() {
-  const prefixe = $('nouveau-prefixe').value.trim();
-  $('nouveau-apercu').textContent = prefixe ? `${prefixe}-travail-compte` : 'travail-compte';
+  const cours = $('nouveau-cours').value.trim() || 'cours';
+  const section = $('nouveau-section').value.trim() || 'groupe';
+  $('nouveau-apercu').textContent = `${cours}.${section}.travail.prenom-nom`;
 }
 
 $('nouveau-lire').addEventListener('click', async () => {
@@ -632,7 +667,9 @@ $('nouveau-creer').addEventListener('click', async () => {
 
   const cree = await tenter(() => api('POST', '/api/classrooms', {
     org,
-    prefix: $('nouveau-prefixe').value.trim(),
+    course: $('nouveau-cours').value.trim(),
+    group: $('nouveau-section').value.trim(),
+    prefix: '',
     name: $('nouveau-nom').value.trim(),
     students: etat.nouveau.etudiants,
     roster_path: $('nouveau-chemin').value.trim(),
@@ -686,7 +723,7 @@ $('travaux-recharger').addEventListener('click', () => ouvrirGroupe(etat.groupe.
 // ------------------------------------------------------- détail d'un travail
 
 async function ouvrirTravail(travail, force) {
-  const chemin = `/api/orgs/${encode(etat.groupe.org)}/groups/${encode(travail.id)}` +
+  const chemin = `/api/classrooms/${encode(etat.groupe.id)}/assignments/${encode(travail.name)}` +
     (force ? '?refresh=1' : '');
   const detail = await tenter(() => api('GET', chemin), 'Travail');
   if (!detail) return;
@@ -705,7 +742,9 @@ async function ouvrirTravail(travail, force) {
 function dessinerTravail() {
   const depots = etat.travail.depots;
   const total = (etat.groupe.students || []).length;
-  const servis = depots.filter((repo) => estDuGroupe(repo.suffix)).length;
+  // Le serveur a déjà rattaché chaque dépôt à son étudiant : la page n'a plus à
+  // deviner qui se cache derrière un nom.
+  const servis = depots.filter((repo) => repo.username).length;
   $('detail-resume').textContent =
     `${depots.length} dépôt(s) · ${servis} étudiant(s) du groupe sur ${total} en ont un` +
     (depots.length - servis > 0 ? ` · ${depots.length - servis} hors liste` : '');
@@ -714,7 +753,6 @@ function dessinerTravail() {
   vider(corps);
   for (const repo of depots) {
     const acces = etat.acces.get(repo.name);
-    const nom = nomDe(repo.suffix) || repo.full_name;
     corps.append(el('tr', {},
       el('td', {}, el('input', {
         type: 'checkbox',
@@ -725,7 +763,9 @@ function dessinerTravail() {
           majSelection();
         },
       })),
-      el('td', nom ? { texte: nom } : { classe: 'vide', texte: '@' + repo.suffix }),
+      el('td', repo.full_name
+        ? { texte: repo.full_name }
+        : { classe: 'vide', texte: repo.student + ' (hors liste)' }),
       el('td', {}, el('a', {
         href: repo.url, target: '_blank', rel: 'noreferrer noopener', texte: repo.name,
       })),
@@ -738,19 +778,6 @@ function dessinerTravail() {
     ));
   }
   majSelection();
-}
-
-// estDuGroupe dit si un suffixe de dépôt correspond à un étudiant inscrit.
-function estDuGroupe(compte) {
-  return (etat.groupe.students || []).some((personne) =>
-    personne.username.toLowerCase() === compte.toLowerCase());
-}
-
-// nomDe retrouve le nom complet d'un étudiant du groupe.
-function nomDe(compte) {
-  const trouve = (etat.groupe.students || []).find((personne) =>
-    personne.username.toLowerCase() === compte.toLowerCase());
-  return trouve ? trouve.full_name : '';
 }
 
 function resumerAcces(acces) {
@@ -781,7 +808,8 @@ function selectionnes() {
 
 $('detail-acces').addEventListener('click', async () => {
   const fiche = await tenter(() => api('POST',
-    `/api/orgs/${encode(etat.groupe.org)}/groups/${encode(etat.travail.id)}/access`), 'Accès');
+    `/api/classrooms/${encode(etat.groupe.id)}/assignments/${encode(etat.travail.name)}/access`),
+    'Accès');
   if (!fiche) return;
   const resultats = await suivre(fiche);
   if (!Array.isArray(resultats)) return;
@@ -908,7 +936,7 @@ $('detail-csv').addEventListener('click', () => {
   if (!choisis.length) { message('Aucun dépôt sélectionné.', 'alerte'); return; }
   const lignes = [['nom_complet', 'depot', 'url']];
   for (const repo of choisis) {
-    lignes.push([nomDe(repo.suffix) || repo.full_name || '', repo.name, repo.url]);
+    lignes.push([repo.full_name || repo.student, repo.name, repo.url]);
   }
   const contenu = lignes.map((ligne) =>
     ligne.map((valeur) => `"${String(valeur).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -942,7 +970,6 @@ $('detail-cloner').addEventListener('click', async () => {
 
   const fiche = await tenter(() => api('POST', '/api/clones/clone', {
     org: etat.groupe.org,
-    prefix: etat.travail.id,
     names: choisis.map((repo) => repo.name),
     destination: destination.value.trim(),
   }), 'Clonage');
@@ -1037,7 +1064,6 @@ function afficherEtape(numero) {
 // --- réglages du travail
 
 const champsTravail = {
-  name_pattern: 'reglage-pattern',
   description_pattern: 'reglage-description',
   template: 'reglage-template',
   permission: 'reglage-permission',
@@ -1074,20 +1100,17 @@ for (const id of ['visibilite-privee', 'visibilite-publique', 'reglage-collabora
 }
 
 $('travail-nom').addEventListener('input', majApercuDuNom);
-$('reglage-pattern').addEventListener('input', majApercuDuNom);
 $('travail-nom').addEventListener('change', planifierApercu);
 
-// Le nom des dépôts se lit avant qu'ils existent : le gabarit est rendu au vol.
+// Le nom des dépôts se lit avant qu'ils existent. Il n'est plus réglable : les
+// quatre niveaux sont la nomenclature elle-même.
 function majApercuDuNom() {
-  const gabarit = $('reglage-pattern').value.trim() || '{assignment}-{username}';
-  const prefixe = etat.groupe && etat.groupe.prefix ? etat.groupe.prefix + '-' : '';
-  const valeurs = {
-    assignment: prefixe + ($('travail-nom').value.trim() || 'travail'),
-    username: 'compte', name: 'prenom-nom', fullname: 'Prénom Nom',
-    first: 'prenom', last: 'nom', index: '01',
-  };
-  $('apercu-nom').textContent = gabarit.replace(/\{([a-z_]+)\}/g,
-    (tout, champ) => (champ in valeurs ? valeurs[champ] : tout));
+  const groupe = etat.groupe || {};
+  const portee = groupe.course
+    ? `${groupe.course}.${groupe.group}`
+    : (groupe.prefix || 'cours.groupe');
+  const travail = $('travail-nom').value.trim() || 'travail';
+  $('apercu-nom').textContent = `${portee}.${travail}.prenom-nom`;
 }
 
 // --- destinataires
@@ -1384,7 +1407,8 @@ function ecrireReglagesGroupe() {
   const groupe = etat.groupe;
   $('gr-nom').value = groupe.name || '';
   $('gr-org').value = groupe.org || '';
-  $('gr-prefixe').value = groupe.prefix || '';
+  $('gr-cours').value = groupe.course || '';
+  $('gr-section').value = groupe.group || '';
   const defauts = groupe.defaults || {};
   for (const [cle, id] of Object.entries(champsGroupe)) {
     $(id).value = defauts[cle] || '';
@@ -1402,7 +1426,9 @@ $('gr-enregistrer').addEventListener('click', async () => {
   const modifie = await tenter(() => api('PUT', `/api/classrooms/${encode(etat.groupe.id)}`, {
     name: $('gr-nom').value.trim(),
     org: $('gr-org').value.trim(),
-    prefix: $('gr-prefixe').value.trim(),
+    course: $('gr-cours').value.trim(),
+    group: $('gr-section').value.trim(),
+    prefix: '',
     students: etat.groupe.students,
     roster_path: etat.groupe.roster_path || '',
     defaults: defauts,
@@ -1522,7 +1548,7 @@ async function demarrer() {
 
   $('version').textContent = contexte.version;
   $('compte').textContent = `@${contexte.viewer} sur ${contexte.host}`;
-  $('aide-champs').textContent = 'Champs disponibles : ' +
+  $('aide-champs').textContent = 'Champs disponibles dans la description : ' +
     contexte.placeholders.map((nom) => `{${nom}}`).join(', ');
 
   for (const id of ['reglage-permission', 'gr-permission']) {

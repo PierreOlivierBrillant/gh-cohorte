@@ -167,10 +167,6 @@ func (s *Server) routes() http.Handler {
 	// --- organisations et inventaire
 	mux.HandleFunc("GET /api/orgs", s.handleOrgs)
 	mux.HandleFunc("GET /api/orgs/{org}", s.handleOrg)
-	mux.HandleFunc("GET /api/orgs/{org}/groups", s.handleGroups)
-	mux.HandleFunc("GET /api/orgs/{org}/groups/{prefix}", s.handleGroup)
-	mux.HandleFunc("GET /api/orgs/{org}/groups/{prefix}/template", s.handleGroupTemplate)
-	mux.HandleFunc("POST /api/orgs/{org}/groups/{prefix}/names", s.handleGroupNames)
 
 	// --- groupes
 	mux.HandleFunc("GET /api/classrooms", s.handleClassrooms)
@@ -183,6 +179,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{id}/students/names", s.handleResolveStudentNames)
 	mux.HandleFunc("POST /api/classrooms/{id}/assignments", s.handleCreateAssignment)
 	mux.HandleFunc("POST /api/classrooms/{id}/assignments/preview", s.handlePreviewAssignment)
+	mux.HandleFunc("GET /api/classrooms/{id}/assignments/{name}", s.handleAssignment)
+	mux.HandleFunc("POST /api/classrooms/{id}/assignments/{name}/access", s.handleAssignmentAccess)
 	mux.HandleFunc("GET /api/orgs/{org}/candidates", s.handleCandidates)
 
 	// --- listes et code de départ
@@ -199,7 +197,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/orgs/{org}/repos/{repo}/collaborators/{login}", s.handleRemoveCollaborator)
 	mux.HandleFunc("DELETE /api/orgs/{org}/repos/{repo}/invitations/{id}", s.handleCancelInvitation)
 	mux.HandleFunc("DELETE /api/orgs/{org}/repos/{repo}", s.handleDeleteRepo)
-	mux.HandleFunc("POST /api/orgs/{org}/groups/{prefix}/access", s.handleGroupAccess)
 
 	// --- clones
 	mux.HandleFunc("POST /api/clones/find", s.handleFindClones)

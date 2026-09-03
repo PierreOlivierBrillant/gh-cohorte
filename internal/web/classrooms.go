@@ -8,6 +8,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
@@ -40,8 +41,12 @@ func (s *Server) handleClassrooms(writer http.ResponseWriter, _ *http.Request) {
 
 // classroomInput est ce que l'interface envoie pour déclarer ou modifier un groupe.
 type classroomInput struct {
-	Name       string             `json:"name"`
-	Org        string             `json:"org"`
+	Name   string `json:"name"`
+	Org    string `json:"org"`
+	Course string `json:"course"`
+	Group  string `json:"group"`
+	// Prefix n'est renseigné que pour adopter un groupe de l'ancienne
+	// nomenclature, en attendant sa migration.
 	Prefix     string             `json:"prefix"`
 	Students   []roster.Person    `json:"students"`
 	RosterPath string             `json:"roster_path"`
@@ -57,7 +62,8 @@ func (s *Server) handleCreateClassroom(writer http.ResponseWriter, request *http
 		return
 	}
 	cree, err := s.classrooms.Add(classroom.Classroom{
-		Name: body.Name, Org: body.Org, Prefix: body.Prefix,
+		Name: body.Name, Org: body.Org,
+		Course: body.Course, Group: body.Group, LegacyPrefix: body.Prefix,
 		Students: body.Students, RosterPath: body.RosterPath,
 		Defaults: s.defaultsOr(body.Defaults),
 	})
@@ -72,7 +78,7 @@ func (s *Server) handleCreateClassroom(writer http.ResponseWriter, request *http
 
 // defaultsOr complète des réglages absents par ceux de la session.
 func (s *Server) defaultsOr(defauts classroom.Defaults) classroom.Defaults {
-	if strings.TrimSpace(defauts.NamePattern) != "" {
+	if strings.TrimSpace(defauts.Visibility) != "" {
 		return defauts
 	}
 	return classroom.DefaultsFrom(s.Settings())
@@ -107,7 +113,13 @@ func (s *Server) handleUpdateClassroom(writer http.ResponseWriter, request *http
 		fail(writer, err)
 		return
 	}
-	cours.Name, cours.Org, cours.Prefix = body.Name, body.Org, body.Prefix
+	cours.Name, cours.Org = body.Name, body.Org
+	cours.Course, cours.Group = body.Course, body.Group
+	if strings.TrimSpace(body.Course) != "" {
+		// Le groupe rejoint la nomenclature à quatre niveaux : son préfixe
+		// hérité n'a plus cours.
+		cours.LegacyPrefix = ""
+	}
 	cours.Defaults = s.defaultsOr(body.Defaults)
 	if body.Students != nil {
 		cours.Students = body.Students
@@ -170,24 +182,33 @@ func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *ht
 	}
 
 	travaux := cours.Assignments(repos)
-	lignes := make([]studentRow, 0, len(cours.Students))
-	for _, student := range cours.Students {
-		ligne := studentRow{
-			FullName: student.FullName, Username: student.Username,
-			Assignments: []studentAssignment{},
-		}
-		for _, travail := range travaux {
-			group := groups.Build(travail.ID, repos)
-			repo, _, found := group.Find(student.Username)
-			if !found {
+	// Les dépôts de chaque travail sont rattachés à leur étudiant une fois pour
+	// toutes : la relecture d'un nom ne dépend plus du compte GitHub.
+	parEtudiant := map[string][]studentAssignment{}
+	for _, travail := range travaux {
+		for _, repo := range cours.Repos(travail.ID, repos) {
+			student, inscrit := cours.StudentOf(repo.Name)
+			if !inscrit {
 				continue
 			}
-			ligne.Assignments = append(ligne.Assignments, studentAssignment{
+			cle := strings.ToLower(student.Username)
+			parEtudiant[cle] = append(parEtudiant[cle], studentAssignment{
 				Name: travail.Name, ID: travail.ID, Repo: repo.Name,
 				URL: s.urlOf(cours.Org, repo),
 			})
 		}
-		lignes = append(lignes, ligne)
+	}
+
+	lignes := make([]studentRow, 0, len(cours.Students))
+	for _, student := range cours.Students {
+		travauxDeLEtudiant := parEtudiant[strings.ToLower(student.Username)]
+		if travauxDeLEtudiant == nil {
+			travauxDeLEtudiant = []studentAssignment{}
+		}
+		lignes = append(lignes, studentRow{
+			FullName: student.FullName, Username: student.Username,
+			Assignments: travauxDeLEtudiant,
+		})
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"students": lignes, "assignments": travaux,
@@ -287,6 +308,97 @@ func (s *Server) handleResolveStudentNames(writer http.ResponseWriter, request *
 	writeJSON(writer, http.StatusAccepted, job.State())
 }
 
+// ------------------------------------------------------- détail d'un travail
+
+// assignmentRepo est un dépôt du travail, tel que l'affiche l'interface.
+type assignmentRepo struct {
+	Name       string `json:"name"`
+	Student    string `json:"student"`
+	FullName   string `json:"full_name"`
+	Username   string `json:"username"`
+	Private    bool   `json:"private"`
+	Visibility string `json:"visibility"`
+	URL        string `json:"url"`
+	PushedAt   string `json:"pushed_at"`
+}
+
+// assignmentOf résout le groupe et le travail désignés par l'adresse.
+func (s *Server) assignmentOf(request *http.Request) (
+	classroom.Classroom, string, []groups.RepoInfo, error) {
+	cours, ok := s.classrooms.Get(request.PathValue("id"))
+	if !ok {
+		return cours, "", nil, valid.Errorf("Groupe inconnu.")
+	}
+	nom := strings.TrimSpace(request.PathValue("name"))
+	if nom == "" {
+		return cours, "", nil, valid.Errorf("Travail inconnu.")
+	}
+	repos, _, err := s.repos(cours.Org, request.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		return cours, "", nil, err
+	}
+	return cours, cours.AssignmentID(nom), repos, nil
+}
+
+// handleAssignment renvoie les dépôts d'un travail, étudiant par étudiant.
+func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Request) {
+	cours, id, repos, err := s.assignmentOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	trouves := cours.Repos(id, repos)
+	if len(trouves) == 0 {
+		fail(writer, valid.Errorf("Aucun dépôt pour le travail « %s ».", cours.ShortName(id)))
+		return
+	}
+
+	lignes := make([]assignmentRepo, 0, len(trouves))
+	for _, repo := range trouves {
+		ligne := assignmentRepo{
+			Name: repo.Name, Student: repo.Suffix, Private: repo.Private,
+			Visibility: repo.Visibility(), URL: s.urlOf(cours.Org, repo),
+			PushedAt: repo.PushedAt,
+		}
+		if student, inscrit := cours.StudentOf(repo.Name); inscrit {
+			ligne.FullName, ligne.Username = student.FullName, student.Username
+		}
+		lignes = append(lignes, ligne)
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"id": id, "name": cours.ShortName(id), "repos": lignes,
+	})
+}
+
+// handleAssignmentAccess inspecte les accès de tous les dépôts d'un travail.
+func (s *Server) handleAssignmentAccess(writer http.ResponseWriter, request *http.Request) {
+	cours, id, repos, err := s.assignmentOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	trouves := cours.Repos(id, repos)
+
+	job := s.jobs.Start("acces", "Accès des dépôts de « "+cours.ShortName(id)+" »",
+		func(job *Job) (any, error) {
+			found := make([]accessPayload, 0, len(trouves))
+			for index, repo := range trouves {
+				if job.Canceled() {
+					return found, nil
+				}
+				payload, err := s.accessOf(cours.Org, repo.Name)
+				if err != nil {
+					return nil, err
+				}
+				found = append(found, payload)
+				job.Progress(index+1, len(trouves), repo.Name)
+				job.Line(repo.Name, payload)
+			}
+			return found, nil
+		})
+	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
 // ------------------------------------------------------------------- travaux
 
 // assignmentInput décrit le travail à distribuer.
@@ -308,7 +420,23 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (
 	if !ok {
 		return cours, vide, nil, nil, valid.Errorf("Groupe inconnu.")
 	}
-	nom, err := valid.SlugFragment(body.Name, "Nom du travail")
+	if cours.Legacy() {
+		return cours, vide, nil, nil, valid.Errorf(
+			"« %s » suit l'ancienne nomenclature. Migrez-le vers « cours%sgroupe » "+
+				"avant de lui distribuer un travail.", cours.Name, naming.Separator)
+	}
+	// Le nom du dépôt contient désormais le nom de l'étudiant : sans lui, il n'y
+	// a pas de dépôt à nommer.
+	if incomplets := cours.MissingNames(); len(incomplets) > 0 {
+		comptes := make([]string, 0, len(incomplets))
+		for _, student := range incomplets {
+			comptes = append(comptes, "@"+student.Username)
+		}
+		return cours, vide, nil, nil, valid.Errorf(
+			"Nom complet manquant pour %s : le nom du dépôt en dépend. "+
+				"Retrouvez les noms depuis l'onglet Étudiants.", strings.Join(comptes, ", "))
+	}
+	nom, err := naming.Fragment(body.Name, "Nom du travail")
 	if err != nil {
 		return cours, vide, nil, nil, err
 	}
@@ -475,7 +603,7 @@ func (s *Server) handleCandidates(writer http.ResponseWriter, request *http.Requ
 	pris := map[string]bool{}
 	for _, cours := range s.classrooms.List() {
 		if strings.EqualFold(cours.Org, org) {
-			pris[strings.ToLower(cours.Prefix)] = true
+			pris[strings.ToLower(cours.Scope())] = true
 		}
 	}
 	proposes := make([]classroom.Candidate, 0)

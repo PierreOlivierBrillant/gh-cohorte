@@ -7,7 +7,6 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -76,34 +75,6 @@ func (s *Server) handleAccess(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	writeJSON(writer, http.StatusOK, payload)
-}
-
-// handleGroupAccess inspecte les accès de tous les dépôts du groupe.
-func (s *Server) handleGroupAccess(writer http.ResponseWriter, request *http.Request) {
-	org, group, err := s.group(request)
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-	repos := append([]groups.Repo(nil), group.Repos...)
-
-	job := s.jobs.Start("acces", "Accès des dépôts de « "+group.Prefix+" »", func(job *Job) (any, error) {
-		found := make([]accessPayload, 0, len(repos))
-		for index, repo := range repos {
-			if job.Canceled() {
-				return found, nil
-			}
-			payload, err := s.accessOf(org, repo.Name)
-			if err != nil {
-				return nil, err
-			}
-			found = append(found, payload)
-			job.Progress(index+1, len(repos), repo.Name)
-			job.Line(repo.Name, payload)
-		}
-		return found, nil
-	})
-	writeJSON(writer, http.StatusAccepted, job.State())
 }
 
 // handleAddCollaborator invite une personne sur un dépôt.

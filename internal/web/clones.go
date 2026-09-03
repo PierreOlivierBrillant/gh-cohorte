@@ -60,7 +60,6 @@ func (s *Server) handleFindClones(writer http.ResponseWriter, request *http.Requ
 func (s *Server) handleClone(writer http.ResponseWriter, request *http.Request) {
 	var body struct {
 		Org         string   `json:"org"`
-		Prefix      string   `json:"prefix"`
 		Names       []string `json:"names"`
 		Destination string   `json:"destination"`
 	}
@@ -69,11 +68,6 @@ func (s *Server) handleClone(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	org, err := valid.Login(body.Org, "Organisation")
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-	prefix, err := valid.SlugFragment(body.Prefix, "Préfixe")
 	if err != nil {
 		fail(writer, err)
 		return
@@ -87,20 +81,30 @@ func (s *Server) handleClone(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 
+	// Les dépôts sont retrouvés dans l'inventaire par leur nom : un dépôt qui
+	// n'y figure pas n'est pas de cette organisation.
 	repos, _, err := s.repos(org, false)
 	if err != nil {
 		fail(writer, err)
 		return
 	}
-	group := groups.Build(prefix, repos)
+	connus := map[string]groups.RepoInfo{}
+	for _, repo := range repos {
+		connus[strings.ToLower(repo.Name)] = repo
+	}
 	targets := make([]clone.Target, 0, len(body.Names))
 	for _, name := range body.Names {
-		repo, _, found := group.Find(name)
-		if !found {
-			fail(writer, valid.Errorf("« %s » n'appartient pas au groupe « %s ».", name, prefix))
+		repo, trouve := connus[strings.ToLower(name)]
+		if !trouve {
+			fail(writer, valid.Errorf("« %s » n'existe pas dans « %s ».", name, org))
 			return
 		}
-		targets = append(targets, clone.Target{Name: repo.Name, URL: s.urlOf(org, repo)})
+		targets = append(targets, clone.Target{
+			Name: repo.Name,
+			URL: s.urlOf(org, groups.Repo{
+				Name: repo.Name, URL: repo.HTMLURL, Private: repo.Private,
+			}),
+		})
 	}
 
 	destination, err := clone.PrepareDestination(body.Destination)
