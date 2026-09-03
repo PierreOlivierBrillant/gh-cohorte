@@ -357,7 +357,9 @@ compte GitHub, lui, n'en contient jamais.
 Un nom se relit donc **sans rien deviner** : cinq parties, pas une de plus.
 C'est ce qui distingue cette nomenclature de la précédente, tout en tirets :
 `a26-5n6-tp1-emilie-cote` ne disait pas où finissait le travail et où commençait
-la personne.
+la personne. Une forme intermédiaire a existé, à quatre niveaux — la session n'y
+était pas encore un niveau à part (`a26-5n6.1010.tp1.emilie-cote`) : elle se lit
+comme l'autre ancienne, et se migre de la même façon.
 
 Le dernier niveau est le **nom de l'étudiant**, pas son compte GitHub. Un dépôt
 se lit sans connaître le pseudonyme de personne — au prix d'une contrainte : le
@@ -416,7 +418,7 @@ le renommage avant d'écrire quoi que ce soit :
 Dépôt actuel                          Nouveau nom
 a26-5n6-travailsession-jlpicard       a26.5n6.01.travailsession.jean-luc-picard
 a26-5n6-travailsession-emilie-cote    a26.5n6.01.travailsession.emilie-cote
-a26-5n6-tp1-visiteur                  compte « visiteur » absent de la liste du groupe
+a26-5n6-tp1-visiteur                  « visiteur » ne correspond à aucun étudiant du groupe
 ```
 
 **GitHub garde une redirection depuis chaque ancien nom** : les clones déjà
@@ -683,12 +685,15 @@ tranché, et pourquoi.
   obligatoire, les homonymes font échouer la préparation avant toute écriture, et
   **le compte GitHub n'est plus déductible du nom du dépôt** : il vit dans la
   liste du groupe, et sur le dépôt sous forme d'invitation.
-- **L'ancienne nomenclature reste lisible, isolée dans un fichier.**
+- **Les anciennes nomenclatures restent lisibles, isolées dans un fichier.**
   `internal/classroom/legacy.go` rassemble tout ce qui ne sert qu'aux dépôts
-  nommés avant le séparateur — relecture par gabarit inversé (`plan.Matcher`),
-  détection par préfixe. Rien n'y est créé : ces groupes s'affichent et se
-  migrent, mais on ne leur distribue plus. Le jour où plus aucune organisation
-  n'en contient, le fichier disparaît d'un bloc.
+  nommés avant la forme courante : la forme tout en tirets, relue par gabarit
+  inversé (`plan.Matcher`) et par détection de préfixe, et la forme à quatre
+  niveaux, qui se découpe déjà mais sans porter la session. Un groupe déclaré
+  sous cette dernière est ramené au rang de préfixe hérité à la lecture du
+  fichier, plutôt que de viser une session vide. Rien n'y est créé : ces groupes
+  s'affichent et se migrent, mais on ne leur distribue plus. Le jour où plus
+  aucune organisation n'en contient, le fichier disparaît d'un bloc.
 - **L'interface web est une API au-dessus des paquets du domaine, pas un
   terminal déguisé.** `internal/web` appelle `plan`, `groups`, `runner`, `clone`
   et `ghapi` directement : la validation, les gabarits, le refus des collisions

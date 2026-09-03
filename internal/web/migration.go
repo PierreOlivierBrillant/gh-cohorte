@@ -86,7 +86,7 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 			case nom == "":
 				ligne.Problem = "nom de travail illisible"
 			case !inscrit:
-				ligne.Problem = "compte « " + repo.Suffix + " » absent de la liste du groupe"
+				ligne.Problem = "« " + repo.Suffix + " » ne correspond à aucun étudiant du groupe"
 			default:
 				ligne.Username = student.Username
 				fragment, err := naming.Student(student.FullName)

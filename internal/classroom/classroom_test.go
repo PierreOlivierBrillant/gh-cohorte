@@ -234,6 +234,60 @@ func TestGroupeHeriteRattacheSesDepotsParLeCompte(t *testing.T) {
 	}
 }
 
+func TestGroupeAQuatreNiveauxRedevientLisible(t *testing.T) {
+	// Écrit tel que la version sans session l'enregistrait : un cours et un
+	// groupe, mais pas de session.
+	chemin := filepath.Join(t.TempDir(), "groupes.json")
+	contenu := `{"version":1,"classrooms":[{"id":"abc","name":"5n6 a26-01",` +
+		`"org":"acme","session":"","course":"5n6","group":"a26-01",` +
+		`"students":[{"full_name":"Émilie Côté","username":"emilie-cote"}],` +
+		`"defaults":{}}]}`
+	if err := os.WriteFile(chemin, []byte(contenu), 0o600); err != nil {
+		t.Fatalf("écriture : %v", err)
+	}
+
+	cours, ok := classroom.Open(chemin).Get("abc")
+	if !ok {
+		t.Fatal("groupe introuvable")
+	}
+	if !cours.Legacy() || cours.Scope() != "5n6.a26-01" {
+		t.Fatalf("portée %q (hérité : %v)", cours.Scope(), cours.Legacy())
+	}
+
+	inventaire := depots(
+		"5n6.a26-01.tp1.emilie-cote", "5n6.a26-01.travailsession.emilie-cote",
+		"5n6.a26-01.tp1.inconnu", "4w6.a26-01.tp1.emilie-cote",
+	)
+	travaux := cours.Assignments(inventaire)
+	if len(travaux) != 2 {
+		t.Fatalf("travaux trouvés : %v", noms(travaux))
+	}
+	for _, travail := range travaux {
+		attendu := 1
+		if travail.Name == "tp1" {
+			attendu = 2 // le dépôt « inconnu » compte, sans être inscrit
+		}
+		if travail.Repos != attendu || travail.Students != 1 {
+			t.Fatalf("« %s » : %+v", travail.Name, travail)
+		}
+	}
+
+	id := cours.AssignmentID("tp1")
+	if id != "5n6.a26-01.tp1" {
+		t.Fatalf("identifiant %q", id)
+	}
+	if depots := cours.Repos(id, inventaire); len(depots) != 2 {
+		t.Fatalf("dépôts du travail : %+v", depots)
+	}
+	if servis := cours.Served(id, inventaire); !servis["emilie-cote"] {
+		t.Fatalf("servis : %+v", servis)
+	}
+	student, inscrit := cours.StudentOf("5n6.a26-01.tp1.emilie-cote")
+	if !inscrit || student.Username != "emilie-cote" {
+		t.Fatalf("étudiant retrouvé : %+v (%v)", student, inscrit)
+	}
+}
+
 // --------------------------------------------------------------- candidats
 
 func TestCandidatsDeLaNouvelleNomenclature(t *testing.T) {
@@ -285,6 +339,30 @@ func TestCandidatsHeritesSignalesCommeTels(t *testing.T) {
 }
 
 // ----------------------------------------------------------------- magasin
+
+func TestCandidatsAQuatreNiveauxSontHerites(t *testing.T) {
+	proposes := classroom.Candidates(depots(
+		"5n6.a26-01.tp1.emilie-cote", "5n6.a26-01.travailsession.emilie-cote",
+		"a26.4w6.01.tp1.jean-luc-picard",
+	))
+	if len(proposes) != 2 {
+		t.Fatalf("candidats : %+v", proposes)
+	}
+	// Celui de la nomenclature courante passe devant.
+	if proposes[0].Legacy || proposes[0].Prefix != "a26.4w6.01" {
+		t.Fatalf("premier candidat : %+v", proposes[0])
+	}
+	ancien := proposes[1]
+	if !ancien.Legacy || ancien.Prefix != "5n6.a26-01" || ancien.Repos != 2 {
+		t.Fatalf("candidat hérité : %+v", ancien)
+	}
+	if strings.Join(ancien.Assignments, ",") != "tp1,travailsession" {
+		t.Fatalf("travaux du candidat : %v", ancien.Assignments)
+	}
+	if strings.Join(ancien.Students, ",") != "emilie-cote" {
+		t.Fatalf("étudiants du candidat : %v", ancien.Students)
+	}
+}
 
 func TestMagasinEcritEtRelit(t *testing.T) {
 	chemin := filepath.Join(t.TempDir(), "groupes.json")

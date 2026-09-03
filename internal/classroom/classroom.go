@@ -95,9 +95,19 @@ type Classroom struct {
 	CreatedAt    string          `json:"created_at"`
 }
 
-// Legacy dit si le groupe suit encore l'ancienne nomenclature.
+// Legacy dit si le groupe suit encore une nomenclature dépassée.
 func (c Classroom) Legacy() bool {
 	return strings.TrimSpace(c.Session) == "" && strings.TrimSpace(c.LegacyPrefix) != ""
+}
+
+// separator est ce qui sépare le préfixe du travail. Deux nomenclatures ont
+// précédé la courante : celle tout en tirets, et celle à quatre niveaux, qui
+// séparait déjà par un point mais ne portait pas la session.
+func (c Classroom) separator() string {
+	if c.Legacy() && !strings.Contains(c.LegacyPrefix, naming.Separator) {
+		return groups.Separator
+	}
+	return naming.Separator
 }
 
 // Validate met le groupe en forme et refuse ce qui ne peut pas nommer un dépôt.
@@ -109,11 +119,19 @@ func (c Classroom) Validate() (Classroom, error) {
 	c.Org = org
 
 	if c.Legacy() {
-		prefix, err := valid.SlugFragment(c.LegacyPrefix, "Préfixe du groupe")
-		if err != nil {
-			return c, err
+		// Le préfixe hérité peut porter des points — la nomenclature à quatre
+		// niveaux en avait déjà. Chaque niveau est validé à part, pour que le
+		// point survive à la slugification.
+		niveaux := strings.Split(c.LegacyPrefix, naming.Separator)
+		rendus := make([]string, 0, len(niveaux))
+		for _, niveau := range niveaux {
+			fragment, err := valid.SlugFragment(niveau, "Préfixe du groupe")
+			if err != nil {
+				return c, err
+			}
+			rendus = append(rendus, fragment)
 		}
-		c.LegacyPrefix = prefix
+		c.LegacyPrefix = strings.Join(rendus, naming.Separator)
 	} else {
 		session, err := naming.Fragment(c.Session, "Session")
 		if err != nil {
@@ -173,7 +191,7 @@ func (c Classroom) Scope() string {
 func (c Classroom) AssignmentID(name string) string {
 	name = strings.TrimSpace(name)
 	if c.Legacy() {
-		return strings.Trim(c.LegacyPrefix+groups.Separator+name, groups.Separator)
+		return strings.Trim(c.LegacyPrefix+c.separator()+name, c.separator())
 	}
 	return naming.AssignmentID(c.Session, c.Course, c.Group, name)
 }
@@ -181,10 +199,7 @@ func (c Classroom) AssignmentID(name string) string {
 // ShortName retire du travail ce qui désigne le groupe.
 func (c Classroom) ShortName(id string) string {
 	scope := c.Scope()
-	separator := naming.Separator
-	if c.Legacy() {
-		separator = groups.Separator
-	}
+	separator := c.separator()
 	if scope != "" && len(id) > len(scope)+1 &&
 		strings.EqualFold(id[:len(scope)+1], scope+separator) {
 		return id[len(scope)+1:]
@@ -201,10 +216,7 @@ func (c Classroom) Owns(id string) bool {
 	if scope == "" {
 		return false
 	}
-	separator := naming.Separator
-	if c.Legacy() {
-		separator = groups.Separator
-	}
+	separator := c.separator()
 	return len(id) > len(scope)+1 &&
 		strings.EqualFold(id[:len(scope)+1], scope+separator)
 }
@@ -327,17 +339,10 @@ func sortAssignments(found []Assignment) {
 
 // Served renvoie les comptes du groupe qui ont déjà un dépôt pour ce travail.
 func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[string]bool {
-	servis := map[string]bool{}
 	if c.Legacy() {
-		taken := groups.Build(assignmentID, repos).Suffixes()
-		for _, student := range c.Students {
-			if taken[strings.ToLower(student.Username)] {
-				servis[strings.ToLower(student.Username)] = true
-			}
-		}
-		return servis
+		return c.legacyServed(assignmentID, repos)
 	}
-
+	servis := map[string]bool{}
 	connus := c.fragments()
 	for _, repo := range repos {
 		parts, reconnu := naming.Parse(repo.Name)
@@ -358,7 +363,7 @@ func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[stri
 // Repos renvoie les dépôts d'un travail du groupe, du plus récent au plus ancien.
 func (c Classroom) Repos(assignmentID string, repos []groups.RepoInfo) []groups.Repo {
 	if c.Legacy() {
-		return groups.Build(assignmentID, repos).Repos
+		return c.legacyRepos(assignmentID, repos)
 	}
 	trouves := make([]groups.Repo, 0)
 	for _, repo := range repos {
