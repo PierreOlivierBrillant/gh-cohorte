@@ -141,6 +141,8 @@ main { padding: 1.5rem; max-width: 1100px; }
 
 .barre-outils .note { margin: .2rem 0 0; }
 .actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.actions .champ { width: auto; min-width: 14rem; }
+.actions .etiquette { display: inline; }
 .note { font-size: .875rem; color: var(--texte-doux); margin: 0; }
 
 /* -------------------------------------------------------------------- boîte */

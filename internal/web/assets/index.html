@@ -39,7 +39,7 @@
   <section id="vue-groupes" class="vue">
     <div class="barre-outils">
       <div>
-        <h2>Groupes</h2>
+        <h2>Vos groupes</h2>
         <p class="note">Un groupe rassemble des étudiants et les travaux qu'on leur distribue.</p>
       </div>
       <div class="actions">
@@ -47,6 +47,23 @@
       </div>
     </div>
     <div class="boite" id="groupes-liste"></div>
+
+    <div class="barre-outils">
+      <div>
+        <h2>Groupes repérés dans l'organisation</h2>
+        <p class="note">Déduits des dépôts déjà présents. En adopter un reprend son préfixe et
+          les comptes qu'on y trouve — rien n'est renommé.</p>
+      </div>
+      <div class="actions">
+        <label class="etiquette" for="accueil-org">Organisation</label>
+        <select id="accueil-org" class="champ"></select>
+        <input type="text" id="accueil-org-libre" class="champ"
+          placeholder="nom de l'organisation" hidden>
+        <button type="button" id="accueil-recharger" class="bouton">Recharger</button>
+      </div>
+    </div>
+    <div id="accueil-org-avis"></div>
+    <div class="boite" id="accueil-candidats"></div>
   </section>
 
   <!-- --------------------------------------------- déclaration d'un groupe -->

@@ -273,15 +273,19 @@ async function chargerGroupes() {
   const donnees = await tenter(() => api('GET', '/api/classrooms'), 'Groupes');
   if (!donnees) return;
   etat.groupes = donnees.classrooms || [];
+  dessinerGroupes();
+  await chargerAccueilOrganisations();
+}
 
+function dessinerGroupes() {
   const conteneur = $('groupes-liste');
   vider(conteneur);
   if (etat.groupes.length === 0) {
     conteneur.append(el('div', { classe: 'boite-vide' },
-      el('p', { texte: 'Aucun groupe déclaré.' }),
+      el('p', { texte: 'Aucun groupe déclaré pour le moment.' }),
       el('p', { classe: 'note',
-        texte: "« Nouveau groupe » repère les groupes déjà présents dans une organisation " +
-          "à partir des dépôts existants : rien n'est renommé." })));
+        texte: 'Adoptez ci-dessous un groupe repéré dans une organisation, ' +
+          'ou déclarez-en un de toutes pièces.' })));
     return;
   }
   for (const groupe of etat.groupes) {
@@ -317,6 +321,149 @@ async function ouvrirGroupe(id, force) {
   afficherVue('travaux');
 }
 
+// ------------------------------------------ organisations et groupes repérés
+
+// Les organisations du compte ne sont demandées qu'une fois : elles changent
+// rarement, et deux écrans s'en servent.
+let organisationsConnues = null;
+
+async function organisations() {
+  if (!organisationsConnues) {
+    const donnees = await tenter(() => api('GET', '/api/orgs'), 'Organisations');
+    organisationsConnues = donnees || { orgs: [] };
+    if (organisationsConnues.notice) message(organisationsConnues.notice, 'alerte', 12000);
+  }
+  return organisationsConnues;
+}
+
+// remplirSelecteur pose les organisations du compte dans une liste déroulante,
+// et retient celle de la dernière fois.
+function remplirSelecteur(selecteur, liste) {
+  if (selecteur.options.length > 0) return selecteur.value;
+  for (const acces of liste) {
+    selecteur.append(el('option', { value: acces.login, texte: acces.label }));
+  }
+  selecteur.append(el('option', { value: '__saisir', texte: 'Saisir un autre nom…' }));
+
+  const memorisee = etat.reglages.org;
+  if (memorisee && liste.some((acces) => acces.login.toLowerCase() === memorisee.toLowerCase())) {
+    selecteur.value = memorisee;
+  } else if (liste.length > 0) {
+    selecteur.value = liste[0].login;
+  } else {
+    selecteur.value = '__saisir';
+  }
+  return selecteur.value;
+}
+
+async function chargerAccueilOrganisations() {
+  const info = await organisations();
+  const choisie = remplirSelecteur($('accueil-org'), info.orgs || []);
+  await choisirOrgAccueil(choisie);
+}
+
+$('accueil-org').addEventListener('change', async () => {
+  await choisirOrgAccueil($('accueil-org').value);
+  memoriserOrganisation($('accueil-org').value);
+});
+$('accueil-org-libre').addEventListener('change', async () => {
+  const saisie = $('accueil-org-libre').value.trim();
+  if (!saisie) return;
+  await montrerCandidats(saisie);
+  memoriserOrganisation(saisie);
+});
+
+// memoriserOrganisation retient l'organisation regardée, pour rouvrir dessus la
+// prochaine fois. L'écriture n'a lieu que si le choix a vraiment changé.
+function memoriserOrganisation(org) {
+  if (!org || org === '__saisir' || org === etat.reglages.org) return;
+  etat.reglages.org = org;
+  api('PUT', '/api/settings', etat.reglages).catch(() => {});
+}
+$('accueil-recharger').addEventListener('click', () => {
+  const org = $('accueil-org-libre').hidden
+    ? $('accueil-org').value : $('accueil-org-libre').value.trim();
+  if (org && org !== '__saisir') montrerCandidats(org, true);
+});
+
+async function choisirOrgAccueil(valeur) {
+  const libre = valeur === '__saisir';
+  $('accueil-org-libre').hidden = !libre;
+  if (libre) {
+    $('accueil-org-libre').value = etat.reglages.org || '';
+    vider($('accueil-candidats'));
+    return;
+  }
+  await montrerCandidats(valeur);
+}
+
+async function montrerCandidats(org, force) {
+  const avis = $('accueil-org-avis');
+  const conteneur = $('accueil-candidats');
+  vider(avis);
+  vider(conteneur);
+  conteneur.append(el('div', { classe: 'boite-vide', texte: 'Lecture des dépôts…' }));
+
+  const donnees = await tenter(() => api('GET',
+    `/api/orgs/${encode(org)}/candidates${force ? '?refresh=1' : ''}`), 'Inventaire');
+  vider(conteneur);
+  if (!donnees) return;
+
+  const candidats = donnees.candidates || [];
+  if (candidats.length === 0) {
+    conteneur.append(el('div', { classe: 'boite-vide' },
+      el('p', { texte: `Aucun groupe repéré dans « ${org} ».` }),
+      el('p', { classe: 'note',
+        texte: `${donnees.total} dépôt(s) lus. Soit ils appartiennent déjà à un groupe ` +
+          'déclaré, soit leurs noms ne laissent pas deviner de préfixe commun : ' +
+          '« Nouveau groupe » permet alors de le déclarer à la main.' })));
+    return;
+  }
+  for (const candidat of candidats) {
+    conteneur.append(el('button', {
+      classe: 'travail-ligne', type: 'button',
+      onclick: () => adopter(candidat, org),
+    },
+      el('span', { classe: 'travail-infos' },
+        el('span', { classe: 'titre', texte: candidat.prefix || "racine de l'organisation" }),
+        el('span', { classe: 'detail',
+          texte: candidat.assignments.join(', ') || 'aucun travail' })),
+      el('span', { classe: 'espace' }),
+      el('span', { classe: 'jeton', texte: `${candidat.students.length} compte(s)` }),
+      el('span', { classe: 'jeton', texte: `${candidat.repos} dépôt(s)` }),
+      el('span', { classe: 'jeton lien', texte: 'Adopter' })));
+  }
+}
+
+// adopter déclare un groupe à partir d'un préfixe repéré : le nom est la seule
+// chose à décider, le reste vient des dépôts.
+async function adopter(candidat, org) {
+  const nom = el('input', {
+    type: 'text', classe: 'champ',
+    value: candidat.prefix || org,
+  });
+  const confirme = await demander(`Adopter « ${candidat.prefix || org} »`, el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nom du groupe' }), nom),
+    el('p', { classe: 'note',
+      texte: `${travaux(candidat.assignments.length)} et ${candidat.students.length} ` +
+        'compte(s) trouvés dans les dépôts existants. Les comptes deviennent la liste ' +
+        "des étudiants ; aucun dépôt n'est touché." })), 'Adopter');
+  if (!confirme) return;
+
+  const cree = await tenter(() => api('POST', '/api/classrooms', {
+    org,
+    prefix: candidat.prefix,
+    name: nom.value.trim() || candidat.prefix || org,
+    students: candidat.students.map((compte) => ({ username: compte, full_name: '' })),
+    roster_path: '',
+    defaults: {},
+  }), 'Groupe');
+  if (!cree) return;
+  message(`Groupe « ${cree.name} » adopté.`);
+  await ouvrirGroupe(cree.id);
+}
+
 // --------------------------------------------------- déclaration d'un groupe
 
 $('groupes-nouveau').addEventListener('click', async () => {
@@ -334,25 +481,9 @@ $('groupes-nouveau').addEventListener('click', async () => {
 });
 
 async function chargerOrganisations() {
-  const donnees = await tenter(() => api('GET', '/api/orgs'), 'Organisations');
-  const choix = $('nouveau-org');
-  vider(choix);
-  const liste = (donnees && donnees.orgs) || [];
-  for (const acces of liste) {
-    choix.append(el('option', { value: acces.login, texte: acces.label }));
-  }
-  choix.append(el('option', { value: '__saisir', texte: 'Saisir un autre nom…' }));
-  if (donnees && donnees.notice) message(donnees.notice, 'alerte', 12000);
-
-  const memorisee = etat.reglages.org;
-  if (memorisee && liste.some((acces) => acces.login.toLowerCase() === memorisee.toLowerCase())) {
-    choix.value = memorisee;
-  } else if (liste.length > 0) {
-    choix.value = liste[0].login;
-  } else {
-    choix.value = '__saisir';
-  }
-  await choisirOrganisation(choix.value);
+  const info = await organisations();
+  const choisie = remplirSelecteur($('nouveau-org'), info.orgs || []);
+  await choisirOrganisation(choisie);
 }
 
 $('nouveau-org').addEventListener('change', () => choisirOrganisation($('nouveau-org').value));
@@ -509,7 +640,6 @@ $('nouveau-creer').addEventListener('click', async () => {
   }), 'Groupe');
   if (!cree) return;
   message(`Groupe « ${cree.name} » créé.`);
-  await chargerGroupes();
   await ouvrirGroupe(cree.id);
 });
 
@@ -1279,7 +1409,6 @@ $('gr-enregistrer').addEventListener('click', async () => {
   }), 'Groupe');
   if (!modifie) return;
   message('Réglages du groupe enregistrés.');
-  await chargerGroupes();
   await ouvrirGroupe(modifie.id, true);
   afficherVue('groupe-reglages');
 });
@@ -1297,7 +1426,6 @@ $('gr-supprimer').addEventListener('click', async () => {
   if (!fait) return;
   message(fait.message, 'succes', 10000);
   etat.groupe = null;
-  await chargerGroupes();
   afficherVue('groupes');
 });
 
@@ -1412,7 +1540,7 @@ async function demarrer() {
     $('reglages-etat').textContent = 'Mémorisation désactivée (--no-save-config)';
   }
 
-  await chargerGroupes();
+  // Afficher la vue suffit à la remplir : elle recharge ce qu'elle montre.
   afficherVue('groupes');
 }
 

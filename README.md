@@ -339,20 +339,31 @@ qu'un travail distribué à trente.
 
 ### Adopter ce qui existe déjà
 
-Une organisation en cours d'année n'a rien à renommer. Au moment de déclarer un
-groupe, l'interface propose les **groupes repérés dans les dépôts** : elle
-détecte les travaux, les regroupe par ce qui les précède, et propose le préfixe
-avec les comptes qu'on y trouve.
+Une organisation en cours d'année n'a rien à renommer. L'écran d'accueil montre
+vos groupes déclarés et, en dessous, les **groupes repérés dans l'organisation
+choisie** : l'outil détecte les travaux, les regroupe par ce qui les précède, et
+propose le préfixe avec les comptes qu'on y trouve.
 
 ```
-Groupes repérés dans l'organisation
-  a26-5n6    travailsession, tp1        24 compte(s)   48 dépôt(s)
-  a26-4w6    tp1                        22 compte(s)   22 dépôt(s)
+Vos groupes                                              [Nouveau groupe]
+  (aucun pour le moment)
+
+Groupes repérés dans l'organisation      Organisation [acme ▾]  [Recharger]
+  a26-5n6    travailsession, tp1     24 compte(s)   48 dépôt(s)   Adopter
+  a26-4w6    tp1                     22 compte(s)   22 dépôt(s)   Adopter
 ```
 
-En choisir un reprend son préfixe et pré-remplit la liste des étudiants à partir
-des dépôts existants ; il ne reste qu'à retrouver les noms complets. Un groupe
-sans préfixe couvre les travaux nommés à la racine de l'organisation, pour une
+**Adopter** ne demande qu'un nom : le préfixe et la liste des étudiants viennent
+des dépôts existants ; il ne reste qu'à retrouver les noms complets. Un préfixe
+déjà couvert par un groupe cesse d'être proposé.
+
+Le sélecteur d'organisation est à l'accueil, et non enfoui dans un formulaire :
+on choisit d'abord où regarder, la liste suit. L'organisation retenue est
+mémorisée, et la session suivante s'ouvre dessus.
+
+Pour les cas que la détection ne devine pas, **Nouveau groupe** déclare un
+groupe à la main : organisation, préfixe, liste d'étudiants. Un groupe **sans
+préfixe** couvre les travaux nommés à la racine de l'organisation, pour une
 nomenclature plate du type `tp1-emilie-cote`.
 
 ### Travaux
