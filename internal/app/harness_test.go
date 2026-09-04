@@ -98,9 +98,12 @@ func (h *harnais) executer(prompter ui.Prompter) int {
 	return h.dernierRC
 }
 
-// script déroule une session interactive avec des réponses préparées.
+// script déroule une session interactive avec des réponses préparées. Répondre
+// à l'assistant du terminal, c'est le demander : sans « --cli », un lancement
+// interactif ouvre l'interface graphique.
 func (h *harnais) script(reponses ...string) (int, *ui.Scripted) {
 	h.t.Helper()
+	h.Options.CLI = true
 	scripte := ui.NewScripted(reponses...)
 	h.scripte = scripte
 	code := h.executer(scripte)

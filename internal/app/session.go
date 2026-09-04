@@ -160,6 +160,12 @@ func (s *Session) adoptLegacyCache() {
 }
 
 // chooseMode décide du mode : création, gestion d'un groupe, options avancées.
+//
+// Sans rien préciser, l'interface graphique l'emporte : c'est là que tout est
+// accessible. Le terminal reste maître dès qu'un drapeau dit quoi faire, et
+// « --cli » y ramène explicitement — la règle du gh CLI est qu'une commande
+// pilotée par des drapeaux ou branchée sur un tuyau ne doit rien ouvrir ni rien
+// demander.
 func (s *Session) chooseMode() (string, error) {
 	if s.Options.Web {
 		return "web", nil
@@ -174,6 +180,9 @@ func (s *Session) chooseMode() (string, error) {
 	if s.Options.Roster != "" || s.Options.Assignment != "" || s.Options.TemplateSet ||
 		s.Options.StarterSet || s.Options.Pattern != "" || s.Options.Yes {
 		return "creer", nil
+	}
+	if !s.Options.CLI {
+		return "web", nil
 	}
 
 	for {

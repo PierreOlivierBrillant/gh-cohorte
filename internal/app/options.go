@@ -40,6 +40,7 @@ type Options struct {
 	Yes              bool
 	NonInteractive   bool
 	Web              bool
+	CLI              bool
 	NoBrowser        bool
 	Delay            float64
 	DelaySet         bool
@@ -67,8 +68,8 @@ func Usage(out io.Writer) {
 	fmt.Fprintf(out, `gh cohorte %s — un dépôt GitHub par personne, à la manière de GitHub Classroom.
 
 Utilisation :
-  gh cohorte                                  assistant interactif complet
-  gh cohorte --web                            interface graphique dans le navigateur
+  gh cohorte                                  interface graphique dans le navigateur
+  gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
   gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
   gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
@@ -93,8 +94,9 @@ Drapeaux :
   --dry-run                simuler sans rien créer
   -y, --yes                passer la confirmation finale
   --non-interactive        échouer plutôt que poser une question
-  --web                    ouvrir l'interface graphique sur la boucle locale
-  --no-browser             avec --web, ne pas ouvrir le navigateur
+  --web                    ouvrir l'interface graphique sur la boucle locale (défaut)
+  --cli                    rester au terminal : assistant interactif
+  --no-browser             ne pas ouvrir le navigateur, afficher l'adresse
   --host HOTE              hôte GitHub (github.com ou instance Enterprise)
   --config FICHIER         fichier de réglages
   --report-dir DOSSIER     dossier des bilans (défaut : rapports)
@@ -146,6 +148,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.BoolVar(&options.Yes, "y", false, "passer la confirmation")
 	set.BoolVar(&options.NonInteractive, "non-interactive", false, "ne poser aucune question")
 	set.BoolVar(&options.Web, "web", false, "ouvrir l'interface graphique locale")
+	set.BoolVar(&options.CLI, "cli", false, "rester au terminal")
 	set.BoolVar(&options.NoBrowser, "no-browser", false, "ne pas ouvrir le navigateur")
 	set.IntVar(&options.Jobs, "jobs", 4, "travaux en parallèle")
 	set.IntVar(&options.Depth, "depth", 0, "profondeur d'historique")
