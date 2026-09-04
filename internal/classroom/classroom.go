@@ -58,7 +58,10 @@ func DefaultsFrom(settings config.Settings) Defaults {
 // normalized comble les valeurs absentes par celles de l'outil.
 func (d Defaults) normalized() Defaults {
 	repli := config.Default()
-	if strings.TrimSpace(d.DescriptionPattern) == "" {
+	// Un gabarit vide, ou celui d'avant la nomenclature à cinq niveaux — il
+	// écrivait le chemin complet du travail là où son nom suffit.
+	if strings.TrimSpace(d.DescriptionPattern) == "" ||
+		strings.TrimSpace(d.DescriptionPattern) == config.LegacyDescriptionPattern {
 		d.DescriptionPattern = repli.DescriptionPattern
 	}
 	if strings.TrimSpace(d.Visibility) == "" {
@@ -88,16 +91,34 @@ type Classroom struct {
 	Group   string `json:"group"`
 	// LegacyPrefix est le préfixe tout en tirets d'un groupe déclaré avant cette
 	// nomenclature. Sa présence dit qu'il reste à migrer.
-	LegacyPrefix string          `json:"prefix,omitempty"`
-	Students     []roster.Person `json:"students"`
-	RosterPath   string          `json:"roster_path,omitempty"`
-	Defaults     Defaults        `json:"defaults"`
-	CreatedAt    string          `json:"created_at"`
+	LegacyPrefix string `json:"prefix,omitempty"`
+	// LegacyPattern dit comment lire des dépôts que rien n'organise :
+	// « projet-{assignment}-{student} ». Adopter ainsi n'impose aucune
+	// convention aux noms déjà en place ; la migration les y amène ensuite.
+	LegacyPattern string          `json:"pattern,omitempty"`
+	Students      []roster.Person `json:"students"`
+	RosterPath    string          `json:"roster_path,omitempty"`
+	Defaults      Defaults        `json:"defaults"`
+	CreatedAt     string          `json:"created_at"`
 }
 
-// Legacy dit si le groupe suit encore une nomenclature dépassée.
+// Legacy dit si le groupe suit encore une nomenclature dépassée : un préfixe
+// hérité, ou un gabarit d'adoption.
 func (c Classroom) Legacy() bool {
-	return strings.TrimSpace(c.Session) == "" && strings.TrimSpace(c.LegacyPrefix) != ""
+	return strings.TrimSpace(c.Session) == "" &&
+		(strings.TrimSpace(c.LegacyPrefix) != "" || strings.TrimSpace(c.LegacyPattern) != "")
+}
+
+// gabarit compile le gabarit d'adoption du groupe, s'il en a un.
+func (c Classroom) gabarit() (Pattern, bool) {
+	if strings.TrimSpace(c.LegacyPattern) == "" {
+		return Pattern{}, false
+	}
+	compile, err := ParsePattern(c.LegacyPattern)
+	if err != nil {
+		return Pattern{}, false
+	}
+	return compile, true
 }
 
 // separator est ce qui sépare le préfixe du travail. Deux nomenclatures ont
@@ -119,19 +140,29 @@ func (c Classroom) Validate() (Classroom, error) {
 	c.Org = org
 
 	if c.Legacy() {
-		// Le préfixe hérité peut porter des points — la nomenclature à quatre
-		// niveaux en avait déjà. Chaque niveau est validé à part, pour que le
-		// point survive à la slugification.
-		niveaux := strings.Split(c.LegacyPrefix, naming.Separator)
-		rendus := make([]string, 0, len(niveaux))
-		for _, niveau := range niveaux {
-			fragment, err := valid.SlugFragment(niveau, "Préfixe du groupe")
+		if strings.TrimSpace(c.LegacyPattern) != "" {
+			// Un gabarit d'adoption ne se slugifie pas : il décrit des noms
+			// déjà en place, qu'il faut reproduire à la lettre.
+			gabarit, err := ParsePattern(c.LegacyPattern)
 			if err != nil {
 				return c, err
 			}
-			rendus = append(rendus, fragment)
+			c.LegacyPattern, c.LegacyPrefix = gabarit.String(), ""
+		} else {
+			// Le préfixe hérité peut porter des points — la nomenclature à
+			// quatre niveaux en avait déjà. Chaque niveau est validé à part,
+			// pour que le point survive à la slugification.
+			niveaux := strings.Split(c.LegacyPrefix, naming.Separator)
+			rendus := make([]string, 0, len(niveaux))
+			for _, niveau := range niveaux {
+				fragment, err := valid.SlugFragment(niveau, "Préfixe du groupe")
+				if err != nil {
+					return c, err
+				}
+				rendus = append(rendus, fragment)
+			}
+			c.LegacyPrefix = strings.Join(rendus, naming.Separator)
 		}
-		c.LegacyPrefix = strings.Join(rendus, naming.Separator)
 	} else {
 		session, err := naming.Fragment(c.Session, "Session")
 		if err != nil {
@@ -145,7 +176,8 @@ func (c Classroom) Validate() (Classroom, error) {
 		if err != nil {
 			return c, err
 		}
-		c.Session, c.Course, c.Group, c.LegacyPrefix = session, course, group, ""
+		c.Session, c.Course, c.Group = session, course, group
+		c.LegacyPrefix, c.LegacyPattern = "", ""
 	}
 
 	c.Name = strings.TrimSpace(c.Name)
@@ -166,7 +198,13 @@ func (c Classroom) Validate() (Classroom, error) {
 // Label décrit le groupe quand il n'a pas de nom propre.
 func (c Classroom) Label() string {
 	if c.Legacy() {
-		return c.LegacyPrefix
+		if c.LegacyPrefix != "" {
+			return c.LegacyPrefix
+		}
+		if gabarit, ok := c.gabarit(); ok && gabarit.Prefix() != "" {
+			return gabarit.Prefix()
+		}
+		return c.LegacyPattern
 	}
 	return c.Course + " " + c.Group
 }
@@ -178,9 +216,14 @@ type Session struct {
 	Name  string `json:"name"`
 }
 
-// Scope est ce qui précède le nom d'un travail dans les dépôts du groupe.
+// Scope désigne ce que le groupe couvre : son préfixe pour la nomenclature
+// courante, et pour un groupe adopté, le gabarit lui-même — deux gabarits
+// différents ne regardent pas les mêmes dépôts, même s'ils commencent pareil.
 func (c Classroom) Scope() string {
 	if c.Legacy() {
+		if c.LegacyPattern != "" {
+			return c.LegacyPattern
+		}
 		return c.LegacyPrefix
 	}
 	return naming.Prefix(c.Session, c.Course, c.Group)
@@ -191,6 +234,11 @@ func (c Classroom) Scope() string {
 func (c Classroom) AssignmentID(name string) string {
 	name = strings.TrimSpace(name)
 	if c.Legacy() {
+		if c.LegacyPattern != "" {
+			// Le gabarit porte déjà tout ce qui entoure le travail : son nom
+			// suffit à le désigner.
+			return name
+		}
 		return strings.Trim(c.LegacyPrefix+c.separator()+name, c.separator())
 	}
 	return naming.AssignmentID(c.Session, c.Course, c.Group, name)
@@ -198,6 +246,9 @@ func (c Classroom) AssignmentID(name string) string {
 
 // ShortName retire du travail ce qui désigne le groupe.
 func (c Classroom) ShortName(id string) string {
+	if c.Legacy() && c.LegacyPattern != "" {
+		return id
+	}
 	scope := c.Scope()
 	separator := c.separator()
 	if scope != "" && len(id) > len(scope)+1 &&
@@ -211,6 +262,9 @@ func (c Classroom) ShortName(id string) string {
 func (c Classroom) Owns(id string) bool {
 	if strings.TrimSpace(id) == "" {
 		return false
+	}
+	if c.Legacy() && c.LegacyPattern != "" {
+		return true
 	}
 	scope := c.Scope()
 	if scope == "" {
@@ -265,12 +319,18 @@ func (c Classroom) fragments() map[string]roster.Person {
 
 // Has dit si un compte GitHub figure parmi les étudiants du groupe.
 func (c Classroom) Has(username string) bool {
+	_, trouve := c.Find(username)
+	return trouve
+}
+
+// Find retrouve un étudiant du groupe par son compte GitHub.
+func (c Classroom) Find(username string) (roster.Person, bool) {
 	for _, student := range c.Students {
 		if strings.EqualFold(student.Username, username) {
-			return true
+			return student, true
 		}
 	}
-	return false
+	return roster.Person{}, false
 }
 
 // ------------------------------------------------------------------- travaux

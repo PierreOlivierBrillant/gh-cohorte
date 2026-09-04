@@ -231,37 +231,16 @@ function demander(titre, contenu, libelle = 'Confirmer') {
 
 // --------------------------------------------------------------------- vues
 
-// Les vues d'un groupe partagent son en-tête et ses onglets.
+// Les vues d'un groupe partagent ses onglets.
 const ongletDeLaVue = {
   travaux: 'travaux', travail: 'travaux', assistant: 'travaux',
   etudiants: 'etudiants', 'groupe-reglages': 'groupe-reglages',
 };
 
-for (const bouton of $('onglets').querySelectorAll('button')) {
-  bouton.addEventListener('click', () => afficherVue(bouton.dataset.vue));
-}
-
-function afficherVue(nom) {
-  // Tant qu'aucune organisation n'est choisie, rien d'autre n'est accessible :
-  // tout ce que fait l'outil s'y passe.
-  if (!etat.organisation && nom !== 'organisation') nom = 'organisation';
-  const onglet = ongletDeLaVue[nom];
-  $('entete-groupe').hidden = !onglet;
-  $('ouvrir-reglages').hidden = !etat.organisation;
-  $('accueil').disabled = !etat.organisation;
-  for (const bouton of $('onglets').querySelectorAll('button')) {
-    bouton.classList.toggle('actif', bouton.dataset.vue === onglet);
-  }
-  for (const vue of document.querySelectorAll('.vue')) {
-    vue.hidden = vue.id !== 'vue-' + nom;
-  }
-  window.scrollTo(0, 0);
-  // Les comptages d'une vue changent pendant qu'on est ailleurs : chaque
-  // retour les redemande plutôt que de laisser voir un état périmé.
-  if (nom === 'parcours') chargerGroupes();
-  if (nom === 'reglages') rafraichirEmplacements();
-  if (nom === 'etudiants') chargerEtudiants();
-  if (nom === 'groupe-reglages') ecrireReglagesGroupe();
+// sigle rend un code de cours tel qu'on l'écrit : « 4w6 » se lit « 4W6 ». Les
+// dépôts, eux, gardent la casse d'origine — GitHub ne la distingue pas.
+function sigle(code) {
+  return (code || '').toUpperCase();
 }
 
 // travaux accorde le mot avec le nombre.
@@ -274,14 +253,303 @@ function groupesEnMots(nombre) {
   return nombre === 1 ? '1 groupe' : `${nombre} groupes`;
 }
 
-$('accueil').addEventListener('click', () => { etat.parcours = { session: '', cours: '' }; afficherVue('parcours'); });
-$('retour-groupes').addEventListener('click', () => afficherVue('parcours'));
-$('nouveau-retour').addEventListener('click', () => afficherVue('parcours'));
-$('reglages-retour').addEventListener('click', () => afficherVue('parcours'));
+for (const bouton of $('onglets').querySelectorAll('button')) {
+  bouton.addEventListener('click', () => afficherVue(bouton.dataset.vue));
+}
+
+// ------------------------------------------------------------------ adresses
+
+// L'adresse dit où l'on se trouve : recharger, revenir en arrière ou coller un
+// lien mènent au même endroit. Le serveur rend l'interface pour toute adresse
+// qu'il ne connaît pas, ce qui permet de vraies routes plutôt qu'un fragment.
+
+function cheminDeLaVue(nom) {
+  const groupe = etat.groupe ? encode(etat.groupe.id) : '';
+  switch (nom) {
+    case 'organisation': return '/organisation';
+    case 'nouveau-groupe': return '/nouveau-groupe';
+    case 'adoption': return '/adoption';
+    case 'reglages': return '/reglages';
+    case 'travaux': return `/g/${groupe}`;
+    case 'assistant': return `/g/${groupe}/nouveau-travail`;
+    case 'etudiants': return `/g/${groupe}/etudiants`;
+    case 'groupe-reglages': return `/g/${groupe}/reglages`;
+    case 'travail':
+      return `/g/${groupe}/travaux/${encode(etat.travail ? etat.travail.name : '')}`;
+    default: {
+      const { session, cours } = etat.parcours;
+      if (!session) return '/';
+      if (!cours) return `/s/${encode(session)}`;
+      return `/s/${encode(session)}/${encode(cours)}`;
+    }
+  }
+}
+
+// lireAdresse traduit l'adresse courante en destination.
+function lireAdresse() {
+  const morceaux = window.location.pathname.split('/')
+    .filter(Boolean).map(decodeURIComponent);
+  if (morceaux.length === 0) return { vue: 'parcours', session: '', cours: '' };
+  switch (morceaux[0]) {
+    case 's':
+      return { vue: 'parcours', session: morceaux[1] || '', cours: morceaux[2] || '' };
+    case 'g':
+      return {
+        vue: vueDuGroupe(morceaux[2]), groupe: morceaux[1] || '',
+        travail: morceaux[3] || '',
+      };
+    case 'nouveau-groupe': case 'adoption': case 'reglages': case 'organisation':
+      return { vue: morceaux[0] };
+    default:
+      return { vue: 'parcours', session: '', cours: '' };
+  }
+}
+
+function vueDuGroupe(segment) {
+  switch (segment) {
+    case 'travaux': return 'travail';
+    case 'nouveau-travail': return 'assistant';
+    case 'etudiants': return 'etudiants';
+    case 'reglages': return 'groupe-reglages';
+    default: return 'travaux';
+  }
+}
+
+// allerA rejoint une destination lue dans l'adresse, sans rien empiler : c'est
+// le chemin du retour arrière et du rechargement.
+async function allerA(route) {
+  if (!etat.organisation) { afficherVue('organisation', true); return; }
+  if (route.vue === 'parcours') {
+    etat.parcours = { session: route.session || '', cours: route.cours || '' };
+    afficherVue('parcours', true);
+    return;
+  }
+  if (!ongletDeLaVue[route.vue]) {
+    // Une adresse peut ouvrir un écran directement : il faut alors le remplir
+    // comme le ferait le bouton qui y mène.
+    if (route.vue === 'adoption') preparerAdoption();
+    if (route.vue === 'nouveau-groupe') preparerNouveauGroupe();
+    afficherVue(route.vue, true);
+    return;
+  }
+
+  // Les sessions et les groupes voisins viennent d'ici : arriver droit sur un
+  // groupe par son adresse les demande quand même, pour que le fil d'Ariane
+  // sache dire « Automne 2026 » plutôt que « a26 ».
+  if (etat.groupes.length === 0) await chargerGroupes();
+  if (!etat.groupe || etat.groupe.id !== route.groupe) {
+    if (!await ouvrirGroupe(route.groupe, false, true)) {
+      // L'adresse désigne un groupe retiré depuis : on remonte à l'accueil.
+      etat.parcours = { session: '', cours: '' };
+      naviguer('/', true);
+      afficherVue('parcours', true);
+      return;
+    }
+  }
+  if (route.vue !== 'travail') { afficherVue(route.vue, true); return; }
+
+  const travail = (etat.groupe.assignments || []).find((item) =>
+    item.name.toLowerCase() === (route.travail || '').toLowerCase());
+  if (!travail) { afficherVue('travaux', true); return; }
+  await ouvrirTravail(travail, false, true);
+}
+
+// naviguer pose une adresse sans changer de vue : les déplacements internes à
+// la hiérarchie s'en servent.
+function naviguer(chemin, remplacer) {
+  if (window.location.pathname === chemin) return;
+  window.history[remplacer ? 'replaceState' : 'pushState']({}, '', chemin);
+}
+
+window.addEventListener('popstate', () => { allerA(lireAdresse()); });
+
+// ------------------------------------------------------------- affichage
+
+function afficherVue(nom, sansHistorique) {
+  // Tant qu'aucune organisation n'est choisie, rien d'autre n'est accessible :
+  // tout ce que fait l'outil s'y passe.
+  if (!etat.organisation && nom !== 'organisation') nom = 'organisation';
+  const onglet = ongletDeLaVue[nom];
+  $('ouvrir-reglages').hidden = !etat.organisation;
+  $('accueil').disabled = !etat.organisation;
+  for (const bouton of $('onglets').querySelectorAll('button')) {
+    bouton.classList.toggle('actif', bouton.dataset.vue === onglet);
+  }
+  for (const vue of document.querySelectorAll('.vue')) {
+    vue.hidden = vue.id !== 'vue-' + nom;
+  }
+  dessinerEntete(nom, onglet);
+  if (!sansHistorique) naviguer(cheminDeLaVue(nom));
+  window.scrollTo(0, 0);
+  // Les comptages d'une vue changent pendant qu'on est ailleurs : chaque
+  // retour les redemande plutôt que de laisser voir un état périmé.
+  if (nom === 'parcours') chargerGroupes();
+  if (nom === 'reglages') rafraichirEmplacements();
+  if (nom === 'etudiants') chargerEtudiants();
+  if (nom === 'groupe-reglages') ecrireReglagesGroupe();
+}
+
+// ------------------------------------------------------------ en-tête de page
+
+// L'en-tête est le même partout : le fil d'Ariane, le titre, ce qu'il faut
+// signaler. Passer d'une session à un cours puis à un groupe ne doit pas donner
+// l'impression de changer d'application.
+function dessinerEntete(nom, onglet) {
+  const entete = $('entete-page');
+  entete.hidden = nom === 'organisation';
+  $('onglets').hidden = !onglet;
+  if (entete.hidden) return;
+
+  const fiche = ficheDeLEntete(nom);
+  const fil = $('fil');
+  vider(fil);
+  fiche.fil.forEach((etape, rang) => {
+    if (rang > 0) fil.append(el('span', { classe: 'separateur', texte: '/' }));
+    fil.append(etape.action
+      ? el('button', { classe: 'lien', type: 'button', texte: etape.texte, onclick: etape.action })
+      : el('span', { texte: etape.texte }));
+  });
+
+  $('page-titre').textContent = fiche.titre;
+  $('page-sous-titre').textContent = fiche.sousTitre || '';
+  $('page-sous-titre').hidden = !fiche.sousTitre;
+
+  const nomenclature = $('page-nomenclature');
+  vider(nomenclature);
+  nomenclature.hidden = !fiche.nomenclature;
+  if (fiche.nomenclature) {
+    nomenclature.append(document.createTextNode('Ses dépôts s’appellent '));
+    nomenclature.append(el('code', { texte: fiche.nomenclature }));
+  }
+
+  const avis = $('page-avis');
+  vider(avis);
+  avis.hidden = !fiche.avis;
+  if (fiche.avis) avis.append(el('div', { classe: 'avis alerte', texte: fiche.avis }));
+
+  const actions = $('page-actions');
+  vider(actions);
+  for (const bouton of fiche.actions || []) {
+    actions.append(el('button', {
+      classe: 'bouton ' + (bouton.classe || ''), type: 'button',
+      texte: bouton.texte, onclick: bouton.action,
+    }));
+  }
+}
+
+// ficheDeLEntete dit ce que l'en-tête montre pour la vue courante.
+function ficheDeLEntete(nom) {
+  const racine = {
+    texte: 'Sessions',
+    action: () => { etat.parcours = { session: '', cours: '' }; afficherVue('parcours'); },
+  };
+  const { session, cours } = etat.parcours;
+
+  if (nom === 'parcours') {
+    const actions = [
+      { texte: 'Recharger', action: () => chargerGroupes(true) },
+      { texte: 'Nouveau groupe', classe: 'vert', action: () => ouvrirNouveauGroupe() },
+    ];
+    if (!session) {
+      return {
+        fil: [{ texte: 'Sessions' }], titre: 'Sessions', actions,
+        sousTitre: `Organisation ${etat.organisation} · session, cours, groupe, travail`,
+      };
+    }
+    if (!cours) {
+      return {
+        fil: [racine, { texte: nomDeSession(session) }],
+        titre: nomDeSession(session), actions,
+        sousTitre: `Cours de la session « ${session} »`,
+      };
+    }
+    return {
+      fil: [racine, etapeSession(session), { texte: sigle(cours) }],
+      titre: sigle(cours), actions,
+      sousTitre: `${nomDeSession(session)} · groupes du cours`,
+    };
+  }
+
+  if (nom === 'nouveau-groupe') {
+    return { fil: [racine, { texte: 'Nouveau groupe' }], titre: 'Nouveau groupe',
+      sousTitre: 'Des étudiants, une place dans la hiérarchie.' };
+  }
+  if (nom === 'adoption') {
+    return { fil: [racine, { texte: 'Adopter par gabarit' }], titre: 'Adopter des dépôts',
+      sousTitre: `Dépôts de ${etat.organisation} qu'aucune convention n'organise.` };
+  }
+  if (nom === 'reglages') {
+    return { fil: [racine, { texte: 'Réglages' }], titre: 'Réglages',
+      sousTitre: "Ce que l'outil retient d'une session à l'autre, et où il l'écrit." };
+  }
+
+  // Les vues d'un groupe : le fil remonte toute la hiérarchie.
+  const groupe = etat.groupe || {};
+  const fil = [racine];
+  if (groupe.session) {
+    fil.push(etapeSession(groupe.session), etapeCours(groupe.session, groupe.course));
+  }
+  fil.push(nom === 'travaux'
+    ? { texte: groupe.name || '' }
+    : { texte: groupe.name || '', action: () => afficherVue('travaux') });
+  if (nom === 'travail' && etat.travail) fil.push({ texte: etat.travail.name });
+  if (nom === 'assistant') fil.push({ texte: etat.assistantTitre || 'Nouveau travail' });
+  if (nom === 'etudiants') fil.push({ texte: 'Étudiants' });
+  if (nom === 'groupe-reglages') fil.push({ texte: 'Réglages du groupe' });
+
+  return {
+    fil, titre: groupe.name || '',
+    sousTitre: sousTitreDuGroupe(groupe),
+    nomenclature: nomenclatureDuGroupe(groupe),
+    avis: avisDuGroupe(groupe),
+  };
+}
+
+function etapeSession(court) {
+  return {
+    texte: nomDeSession(court),
+    action: () => { etat.parcours = { session: court, cours: '' }; afficherVue('parcours'); },
+  };
+}
+
+function etapeCours(court, cours) {
+  return {
+    texte: sigle(cours),
+    action: () => { etat.parcours = { session: court, cours }; afficherVue('parcours'); },
+  };
+}
+
+function sousTitreDuGroupe(groupe) {
+  const compte = `${(groupe.students || []).length} étudiant(s)`;
+  if (!groupe.session) return `Organisation ${groupe.org} · ${compte}`;
+  return `${groupe.session_name || groupe.session} · ${sigle(groupe.course)}` +
+    ` · groupe ${groupe.group} · ${compte}`;
+}
+
+// nomenclatureDuGroupe montre en toutes lettres comment ses dépôts s'appellent.
+function nomenclatureDuGroupe(groupe) {
+  if (groupe.session) {
+    return `${groupe.session}.${groupe.course}.${groupe.group}.<travail>.<étudiant>`;
+  }
+  if (groupe.pattern) return groupe.pattern;
+  if (groupe.prefix) {
+    const separateur = groupe.prefix.includes('.') ? '.' : '-';
+    return `${groupe.prefix}${separateur}<travail>${separateur}<étudiant>`;
+  }
+  return '';
+}
+
+function avisDuGroupe(groupe) {
+  if (groupe.session || !(groupe.prefix || groupe.pattern)) return '';
+  return "Ce groupe suit une nomenclature dépassée. Ses dépôts restent lisibles, mais on ne " +
+    'peut plus lui distribuer de travail : renommez-les depuis « Réglages du groupe ».';
+}
+
+$('accueil').addEventListener('click', () => {
+  etat.parcours = { session: '', cours: '' };
+  afficherVue('parcours');
+});
 $('ouvrir-reglages').addEventListener('click', () => afficherVue('reglages'));
-$('travail-retour').addEventListener('click', () => afficherVue('travaux'));
-$('assistant-retour').addEventListener('click', () => afficherVue('travaux'));
-$('parcours-recharger').addEventListener('click', () => chargerGroupes(true));
 
 // ------------------------------------------------ parcours de la hiérarchie
 
@@ -295,7 +563,8 @@ async function chargerGroupes(force) {
     groupe.org.toLowerCase() === etat.organisation.toLowerCase());
   etat.sessions = donnees.sessions || [];
   dessinerParcours();
-  await montrerCandidats(etat.organisation, force);
+  // La détection relit tout l'inventaire : elle n'a lieu que là où elle sert.
+  if (!$('vue-parcours').hidden) await montrerCandidats(etat.organisation, force);
 }
 
 // nomDeSession retrouve le nom long d'une session.
@@ -309,24 +578,9 @@ function nomDeSession(court) {
 // session, ou les groupes d'un cours.
 function dessinerParcours() {
   const { session, cours } = etat.parcours;
-  const fil = $('parcours-fil');
-  vider(fil);
-  fil.append(el('button', {
-    classe: 'lien', type: 'button', texte: 'Sessions',
-    onclick: () => { etat.parcours = { session: '', cours: '' }; dessinerParcours(); },
-  }));
-  if (session) {
-    fil.append(el('span', { classe: 'separateur', texte: '/' }));
-    fil.append(el('button', {
-      classe: 'lien', type: 'button', texte: nomDeSession(session),
-      onclick: () => { etat.parcours = { session, cours: '' }; dessinerParcours(); },
-    }));
-  }
-  if (cours) {
-    fil.append(el('span', { classe: 'separateur', texte: '/' }));
-    fil.append(el('span', { texte: cours }));
-  }
-
+  // Le nom long d'une session arrive avec les groupes : l'en-tête, dessiné
+  // avant eux, doit être repris une fois qu'ils sont là.
+  if (!$('vue-parcours').hidden) dessinerEntete('parcours', null);
   $('candidats-accueil').hidden = !!(session || cours);
   const conteneur = $('parcours-liste');
   vider(conteneur);
@@ -340,17 +594,14 @@ function dessinerParcours() {
   }
 }
 
-// herites rassemble les groupes qui n'ont pas encore de session : ils suivent
-// l'ancienne nomenclature et attendent leur migration.
+// herites rassemble les groupes qui n'ont pas encore de place dans la
+// hiérarchie : ils suivent une nomenclature dépassée, et attendent d'être
+// renommés.
 function herites() {
   return etat.groupes.filter((groupe) => !groupe.session);
 }
 
 function dessinerSessions(conteneur) {
-  $('parcours-titre').textContent = 'Sessions';
-  $('parcours-note').textContent =
-    `Organisation ${etat.organisation} · session, cours, groupe, travail`;
-
   const parSession = new Map();
   for (const groupe of etat.groupes) {
     if (!groupe.session) continue;
@@ -374,20 +625,17 @@ function dessinerSessions(conteneur) {
       nomDeSession(session.court),
       `${cours.size} cours · ${groupesEnMots(session.groupes.length)}`,
       [el('span', { classe: 'jeton', texte: session.court })],
-      () => { etat.parcours = { session: session.court, cours: '' }; dessinerParcours(); }));
+      () => { etat.parcours = { session: session.court, cours: '' }; afficherVue('parcours'); }));
   }
 
   for (const groupe of herites()) {
-    conteneur.append(ligneParcours(groupe.name, 'ancienne nomenclature — à migrer',
-      [el('span', { classe: 'jeton non', texte: groupe.prefix + '-…' })],
+    conteneur.append(ligneParcours(groupe.name, 'nomenclature dépassée — à renommer',
+      [el('span', { classe: 'jeton non', texte: nomenclatureDuGroupe(groupe) })],
       () => ouvrirGroupe(groupe.id)));
   }
 }
 
 function dessinerCours(conteneur, session) {
-  $('parcours-titre').textContent = nomDeSession(session);
-  $('parcours-note').textContent = `Cours de la session « ${session} »`;
-
   const parCours = new Map();
   for (const groupe of etat.groupes) {
     if (!groupe.session || groupe.session.toLowerCase() !== session.toLowerCase()) continue;
@@ -399,19 +647,16 @@ function dessinerCours(conteneur, session) {
   for (const cours of triees) {
     const etudiants = cours.groupes.reduce(
       (total, groupe) => total + (groupe.students || []).length, 0);
-    conteneur.append(ligneParcours(cours.code,
+    conteneur.append(ligneParcours(sigle(cours.code),
       `${groupesEnMots(cours.groupes.length)} · ${etudiants} étudiant(s)`, [],
       () => {
         etat.parcours = { session, cours: cours.code };
-        dessinerParcours();
+        afficherVue('parcours');
       }));
   }
 }
 
 function dessinerGroupesDuCours(conteneur, session, cours) {
-  $('parcours-titre').textContent = `${cours} — ${nomDeSession(session)}`;
-  $('parcours-note').textContent = 'Groupes du cours';
-
   const retenus = etat.groupes.filter((groupe) =>
     groupe.session && groupe.session.toLowerCase() === session.toLowerCase() &&
     groupe.course.toLowerCase() === cours.toLowerCase());
@@ -435,37 +680,21 @@ function ligneParcours(titre, detail, jetons, action) {
     el('span', { classe: 'chevron', texte: '›' }));
 }
 
-async function ouvrirGroupe(id, force) {
+// ouvrirGroupe charge un groupe et montre ses travaux. Il rend faux quand le
+// groupe n'existe pas — une adresse peut désigner un groupe retiré depuis.
+async function ouvrirGroupe(id, force, sansHistorique) {
   const groupe = await tenter(() => api('GET',
     `/api/classrooms/${encode(id)}${force ? '?refresh=1' : ''}`), 'Groupe');
-  if (!groupe) return;
+  if (!groupe) return false;
   etat.groupe = groupe;
   etat.travail = null;
   etat.etudiants = [];
   if (groupe.session) etat.parcours = { session: groupe.session, cours: groupe.course };
 
-  const herite = !groupe.session && groupe.prefix;
-  $('groupe-titre').textContent = groupe.name;
-  $('groupe-prefixe').textContent = herite
-    ? groupe.prefix + '-…'
-    : `${groupe.session}.${groupe.course}.${groupe.group}.…`;
-  $('groupe-sous-titre').textContent = herite
-    ? `Organisation ${groupe.org} · ${(groupe.students || []).length} étudiant(s)`
-    : `${groupe.session_name || groupe.session} · ${groupe.course} · groupe ${groupe.group}` +
-      ` · ${(groupe.students || []).length} étudiant(s)`;
-
-  const avis = $('groupe-avis');
-  vider(avis);
-  avis.hidden = !herite;
-  if (herite) {
-    avis.append(el('div', { classe: 'avis alerte',
-      texte: "Ce groupe suit l'ancienne nomenclature, tout en tirets. Ses dépôts restent " +
-        "lisibles, mais on ne peut plus lui distribuer de travail : migrez-le depuis " +
-        '« Réglages du groupe ».' }));
-  }
-  $('travaux-nouveau').disabled = !!herite;
+  $('travaux-nouveau').disabled = !groupe.session;
   dessinerTravaux();
-  afficherVue('travaux');
+  afficherVue('travaux', sansHistorique);
+  return true;
 }
 
 // ------------------------------------------ organisations et groupes repérés
@@ -573,12 +802,13 @@ async function montrerCandidats(org, force) {
       onclick: () => adopter(candidat, org),
     },
       el('span', { classe: 'travail-infos' },
-        el('span', { classe: 'titre', texte: candidat.prefix || "racine de l'organisation" }),
+        el('span', { classe: 'titre',
+          texte: candidat.prefix || "dépôts sans préfixe commun" }),
         el('span', { classe: 'detail',
           texte: candidat.assignments.join(', ') || 'aucun travail' })),
       el('span', { classe: 'espace' }),
       candidat.legacy
-        ? el('span', { classe: 'jeton non', texte: 'ancienne nomenclature' })
+        ? el('span', { classe: 'jeton non', texte: 'nomenclature dépassée' })
         : null,
       el('span', { classe: 'jeton',
         texte: `${candidat.students.length} ${candidat.legacy ? 'compte(s)' : 'étudiant(s)'}` }),
@@ -590,6 +820,13 @@ async function montrerCandidats(org, force) {
 // adopter déclare un groupe à partir d'une place repérée : le nom est la seule
 // chose à décider, le reste vient des dépôts.
 async function adopter(candidat, org) {
+  // Sans préfixe commun, il n'y a rien à adopter tel quel : c'est le cas où
+  // un gabarit écrit à la main est le seul moyen de dire ce qu'on veut lire.
+  if (candidat.legacy && !candidat.prefix) {
+    ouvrirAdoption('{assignment}-{student}');
+    message('Ces dépôts ne partagent aucun préfixe : décrivez leurs noms.', 'alerte', 9000);
+    return;
+  }
   const nom = el('input', {
     type: 'text', classe: 'champ',
     value: candidat.prefix || org,
@@ -630,7 +867,13 @@ async function adopter(candidat, org) {
 
 // --------------------------------------------------- déclaration d'un groupe
 
-$('groupes-nouveau').addEventListener('click', () => {
+function ouvrirNouveauGroupe() {
+  preparerNouveauGroupe();
+  afficherVue('nouveau-groupe');
+  $('nouveau-session').focus();
+}
+
+function preparerNouveauGroupe() {
   etat.nouveau = { etudiants: [], rejets: [] };
   $('nouveau-session').value = etat.parcours.session || '';
   $('nouveau-session-nom').value = etat.parcours.session
@@ -651,9 +894,7 @@ $('groupes-nouveau').addEventListener('click', () => {
     suggestions.append(el('option', { value: session.short, texte: session.name }));
   }
   majApercuPrefixe();
-  afficherVue('nouveau-groupe');
-  $('nouveau-session').focus();
-});
+}
 
 for (const id of ['nouveau-session', 'nouveau-cours', 'nouveau-section']) {
   $(id).addEventListener('input', majApercuPrefixe);
@@ -682,6 +923,10 @@ $('nouveau-lire').addEventListener('click', async () => {
   if (liste) appliquerListeNouveau(liste);
 });
 
+$('nouveau-chemin').addEventListener('change', () => {
+  if ($('nouveau-chemin').value.trim()) $('nouveau-charger').click();
+});
+
 $('nouveau-charger').addEventListener('click', async () => {
   const chemin = $('nouveau-chemin').value.trim();
   if (!chemin) { message('Indiquez un chemin de fichier.', 'alerte'); return; }
@@ -689,15 +934,6 @@ $('nouveau-charger').addEventListener('click', async () => {
   if (!liste) return;
   $('nouveau-chemin').value = liste.path;
   appliquerListeNouveau(liste);
-});
-
-$('nouveau-fichier').addEventListener('change', async (evenement) => {
-  const fichier = evenement.target.files[0];
-  if (!fichier) return;
-  const texte = await fichier.text();
-  $('nouveau-texte').value = texte;
-  const liste = await tenter(() => api('POST', '/api/roster/parse', { text: texte }), 'Liste');
-  if (liste) appliquerListeNouveau(liste);
 });
 
 function appliquerListeNouveau(liste) {
@@ -795,7 +1031,7 @@ $('travaux-recharger').addEventListener('click', () => ouvrirGroupe(etat.groupe.
 
 // ------------------------------------------------------- détail d'un travail
 
-async function ouvrirTravail(travail, force) {
+async function ouvrirTravail(travail, force, sansHistorique) {
   const chemin = `/api/classrooms/${encode(etat.groupe.id)}/assignments/${encode(travail.name)}` +
     (force ? '?refresh=1' : '');
   const detail = await tenter(() => api('GET', chemin), 'Travail');
@@ -806,10 +1042,9 @@ async function ouvrirTravail(travail, force) {
   etat.travail = { id: travail.id, name: travail.name, depots: detail.repos };
   etat.selection = new Set(detail.repos.map((repo) => repo.name));
   etat.acces.clear();
-  $('fil-travail').textContent = travail.name;
   $('detail-titre').textContent = travail.name;
   dessinerTravail();
-  afficherVue('travail');
+  afficherVue('travail', sansHistorique);
 }
 
 function dessinerTravail() {
@@ -1036,7 +1271,9 @@ $('detail-cloner').addEventListener('click', async () => {
   });
   const confirme = await demander(`Cloner ${choisis.length} dépôt(s)`, el('div', {},
     el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Dossier de destination' }), destination),
+      el('span', { classe: 'etiquette', texte: 'Dossier de destination' }),
+      el('span', { classe: 'ligne-champ' }, destination, boutonParcourir(destination, {
+        dossier: true, titre: 'Choisir où cloner' }))),
     el('p', { classe: 'note', texte: `${etat.contexte.jobs} clonage(s) en parallèle` +
       (etat.contexte.depth ? `, profondeur ${etat.contexte.depth}` : '') })), 'Cloner');
   if (!confirme) return;
@@ -1063,7 +1300,9 @@ $('detail-pull').addEventListener('click', async () => {
   });
   const trouve = await demander('Mettre à jour des clones', el('div', {},
     el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Dossier contenant les clones' }), dossier)),
+      el('span', { classe: 'etiquette', texte: 'Dossier contenant les clones' }),
+      el('span', { classe: 'ligne-champ' }, dossier, boutonParcourir(dossier, {
+        dossier: true, titre: 'Choisir le dossier des clones' })))),
     'Chercher');
   if (!trouve) return;
 
@@ -1107,8 +1346,8 @@ $('detail-distribuer').addEventListener('click', () => {
 
 function ouvrirAssistant(nom, titre, etape = 1) {
   etat.reglagesTravail = Object.assign({}, etat.groupe.defaults);
+  etat.assistantTitre = titre;
   $('travail-nom').value = nom;
-  $('fil-assistant').textContent = titre;
   ecrireReglagesTravail();
   dessinerDestinataires();
   afficherEtape(etape);
@@ -1402,7 +1641,11 @@ async function chargerEtudiants(force) {
             el('a', {
               classe: 'jeton lien', href: travail.url,
               target: '_blank', rel: 'noreferrer noopener', texte: travail.name,
-            }))))));
+            })))),
+      el('td', {}, el('button', {
+        classe: 'bouton petit', type: 'button', texte: 'Déplacer…',
+        onclick: () => deplacerEtudiant(ligne),
+      }))));
   }
 
   $('etudiants-resume').textContent =
@@ -1436,7 +1679,9 @@ $('etudiants-importer').addEventListener('click', async () => {
     placeholder: 'Jean-Luc Picard, jlpicard' });
   const confirme = await demander('Remplacer la liste des étudiants', el('div', {},
     el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Fichier CSV de la machine' }), chemin),
+      el('span', { classe: 'etiquette', texte: 'Fichier CSV de la machine' }),
+      el('span', { classe: 'ligne-champ' }, chemin, boutonParcourir(chemin, {
+        titre: 'Choisir la liste des étudiants' }))),
     el('label', { classe: 'champ-bloc' },
       el('span', { classe: 'etiquette', texte: '…ou une liste collée' }), zone),
     el('p', { classe: 'note',
@@ -1477,25 +1722,48 @@ const champsGroupe = {
 
 function ecrireReglagesGroupe() {
   const groupe = etat.groupe;
-  const herite = !groupe.session && groupe.prefix;
   $('gr-nom').value = groupe.name || '';
-  $('gr-org').value = groupe.org || '';
-  $('gr-session').value = groupe.session || '';
   $('gr-session-nom').value = groupe.session_name || '';
-  $('gr-cours').value = groupe.course || '';
-  $('gr-section').value = groupe.group || '';
-  // Un groupe hérité ne change pas de place à la main : renommer ses dépôts
-  // fait partie de la migration.
-  for (const id of ['gr-session', 'gr-session-nom', 'gr-cours', 'gr-section']) {
-    $(id).disabled = !!herite;
-  }
-  preparerMigration(herite ? groupe.prefix : '');
+  // Le nom long d'une session n'a de sens que pour un groupe qui en a une.
+  $('gr-session-nom-bloc').hidden = !groupe.session;
+
+  preparerMigration(groupe);
   const defauts = groupe.defaults || {};
   for (const [cle, id] of Object.entries(champsGroupe)) {
     $(id).value = defauts[cle] || '';
   }
   $('gr-collaborateur').checked = defauts.add_collaborator !== false;
 }
+
+// enregistrerGroupe renvoie le groupe entier : le serveur remplace la fiche,
+// et taire un champ l'effacerait.
+async function enregistrerGroupe(modifications) {
+  const groupe = etat.groupe;
+  return tenter(() => api('PUT', `/api/classrooms/${encode(groupe.id)}`, Object.assign({
+    name: groupe.name || '',
+    org: groupe.org,
+    session: groupe.session || '',
+    session_name: groupe.session_name || '',
+    course: groupe.course || '',
+    group: groupe.group || '',
+    prefix: groupe.prefix || '',
+    pattern: groupe.pattern || '',
+    students: groupe.students,
+    roster_path: groupe.roster_path || '',
+    defaults: groupe.defaults || {},
+  }, modifications)), 'Groupe');
+}
+
+$('gr-nom-enregistrer').addEventListener('click', async () => {
+  const modifie = await enregistrerGroupe({
+    name: $('gr-nom').value.trim(),
+    session_name: $('gr-session-nom').value.trim(),
+  });
+  if (!modifie) return;
+  message('Nom enregistré.');
+  await ouvrirGroupe(modifie.id, true, true);
+  afficherVue('groupe-reglages');
+});
 
 $('gr-enregistrer').addEventListener('click', async () => {
   const defauts = Object.assign({}, etat.groupe.defaults);
@@ -1504,40 +1772,60 @@ $('gr-enregistrer').addEventListener('click', async () => {
   }
   defauts.add_collaborator = $('gr-collaborateur').checked;
 
-  const modifie = await tenter(() => api('PUT', `/api/classrooms/${encode(etat.groupe.id)}`, {
-    name: $('gr-nom').value.trim(),
-    org: $('gr-org').value.trim(),
-    session: $('gr-session').value.trim(),
-    session_name: $('gr-session-nom').value.trim(),
-    course: $('gr-cours').value.trim(),
-    group: $('gr-section').value.trim(),
-    prefix: '',
-    students: etat.groupe.students,
-    roster_path: etat.groupe.roster_path || '',
-    defaults: defauts,
-  }), 'Groupe');
+  const modifie = await enregistrerGroupe({ defaults: defauts });
   if (!modifie) return;
   message('Réglages du groupe enregistrés.');
-  await ouvrirGroupe(modifie.id, true);
+  await ouvrirGroupe(modifie.id, true, true);
   afficherVue('groupe-reglages');
 });
 
 // ------------------------------------------------------------------ migration
 
-function preparerMigration(prefixe) {
-  $('migration-boite').hidden = !prefixe;
+// preparerMigration remplit l'écran qui renomme les dépôts d'un groupe. Le
+// mécanisme est le même qu'on vienne d'une nomenclature dépassée ou qu'on
+// change simplement de session : ce sont les mots qui diffèrent.
+function preparerMigration(groupe) {
+  const herite = !groupe.session;
+  $('migration-titre').textContent = herite
+    ? 'Migrer vers la nomenclature courante'
+    : 'Renommer ou déplacer le groupe';
+  $('migration-note').textContent = herite
+    ? "Les dépôts de ce groupe ne suivent pas la nomenclature courante. Les renommer leur " +
+      'donne une place dans la hiérarchie, et rend la distribution possible.'
+    : 'Changer la session, le cours ou le numéro du groupe renomme tous ses dépôts. GitHub ' +
+      'garde une redirection depuis chaque ancien nom : les clones déjà faits continuent de ' +
+      'fonctionner.';
+
   $('mig-table').hidden = true;
   $('mig-resume').textContent = '';
   $('mig-lancer').disabled = true;
   vider($('mig-avis'));
-  if (!prefixe) return;
 
-  // « a26-5n6 » suit l'habitude « session-cours » : le premier segment fait la
-  // session, le dernier le cours. C'est une proposition, pas une règle.
-  const segments = prefixe.split('-');
-  $('mig-session').value = segments.length > 1 ? segments[0] : '';
-  $('mig-cours').value = segments.length > 1 ? segments[segments.length - 1] : prefixe;
-  $('mig-section').value = '01';
+  if (!herite) {
+    $('mig-session').value = groupe.session;
+    $('mig-cours').value = groupe.course;
+    $('mig-section').value = groupe.group;
+  } else {
+    // « a26-5n6 » suit l'habitude « session-cours » : le premier segment fait
+    // la session, le dernier le cours. C'est une proposition, pas une règle.
+    const prefixe = groupe.prefix || '';
+    const segments = prefixe.split(/[-.]/).filter(Boolean);
+    $('mig-session').value = segments.length > 1 ? segments[0] : '';
+    $('mig-cours').value = segments.length > 1 ? segments[segments.length - 1] : prefixe;
+    $('mig-section').value = '01';
+  }
+  majApercuMigration();
+}
+
+function majApercuMigration() {
+  const session = $('mig-session').value.trim() || 'session';
+  const cours = $('mig-cours').value.trim() || 'cours';
+  const section = $('mig-section').value.trim() || 'groupe';
+  $('mig-apercu').textContent = `${session}.${cours}.${section}.<travail>.<étudiant>`;
+}
+
+for (const id of ['mig-session', 'mig-cours', 'mig-section']) {
+  $(id).addEventListener('input', majApercuMigration);
 }
 
 function corpsMigration() {
@@ -1549,7 +1837,7 @@ function corpsMigration() {
   };
 }
 
-$('mig-apercu').addEventListener('click', async () => {
+$('mig-apercu-bouton').addEventListener('click', async () => {
   const apercu = await tenter(() => api('POST',
     `/api/classrooms/${encode(etat.groupe.id)}/migration/preview`, corpsMigration()), 'Migration');
   vider($('mig-avis'));
@@ -1606,7 +1894,7 @@ $('mig-lancer').addEventListener('click', async () => {
     journaliser('Le groupe reste sur l\'ancienne nomenclature : des dépôts sont restés en ' +
       'arrière.', 'warn');
   }
-  await ouvrirGroupe(etat.groupe.id, true);
+  await ouvrirGroupe(etat.groupe.id, true, true);
   afficherVue('groupe-reglages');
 });
 
@@ -1623,7 +1911,7 @@ $('gr-supprimer').addEventListener('click', async () => {
   if (!fait) return;
   message(fait.message, 'succes', 10000);
   etat.groupe = null;
-  afficherVue('groupes');
+  afficherVue('parcours');
 });
 
 // ------------------------------------------------------- réglages généraux
@@ -1639,7 +1927,7 @@ async function rafraichirEmplacements() {
   etat.contexte = contexte;
   dessinerPortees(contexte.scopes);
   dessinerChemins(contexte.paths);
-  $('reglage-delay').value = etat.reglages.delay_seconds ?? 1;
+  ecrireReglagesGeneraux();
 }
 
 $('reglages-org').addEventListener('change', () => {
@@ -1671,6 +1959,7 @@ async function changerOrganisation(org) {
 
 $('reglages-enregistrer').addEventListener('click', async () => {
   etat.reglages.delay_seconds = Number($('reglage-delay').value) || 0;
+  etat.reglages.clone_dir = $('reglage-clone-dir').value.trim();
   const bilan = await tenter(() => api('PUT', '/api/settings', etat.reglages), 'Réglages');
   if (!bilan) return;
   $('reglages-etat').textContent = bilan.saved
@@ -1703,6 +1992,291 @@ function dessinerChemins(chemins) {
       el('td', {}, el('code', { texte: item.path })),
       el('td', { classe: 'note', texte: item.state })));
   }
+}
+
+// ----------------------------------------------------- adoption par gabarit
+
+// Beaucoup d'organisations n'ont jamais suivi de convention. La détection par
+// préfixe ne devine rien de « kickmyb-equipe-3 » ou de « tp1-h23-4204n6-alice » :
+// il faut alors dire soi-même comment ces noms sont faits. Rien n'est renommé —
+// le groupe lit les dépôts tels qu'ils sont, et la migration vient après.
+
+const exemplesGabarit = [
+  '{assignment}-{student}',
+  'projet-{assignment}-{student}',
+  '{assignment}.{student}',
+  'kickmyb-{student}',
+];
+
+function ouvrirAdoption(gabarit) {
+  preparerAdoption(gabarit);
+  afficherVue('adoption');
+  $('adoption-gabarit').focus();
+}
+
+function preparerAdoption(gabarit) {
+  etat.adoption = { rows: [], students: [], pattern: '' };
+  $('adoption-gabarit').value = gabarit || '{assignment}-{student}';
+  $('adoption-nom').value = '';
+  $('adoption-suite').hidden = true;
+  $('adoption-table').hidden = true;
+  $('adoption-resume').textContent = '';
+  vider($('adoption-avis'));
+
+  const exemples = $('adoption-exemples');
+  vider(exemples);
+  exemples.append(el('span', { classe: 'note', texte: 'Exemples :' }));
+  for (const modele of exemplesGabarit) {
+    exemples.append(el('button', {
+      classe: 'bouton petit', type: 'button', texte: modele,
+      onclick: () => { $('adoption-gabarit').value = modele; essayerGabarit(); },
+    }));
+  }
+}
+
+$('adoption-ouvrir').addEventListener('click', () => ouvrirAdoption());
+$('adoption-essayer').addEventListener('click', () => essayerGabarit());
+$('adoption-gabarit').addEventListener('keydown', (evenement) => {
+  if (evenement.key === 'Enter') { evenement.preventDefault(); essayerGabarit(); }
+});
+
+async function essayerGabarit() {
+  const gabarit = $('adoption-gabarit').value.trim();
+  vider($('adoption-avis'));
+  $('adoption-suite').hidden = true;
+  if (!gabarit) { message('Écrivez un gabarit.', 'alerte'); return; }
+
+  const essai = await tenter(() => api('POST',
+    `/api/orgs/${encode(etat.organisation)}/match`, { pattern: gabarit }), 'Gabarit');
+  if (!essai) return;
+
+  etat.adoption = { rows: essai.rows, students: essai.students, pattern: essai.pattern };
+  $('adoption-resume').textContent =
+    `${essai.matched} dépôt(s) sur ${essai.total} · ${travaux(essai.assignments.length)} · ` +
+    `${essai.students.length} personne(s)`;
+
+  const corps = $('adoption-table').querySelector('tbody');
+  vider(corps);
+  for (const ligne of essai.rows.slice(0, 200)) {
+    corps.append(el('tr', {},
+      el('td', {}, el('code', { texte: ligne.repo })),
+      ligne.assignment
+        ? el('td', {}, el('code', { texte: ligne.assignment }))
+        : el('td', { classe: 'vide', texte: 'travail unique' }),
+      el('td', {}, el('code', { texte: ligne.student }))));
+  }
+  $('adoption-table').hidden = essai.rows.length === 0;
+
+  if (essai.rows.length === 0) {
+    $('adoption-avis').append(el('div', { classe: 'avis alerte',
+      texte: `Aucun des ${essai.total} dépôts ne correspond. Vérifiez le texte littéral du ` +
+        'gabarit : tout ce qui n’est pas un champ est pris à la lettre.' }));
+    return;
+  }
+  if (essai.rows.length > 200) {
+    $('adoption-avis').append(el('div', { classe: 'avis',
+      texte: `Les 200 premiers dépôts sont montrés ; les ${essai.matched} seront adoptés.` }));
+  }
+  $('adoption-nom').value = $('adoption-nom').value.trim() || essai.prefix || 'Dépôts adoptés';
+  $('adoption-suite').hidden = false;
+}
+
+$('adoption-creer').addEventListener('click', async () => {
+  const adoption = etat.adoption || {};
+  if (!adoption.pattern || !(adoption.rows || []).length) {
+    message("Essayez d'abord le gabarit.", 'alerte');
+    return;
+  }
+  const comptes = document.querySelector('input[name="adoption-comptes"]:checked').value === 'comptes';
+  const cree = await tenter(() => api('POST', '/api/classrooms', {
+    org: etat.organisation,
+    session: '', course: '', group: '', prefix: '',
+    pattern: adoption.pattern,
+    name: $('adoption-nom').value.trim() || 'Dépôts adoptés',
+    session_name: '',
+    students: comptes
+      ? adoption.students.map((compte) => ({ username: compte, full_name: '' }))
+      : [],
+    roster_path: '',
+    defaults: {},
+  }), 'Groupe');
+  if (!cree) return;
+  message(`Groupe « ${cree.name} » adopté : ${adoption.rows.length} dépôt(s).`);
+  await ouvrirGroupe(cree.id);
+});
+
+// -------------------------------------------- déplacer un étudiant de groupe
+
+// Une personne change de groupe en cours de session : c'est fréquent. Sa fiche
+// suit toujours ; ses dépôts, seulement si on le demande, parce que les
+// renommer est une écriture sur GitHub.
+async function deplacerEtudiant(personne) {
+  // Arriver droit sur un groupe par son adresse ne charge pas les autres.
+  if (etat.groupes.length === 0) await chargerGroupes();
+  const ailleurs = etat.groupes.filter((groupe) =>
+    groupe.id !== etat.groupe.id &&
+    groupe.org.toLowerCase() === etat.groupe.org.toLowerCase());
+  if (ailleurs.length === 0) {
+    message('Aucun autre groupe dans cette organisation.', 'alerte');
+    return;
+  }
+
+  const choix = el('select', { classe: 'champ' });
+  for (const groupe of ailleurs) {
+    const place = groupe.session
+      ? `${groupe.session} · ${sigle(groupe.course)} · ${groupe.group}`
+      : 'nomenclature dépassée';
+    choix.append(el('option', { value: groupe.id, texte: `${groupe.name} — ${place}` }));
+  }
+  const avecDepots = el('input', { type: 'checkbox', checked: true });
+
+  const confirme = await demander(`Déplacer ${personne.full_name || '@' + personne.username}`,
+    el('div', {},
+      el('label', { classe: 'champ-bloc' },
+        el('span', { classe: 'etiquette', texte: "Groupe d'arrivée" }), choix),
+      el('label', { classe: 'case' }, avecDepots,
+        el('span', {}, el('strong', { texte: 'Renommer aussi ses dépôts' }),
+          el('span', { classe: 'aide',
+            texte: 'Ils prennent la place du groupe d’arrivée. GitHub garde une redirection ' +
+              'depuis chaque ancien nom.' }))),
+      el('p', { classe: 'note',
+        texte: 'Sans renommage, ses dépôts restent au nom du groupe actuel : celui-ci ' +
+          'continuera de les montrer.' })), 'Déplacer');
+  if (!confirme) return;
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.id)}/students/move`, {
+      username: personne.username,
+      target: choix.value,
+      repos: avecDepots.checked,
+    }), 'Déplacement');
+  if (!fiche) return;
+
+  // Sans dépôt à renommer, le serveur répond directement ; sinon c'est un
+  // travail de fond, avec son journal.
+  const bilan = fiche.id ? await suivre(fiche) : fiche;
+  if (!bilan) return;
+  message(`@${bilan.moved} déplacé vers « ${bilan.target} »` +
+    (bilan.renamed ? ` · ${bilan.renamed} dépôt(s) renommé(s)` : ''));
+  await chargerGroupes(true);
+  await ouvrirGroupe(etat.groupe.id, true, true);
+  afficherVue('etudiants');
+}
+
+// ----------------------------------------------------- choix d'un chemin
+
+// Le navigateur ne donne jamais le chemin d'un fichier déposé : c'est le
+// serveur, qui tourne sur la même machine, qui demande au système d'ouvrir sa
+// fenêtre. Quand la plateforme n'en a pas — un serveur sans session graphique —,
+// l'explorateur de l'interface prend le relais.
+async function choisirChemin(champ, options = {}) {
+  const requete = {
+    path: champ.value.trim(),
+    dirs: !!options.dossier,
+    title: options.titre || 'Choisir',
+  };
+  if (etat.contexte && etat.contexte.native_picker) {
+    const reponse = await tenter(() => api('POST', '/api/paths/pick', requete), 'Sélection');
+    if (!reponse || reponse.canceled) return;
+    champ.value = reponse.path;
+    champ.dispatchEvent(new Event('change', { bubbles: true }));
+    return;
+  }
+  const choisi = await explorer(requete);
+  if (choisi === null) return;
+  champ.value = choisi;
+  champ.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// boutonParcourir accompagne un champ créé à la volée, dans un dialogue.
+function boutonParcourir(champ, options) {
+  return el('button', {
+    classe: 'bouton', type: 'button', texte: 'Parcourir…',
+    onclick: () => choisirChemin(champ, options),
+  });
+}
+
+for (const bouton of document.querySelectorAll('[data-parcourir]')) {
+  bouton.addEventListener('click', () => choisirChemin($(bouton.dataset.parcourir), {
+    dossier: bouton.dataset.dossier === '1',
+    titre: bouton.dataset.titre,
+  }));
+}
+
+// explorer ouvre l'explorateur interne et renvoie le chemin retenu, ou null.
+function explorer(requete) {
+  const dialogue = $('explorateur');
+  const saisie = $('explorateur-saisie');
+  $('explorateur-titre').textContent = requete.title;
+  saisie.value = requete.path || '';
+
+  let dossierCourant = '';
+  let maison = '';
+  // Déclarée ici pour que la liste puisse répondre d'un double-clic.
+  let repondre = () => {};
+
+  async function lister(chemin) {
+    const listing = await tenter(() => api('POST', '/api/paths/browse',
+      { path: chemin, dirs: requete.dirs, title: '' }), 'Dossier');
+    if (!listing) return;
+    dossierCourant = listing.path;
+    maison = listing.home;
+    $('explorateur-chemin').textContent = listing.path;
+    $('explorateur-parent').disabled = !listing.parent;
+    $('explorateur-parent').dataset.cible = listing.parent || '';
+    if (requete.dirs) saisie.value = listing.path;
+
+    const liste = $('explorateur-liste');
+    vider(liste);
+    for (const entree of listing.entries) {
+      liste.append(el('button', {
+        classe: 'ligne-entree', type: 'button',
+        onclick: (evenement) => {
+          if (entree.dir) { lister(entree.path); return; }
+          saisie.value = entree.path;
+          for (const autre of liste.querySelectorAll('button')) autre.classList.remove('choisi');
+          evenement.currentTarget.classList.add('choisi');
+        },
+        ondblclick: () => { if (!entree.dir) repondre(entree.path); },
+      },
+        el('span', { classe: 'marque', texte: entree.dir ? '📁' : '·' }),
+        el('span', { classe: entree.dir ? '' : 'fichier', texte: entree.name })));
+    }
+    if (listing.entries.length === 0) {
+      liste.append(el('div', { classe: 'boite-vide',
+        texte: requete.dirs ? 'Aucun sous-dossier.' : 'Dossier vide.' }));
+    }
+    if (listing.truncated) {
+      liste.append(el('div', { classe: 'boite-vide',
+        texte: 'Dossier trop fourni : la liste est écourtée. Tapez le chemin ci-dessous.' }));
+    }
+  }
+
+  return new Promise((resolve) => {
+    let repondu = false;
+    repondre = (valeur) => {
+      if (repondu) return;
+      repondu = true;
+      $('explorateur-ok').removeEventListener('click', surOui);
+      $('explorateur-annuler').removeEventListener('click', surNon);
+      $('explorateur-parent').removeEventListener('click', surParent);
+      $('explorateur-maison').removeEventListener('click', surMaison);
+      dialogue.removeEventListener('cancel', surNon);
+      if (dialogue.open) dialogue.close();
+      resolve(valeur);
+    };
+    const surOui = () => repondre(saisie.value.trim() || dossierCourant);
+    const surNon = () => repondre(null);
+    const surParent = () => lister($('explorateur-parent').dataset.cible || dossierCourant);
+    const surMaison = () => lister(maison);
+    $('explorateur-ok').addEventListener('click', surOui);
+    $('explorateur-annuler').addEventListener('click', surNon);
+    $('explorateur-parent').addEventListener('click', surParent);
+    $('explorateur-maison').addEventListener('click', surMaison);
+    dialogue.addEventListener('cancel', surNon);
+    dialogue.showModal();
+    lister(requete.path);
+  });
 }
 
 // ------------------------------------------------------- complétion de chemins
@@ -1764,10 +2338,7 @@ async function demarrer() {
 
   dessinerPortees(contexte.scopes);
   dessinerChemins(contexte.paths);
-  $('reglage-delay').value = etat.reglages.delay_seconds ?? 1;
-  if (!contexte.save_config) {
-    $('reglages-etat').textContent = 'Mémorisation désactivée (--no-save-config)';
-  }
+  ecrireReglagesGeneraux();
 
   // Rien n'est accessible tant qu'une organisation n'a pas été choisie : si
   // aucune n'a été mémorisée, c'est la première chose demandée.
@@ -1776,8 +2347,23 @@ async function demarrer() {
     return;
   }
   etat.organisation = etat.reglages.org;
-  // Afficher la vue suffit à la remplir : elle recharge ce qu'elle montre.
-  afficherVue('parcours');
+  // L'adresse dit où reprendre : recharger la page ou coller un lien ramène au
+  // même endroit qu'avant.
+  await allerA(lireAdresse());
+}
+
+// ecrireReglagesGeneraux remplit l'écran des réglages de la session.
+function ecrireReglagesGeneraux() {
+  const contexte = etat.contexte || {};
+  $('reglage-delay').value = etat.reglages.delay_seconds ?? 1;
+  $('reglage-clone-dir').value = etat.reglages.clone_dir || '';
+  $('reglages-selecteur').textContent = contexte.native_picker
+    ? `« Parcourir… » ouvre la fenêtre du système (${contexte.native_picker}).`
+    : "Cette machine n'a pas de fenêtre de sélection : « Parcourir… » ouvre " +
+      "l'explorateur de l'interface.";
+  if (!contexte.save_config) {
+    $('reglages-etat').textContent = 'Mémorisation désactivée (--no-save-config)';
+  }
 }
 
 demarrer();

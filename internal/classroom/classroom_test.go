@@ -9,6 +9,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 )
 
@@ -464,11 +465,11 @@ func TestNomLongDeSession(t *testing.T) {
 		t.Fatalf("ajout : %v", err)
 	}
 
-	// Sans nom long, la session s'affiche par son nom court.
-	if nom := magasin.SessionName("a26"); nom != "a26" {
-		t.Fatalf("nom par défaut %q", nom)
+	// Sans rien écrire, le nom court se lit déjà : « a26 » dit la saison.
+	if nom := magasin.SessionName("a26"); nom != "Automne 2026" {
+		t.Fatalf("nom déduit %q", nom)
 	}
-	if err := magasin.SetSessionName("a26", "Automne 2026"); err != nil {
+	if err := magasin.SetSessionName("a26", "Automne 2026 — 1re session"); err != nil {
 		t.Fatalf("nom long : %v", err)
 	}
 
@@ -477,11 +478,27 @@ func TestNomLongDeSession(t *testing.T) {
 		t.Fatalf("second groupe : %v", err)
 	}
 	relu := classroom.Open(chemin)
-	if nom := relu.SessionName("A26"); nom != "Automne 2026" {
+	if nom := relu.SessionName("A26"); nom != "Automne 2026 — 1re session" {
 		t.Fatalf("nom long relu %q", nom)
 	}
 	sessions := relu.Sessions()
-	if len(sessions) != 1 || sessions[0].Short != "a26" || sessions[0].Name != "Automne 2026" {
+	if len(sessions) != 1 || sessions[0].Short != "a26" ||
+		sessions[0].Name != "Automne 2026 — 1re session" {
 		t.Fatalf("sessions : %+v", sessions)
+	}
+}
+
+func TestNomDeSessionDeduitDeLaSaison(t *testing.T) {
+	cas := map[string]string{
+		"a26": "Automne 2026", "h27": "Hiver 2027",
+		"e27": "Été 2027", "p28": "Printemps 2028",
+		"A26": "Automne 2026",
+		// Ce qui ne suit pas la convention se rend tel quel.
+		"x26": "x26", "automne": "automne", "a2026": "a2026",
+	}
+	for court, attendu := range cas {
+		if nom := naming.SessionLabel(court); nom != attendu {
+			t.Errorf("%s → %q, attendu %q", court, nom, attendu)
+		}
 	}
 }

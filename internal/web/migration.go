@@ -9,9 +9,13 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
-// Migrer un groupe, c'est renommer ses dépôts pour qu'ils suivent la
-// nomenclature courante. GitHub garde une redirection depuis l'ancien nom : les
-// clones et les liens déjà distribués continuent de fonctionner.
+// Déplacer un groupe, c'est renommer ses dépôts pour qu'ils tiennent à une
+// autre place : la nomenclature courante quand ils viennent d'une ancienne, ou
+// une autre session, un autre cours, un autre numéro de groupe. Le mécanisme
+// est le même dans les deux cas — c'est pourquoi il n'y en a qu'un.
+//
+// GitHub garde une redirection depuis l'ancien nom : les clones et les liens
+// déjà distribués continuent de fonctionner.
 
 // migrationRow est un dépôt à renommer, ou la raison qui l'en empêche.
 type migrationRow struct {
@@ -44,10 +48,6 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 	if !ok {
 		return cours, vide, nil, valid.Errorf("Groupe inconnu.")
 	}
-	if !cours.Legacy() {
-		return cours, vide, nil, valid.Errorf(
-			"« %s » suit déjà la nomenclature courante.", cours.Name)
-	}
 	cible := cours
 	session, err := naming.Fragment(body.Session, "Session")
 	if err != nil {
@@ -61,7 +61,12 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 	if err != nil {
 		return cours, vide, nil, err
 	}
-	cible.Session, cible.Course, cible.Group, cible.LegacyPrefix = session, course, group, ""
+	cible.Session, cible.Course, cible.Group = session, course, group
+	cible.LegacyPrefix, cible.LegacyPattern = "", ""
+	if !cours.Legacy() && strings.EqualFold(cours.Scope(), cible.Scope()) {
+		return cours, vide, nil, valid.Errorf(
+			"« %s » est déjà à cette place.", cours.Name)
+	}
 
 	repos, _, err := s.repos(cours.Org, false)
 	if err != nil {
@@ -178,7 +183,7 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	label := "Migration de « " + cours.Name + " » vers " + cible.Scope()
+	label := "Déplacement de « " + cours.Name + " » vers " + cible.Scope()
 	job := s.jobs.Start("migration", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
 		for index, ligne := range prets {

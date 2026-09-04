@@ -177,6 +177,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/classrooms/{id}/students", s.handleClassroomStudents)
 	mux.HandleFunc("POST /api/classrooms/{id}/students", s.handleSetStudents)
 	mux.HandleFunc("POST /api/classrooms/{id}/students/names", s.handleResolveStudentNames)
+	mux.HandleFunc("POST /api/classrooms/{id}/students/move", s.handleMoveStudent)
 	mux.HandleFunc("POST /api/classrooms/{id}/assignments", s.handleCreateAssignment)
 	mux.HandleFunc("POST /api/classrooms/{id}/assignments/preview", s.handlePreviewAssignment)
 	mux.HandleFunc("GET /api/classrooms/{id}/assignments/{name}", s.handleAssignment)
@@ -184,6 +185,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{id}/migration/preview", s.handleMigrationPreview)
 	mux.HandleFunc("POST /api/classrooms/{id}/migration/apply", s.handleMigrationApply)
 	mux.HandleFunc("GET /api/orgs/{org}/candidates", s.handleCandidates)
+	mux.HandleFunc("POST /api/orgs/{org}/match", s.handleMatchPattern)
 
 	// --- listes et code de départ
 	mux.HandleFunc("POST /api/roster/parse", s.handleParseRoster)
@@ -205,6 +207,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/clones/clone", s.handleClone)
 	mux.HandleFunc("POST /api/clones/pull", s.handlePull)
 	mux.HandleFunc("POST /api/paths/suggest", s.handleSuggestPath)
+	mux.HandleFunc("POST /api/paths/pick", s.handlePickPath)
+	mux.HandleFunc("POST /api/paths/browse", s.handleBrowsePath)
 
 	// --- travaux en arrière-plan
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)

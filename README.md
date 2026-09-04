@@ -46,11 +46,21 @@ l'outil signale un rôle insuffisant avant de tenter quoi que ce soit.
 
 ## Démarrage rapide
 
-Lancée sans argument, l'extension ouvre un menu : créer des dépôts, gérer un
-groupe existant, options avancées, quitter.
+Lancée sans argument, l'extension **ouvre l'interface graphique** dans le
+navigateur : c'est là que tout est accessible.
 
 ```
 gh cohorte
+```
+
+Le terminal reste maître dès qu'un drapeau dit quoi faire — `--roster`,
+`--assignment`, `--manage`, `--yes` —, et quand la sortie est redirigée ou que
+`--non-interactive` est passé, rien ne s'ouvre et rien n'est demandé. `--cli`
+ramène explicitement à l'assistant du terminal, qui ouvre alors un menu : créer
+des dépôts, gérer un groupe existant, options avancées, quitter.
+
+```
+gh cohorte --cli
 ```
 
 L'assistant enchaîne : authentification → organisation → liste des personnes →
@@ -291,12 +301,12 @@ bilans — et permet de vider le cache ou d'oublier les réglages mémorisés.
 
 ## Interface web
 
-`gh cohorte --web` monte un petit serveur sur la boucle locale et ouvre le
-navigateur dessus. C'est la même extension, les mêmes vérifications et les mêmes
-écritures : seule la façon de poser les questions change.
+C'est le mode par défaut : un petit serveur sur la boucle locale, et le
+navigateur ouvert dessus. La même extension, les mêmes vérifications et les
+mêmes écritures — seule la façon de poser les questions change.
 
 ```
-gh cohorte --web
+gh cohorte
 ```
 
 ```
@@ -316,8 +326,18 @@ Vient ensuite une hiérarchie, parcourue de haut en bas :
 
 ```
 session  →  cours  →  groupe  →  travail
-a26         5n6        01        tp1
+a26         5N6        01        tp1
 ```
+
+**Chaque niveau a son adresse.** `/s/a26`, `/s/a26/5n6`, `/g/<groupe>/etudiants`,
+`/g/<groupe>/travaux/tp1` : recharger la page, revenir en arrière ou garder un
+lien ramène au même endroit. Un même bandeau — fil d'Ariane, titre, ce qu'il
+faut signaler — suit du haut de la hiérarchie jusqu'au groupe.
+
+Le **nom long d'une session se déduit de son nom court** : `a26` se lit
+« Automne 2026 », et `h`, `e`, `p` font hiver, été et printemps. Rien n'oblige à
+suivre la convention — un nom court qui ne la suit pas s'affiche tel quel — et
+un nom écrit à la main l'emporte toujours.
 
 L'interface reprend le modèle de GitHub Classroom : un **groupe** rassemble des
 **étudiants**, à qui l'on **distribue des travaux**.
@@ -403,16 +423,48 @@ Groupes repérés dans l'organisation
 Cliquer une session donne ses cours, un cours donne ses groupes, un groupe donne
 ses travaux. Un fil d'Ariane remonte à chaque niveau.
 
-Les préfixes de l'ancienne nomenclature sont signalés comme tels. Un groupe
+Les préfixes des nomenclatures dépassées sont signalés comme tels. Un groupe
 adopté ainsi **reste lisible** — ses dépôts, ses travaux, ses accès s'affichent
-— mais on ne lui distribue plus : il faut d'abord le migrer.
+— mais on ne lui distribue plus : il faut d'abord le renommer.
 
-### Migrer un groupe existant
+### Adopter ce que rien n'organise
 
-« Réglages du groupe » d'un groupe hérité propose de **renommer ses dépôts**.
-On y indique la session, le cours et le groupe ; l'outil propose une découpe du
-préfixe (`a26-5n6` → session `a26`, cours `5n6`, à corriger au besoin) et montre
-le renommage avant d'écrire quoi que ce soit :
+La détection par préfixe ne devine rien de `kickmyb-equipe-3` ou de
+`tp1-h23-4204n6-alice` : beaucoup d'organisations n'ont jamais suivi de
+convention. « Adopter par gabarit… » ouvre alors un écran où l'on **écrit
+comment ces noms sont faits** :
+
+```
+Gabarit des noms de dépôts   projet-{assignment}-{student}          [Essayer]
+
+34 dépôt(s) sur 554 · 2 travaux · 22 personne(s)
+
+  Dépôt                       Travail   Personne
+  projet-tp1-jlpicard         tp1       jlpicard
+  projet-tp1-emilie-cote      tp1       emilie-cote
+```
+
+`{assignment}` est le travail, `{student}` la personne — son compte GitHub, ou
+son nom. Tout le reste est pris à la lettre. Sans `{assignment}`, tous les
+dépôts trouvés forment un seul travail.
+
+Un nom seul ne se découpe pas toujours : `projet-tp1-emilie-cote` peut se lire
+`tp1` + `emilie-cote` ou `tp1-emilie` + `cote`. **Les noms s'éclairent les uns
+les autres** — `tp1` reconnu chez un voisin non ambigu tranche pour tous. Une
+fois la liste des étudiants importée, la lecture devient exacte : chaque nom lui
+est confronté personne par personne.
+
+Le groupe garde ce gabarit jusqu'à son renommage. Rien n'est écrit sur GitHub à
+l'adoption.
+
+### Renommer, déplacer, migrer un groupe
+
+« Réglages du groupe » propose de **renommer ses dépôts**, qu'il vienne d'une
+nomenclature dépassée ou qu'il suive déjà la courante : c'est le même mécanisme,
+et il n'y en a qu'un. On y indique la session, le cours et le groupe — préremplis
+par sa place actuelle, ou par une découpe proposée de son préfixe hérité
+(`a26-5n6` → session `a26`, cours `5n6`) — et le renommage se montre avant que
+quoi que ce soit ne soit écrit :
 
 ```
 Dépôt actuel                          Nouveau nom
@@ -477,9 +529,24 @@ retrouvés, ils sont retenus), et remplacer la liste.
 
 ### Réglages du groupe
 
-Nom affiché, session — nom court et nom long —, cours, groupe, et les réglages
-par défaut de ses travaux. Les changer ne renomme aucun dépôt : ils changent ce
-que le groupe regarde.
+Trois blocs, qui ne font pas la même chose :
+
+- **Nom affiché** — le nom du groupe dans cette interface, et le nom long de sa
+  session. Rien n'est touché sur GitHub.
+- **Renommer ou déplacer le groupe** — changer la session, le cours ou le numéro
+  du groupe **renomme tous ses dépôts**, avec un aperçu avant d'écrire. C'est le
+  même écran qui migre un groupe venu d'une nomenclature dépassée.
+- **Réglages par défaut des travaux** — ce que les prochains travaux
+  reprendront : gabarit de description, dépôt modèle, visibilité, droit accordé.
+
+### Déplacer un étudiant
+
+Une personne change de groupe en cours de session : « Déplacer… », dans la liste
+des étudiants, la fait passer d'un groupe à l'autre à l'intérieur d'une même
+organisation. Sa fiche suit toujours ; **ses dépôts, seulement si on le
+demande** — les renommer est une écriture sur GitHub, et le groupe d'arrivée
+doit suivre la nomenclature courante pour savoir les nommer. Sans renommage, ses
+dépôts restent au nom du groupe de départ, qui continue de les montrer.
 
 ---
 
@@ -492,12 +559,18 @@ préfixe (`--manage tp1`), ce qui revient au même puisque le préfixe d'un trav
 est son identifiant. Les deux interfaces lisent les mêmes dépôts.
 
 Le clonage, les fichiers de départ et les listes CSV désignent des chemins **de
-la machine**, pas du navigateur : les champs correspondants se complètent au fil
-de la frappe, le serveur local répondant à la place du shell.
+la machine**, pas du navigateur. Chaque champ de chemin a donc un bouton
+« Parcourir… » qui ouvre **la fenêtre de sélection du système** — zenity ou
+kdialog sous Linux, `osascript` sous macOS, une fenêtre .NET sous Windows. Une
+page web ne voit jamais le chemin d'un fichier déposé ; c'est le serveur local,
+qui tourne sur la même machine, qui la demande. Là où aucune n'est disponible —
+une machine sans session graphique —, l'interface montre son propre explorateur,
+qui marche partout. Les champs se complètent aussi au fil de la frappe, le
+serveur local répondant à la place du shell.
 
-L'interface est aussi accessible depuis le menu principal de `gh cohorte`, et
-`--no-browser` se contente d'afficher l'adresse sans ouvrir de navigateur — utile
-à travers une session SSH avec redirection de port.
+`--no-browser` se contente d'afficher l'adresse sans ouvrir de navigateur —
+utile à travers une session SSH avec redirection de port. `--cli` reste au
+terminal.
 
 ## Interface
 
@@ -563,8 +636,9 @@ L'interface est aussi accessible depuis le menu principal de `gh cohorte`, et
 --dry-run                simuler sans rien créer
 -y, --yes                passer la confirmation finale
 --non-interactive        échouer plutôt que poser une question
---web                    ouvrir l'interface graphique sur la boucle locale
---no-browser             avec --web, ne pas ouvrir le navigateur
+--web                    ouvrir l'interface graphique sur la boucle locale (défaut)
+--cli                    rester au terminal : assistant interactif
+--no-browser             ne pas ouvrir le navigateur, afficher l'adresse
 --host HOTE              hôte GitHub (github.com ou instance Enterprise)
 --config FICHIER         fichier de réglages
 --report-dir DOSSIER     dossier des bilans (défaut : rapports)
@@ -601,6 +675,10 @@ Codes de retour : `0` succès, `1` au moins un échec, `2` erreur de validation,
   en-tête que seule la page sait ajouter : un autre site ouvert dans le même
   navigateur ne peut donc rien déclencher. Le jeton GitHub, lui, ne quitte jamais
   le processus : la page ne parle qu'à cette API locale.
+- Le serveur local lit et liste des dossiers de la machine, et peut ouvrir la
+  fenêtre de sélection du système : c'est ce qui permet de choisir un fichier
+  sans le taper. Ces routes ne sont joignables que depuis la page, sous les mêmes
+  contrôles que tout le reste.
 
 ## Développement
 
@@ -609,6 +687,11 @@ go build .          # produit ./gh-cohorte
 go test ./...       # toute la suite, sans aucun accès réseau
 gh extension install .   # installer la version locale
 ```
+
+`CLAUDE.md` énonce les deux règles à ne pas perdre de vue : rien ne doit
+dépendre d'un système d'exploitation, et chaque fonctionnalité doit exister dans
+les trois interfaces — web, assistant du terminal, drapeaux — ce que rend
+tenable le fait que la logique vive dans les paquets du domaine.
 
 Les tests montent un **faux serveur GitHub** local (`internal/fakegh`) qui imite
 les points d'API utilisés, et de **vrais dépôts git locaux** (`file://`) pour le
@@ -624,6 +707,7 @@ sortie propre hors terminal.
 | `internal/plan` | gabarits et plan de génération |
 | `internal/groups` | détection des groupes de dépôts, sélections |
 | `internal/naming` | la nomenclature des dépôts : composition et relecture |
+| `internal/picker` | la fenêtre de sélection du système, et l'explorateur de repli |
 | `internal/classroom` | groupes : étudiants, place dans la nomenclature, travaux |
 | `internal/orgs` | inventaire des organisations : rôle et droit de créer |
 | `internal/starter` | lecture d'un dossier de fichiers de départ |

@@ -58,6 +58,9 @@ func Open(path string) *Store {
 	}
 	store.items = make([]Classroom, 0, len(lu.Classrooms))
 	for _, item := range lu.Classrooms {
+		// Les réglages sont remis en forme à la lecture, pas seulement à
+		// l'écriture : un gabarit dépassé doit être corrigé avant d'être montré.
+		item.Defaults = item.Defaults.normalized()
 		store.items = append(store.items, awaitingSession(item))
 	}
 	for court, long := range lu.Sessions {
@@ -80,14 +83,20 @@ func awaitingSession(item Classroom) Classroom {
 	return item
 }
 
-// SessionName renvoie le nom long d'une session, ou son nom court à défaut.
+// SessionName renvoie le nom long d'une session : celui qu'on lui a donné, ou
+// celui que son nom court laisse déduire — « a26 » se lit « Automne 2026 » sans
+// qu'on ait à l'écrire.
 func (s *Store) SessionName(short string) string {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+	return s.sessionNameLocked(short)
+}
+
+func (s *Store) sessionNameLocked(short string) string {
 	if long := s.sessions[strings.ToLower(short)]; long != "" {
 		return long
 	}
-	return short
+	return naming.SessionLabel(short)
 }
 
 // Sessions renvoie les sessions qui portent au moins un groupe, de la plus
@@ -103,11 +112,7 @@ func (s *Store) Sessions() []Session {
 			continue
 		}
 		vues[strings.ToLower(court)] = true
-		nom := s.sessions[strings.ToLower(court)]
-		if nom == "" {
-			nom = court
-		}
-		liste = append(liste, Session{Short: court, Name: nom})
+		liste = append(liste, Session{Short: court, Name: s.sessionNameLocked(court)})
 	}
 	sort.Slice(liste, func(i, j int) bool {
 		return strings.ToLower(liste[i].Short) < strings.ToLower(liste[j].Short)
@@ -125,7 +130,9 @@ func (s *Store) SetSessionName(short, name string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	name = strings.TrimSpace(name)
-	if name == "" || strings.EqualFold(name, court) {
+	// Un nom qui répète ce que le nom court dit déjà n'a pas à être écrit.
+	if name == "" || strings.EqualFold(name, court) ||
+		strings.EqualFold(name, naming.SessionLabel(court)) {
 		delete(s.sessions, strings.ToLower(court))
 	} else {
 		s.sessions[strings.ToLower(court)] = name

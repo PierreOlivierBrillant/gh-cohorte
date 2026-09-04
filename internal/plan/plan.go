@@ -12,7 +12,14 @@ import (
 )
 
 // Placeholders énumère les champs autorisés dans les gabarits.
-var Placeholders = []string{"assignment", "username", "name", "fullname", "first", "last", "index"}
+//
+// {assignment} est l'identifiant complet du travail — « a26.5n6.01.tp1 » sous la
+// nomenclature courante. {title} n'en garde que le dernier niveau, « tp1 » :
+// c'est ce qu'on veut lire dans la description d'un dépôt, où le chemin complet
+// n'apprend rien de plus que son nom.
+var Placeholders = []string{
+	"assignment", "title", "username", "name", "fullname", "first", "last", "index",
+}
 
 var placeholderRe = regexp.MustCompile(`\{([a-z_]+)\}`)
 
@@ -73,6 +80,7 @@ func fields(person roster.Person, assignment string, index int) map[string]strin
 	}
 	return map[string]string{
 		"assignment": assignment,
+		"title":      title(assignment),
 		"username":   person.Username,
 		"name":       valid.Slugify(person.FullName),
 		"fullname":   person.FullName,
@@ -80,6 +88,14 @@ func fields(person roster.Person, assignment string, index int) map[string]strin
 		"last":       last,
 		"index":      fmt.Sprintf("%02d", index),
 	}
+}
+
+// title ne garde du travail que son dernier niveau.
+func title(assignment string) string {
+	if position := strings.LastIndex(assignment, "."); position >= 0 {
+		return assignment[position+1:]
+	}
+	return assignment
 }
 
 // Render remplit un gabarit pour une personne.
@@ -99,7 +115,9 @@ func Render(pattern string, person roster.Person, assignment string, index int) 
 // Le champ {index} n'est pas connu à la relecture : n'importe quel nombre y est
 // accepté. Un gabarit sans {assignment} ne se relit pas et renvoie nil.
 func Matcher(pattern string, person roster.Person) *regexp.Regexp {
-	if !strings.Contains(pattern, "{assignment}") {
+	// {title} ne se relit pas : deux champs libres dans un même nom ne se
+	// découpent pas sans deviner.
+	if !strings.Contains(pattern, "{assignment}") || strings.Contains(pattern, "{title}") {
 		return nil
 	}
 	values := fields(person, "", 1)

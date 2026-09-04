@@ -84,12 +84,33 @@ a:hover { text-decoration: underline; }
 .barre-globale .version { font-weight: 400; opacity: .6; margin-left: .35rem; }
 .barre-globale .compte { opacity: .75; }
 
-/* --------------------------------------------------------- en-tête du cours */
+/* ---------------------------------------------------------- en-tête de page */
 
-.entete-cours {
+/* Le même bandeau du haut de la hiérarchie jusqu'au groupe : passer d'une
+   session à un cours puis à un groupe ne doit pas donner l'impression de
+   changer d'application. */
+.entete-page {
   padding: 1.25rem 1.5rem 0;
   background: var(--fond-doux);
   border-bottom: 1px solid var(--bord);
+}
+
+.entete-page h1 { font-size: 1.5rem; margin: 0; }
+.titre-bloc { min-width: 0; }
+
+/* La nomenclature des dépôts, en toutes lettres : une pastille tronquée ne
+   disait pas ce qu'elle montrait. */
+.nomenclature {
+  margin: .6rem 0 0;
+  font-size: .8125rem;
+  color: var(--texte-doux);
+}
+
+.nomenclature code {
+  background: var(--fond);
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  padding: .1rem .35rem;
 }
 
 .ligne-cours {
@@ -102,7 +123,7 @@ a:hover { text-decoration: underline; }
 
 .choix-cours { display: flex; align-items: center; gap: .5rem; }
 .choix-cours .champ { width: auto; min-width: 16rem; }
-.entete-cours .note { margin: .25rem 0 0; }
+.entete-page .note { margin: .25rem 0 0; }
 
 .onglets { display: flex; gap: .25rem; margin-top: 1rem; }
 
@@ -365,6 +386,13 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
   font-size: .875rem;
 }
 
+/* Une pile d'avertissements a besoin d'air : collés au contenu suivant, ils
+   se lisaient comme son titre. */
+.avis-pile { margin: .75rem 0 1rem; }
+.avis-pile:empty { margin: 0; }
+.avis-pile > * + * { margin-top: .5rem; }
+.entete-page .avis-pile { margin-top: 1rem; margin-bottom: 1rem; }
+
 .avis.alerte { border-color: var(--alerte); background: var(--alerte-fond); color: var(--texte); }
 .avis.erreur { border-color: var(--erreur); background: var(--erreur-fond); color: var(--texte); }
 .avis.succes { border-color: var(--succes); background: var(--succes-fond); color: var(--texte); }
@@ -474,8 +502,8 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 
 /* Une carte de groupe, sur la page d'accueil. */
 .groupe-ligne .titre { font-size: 1.05rem; }
-.entete-cours .fil { margin-bottom: .5rem; }
-.entete-cours .ligne-cours { align-items: baseline; }
+.entete-page .fil { margin-bottom: .5rem; }
+.entete-page .ligne-cours { align-items: baseline; }
 
 /* L'écran d'entrée : rien d'autre n'est offert tant qu'une organisation
    n'a pas été choisie. */
@@ -483,3 +511,51 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 
 /* Le fil d'Ariane de la hiérarchie. */
 .fil .lien { font: inherit; }
+
+/* --------------------------------------------------- explorateur de fichiers */
+
+/* Le repli, quand la plateforme n'a pas de fenêtre de sélection à offrir. */
+.explorateur-barre {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: .5rem;
+}
+
+.explorateur-barre code {
+  font-size: .8125rem;
+  color: var(--texte-doux);
+  overflow-wrap: anywhere;
+}
+
+.explorateur-liste {
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  height: 16rem;
+  overflow: auto;
+  margin-bottom: .75rem;
+}
+
+.explorateur-liste button {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  width: 100%;
+  padding: .35rem .6rem;
+  border: 0;
+  border-bottom: 1px solid var(--bord);
+  background: none;
+  color: var(--texte);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorateur-liste button:last-child { border-bottom: 0; }
+.explorateur-liste button:hover { background: var(--fond-doux); }
+.explorateur-liste button.choisi { background: var(--fond-doux); font-weight: 600; }
+.explorateur-liste .marque { width: 1.1rem; text-align: center; color: var(--texte-doux); }
+.explorateur-liste .fichier { color: var(--texte-doux); }
+
+#explorateur { width: min(38rem, 92vw); }

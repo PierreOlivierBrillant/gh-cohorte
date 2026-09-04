@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>gh cohorte</title>
-<link rel="stylesheet" href="app.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="/favicon.svg" color="#1f6feb">
+<link rel="stylesheet" href="/app.css">
 </head>
 <body>
 
@@ -18,16 +20,20 @@
   <button type="button" id="quitter" class="bouton discret inverse">Quitter</button>
 </header>
 
-<!-- En-tête du groupe ouvert : c'est la page de cours de Classroom. -->
-<div class="entete-cours" id="entete-groupe" hidden>
-  <nav class="fil"><button type="button" id="retour-groupes" class="lien">Tous les groupes</button></nav>
+<!-- En-tête de page. Le même du haut de la hiérarchie jusqu'au groupe : c'est
+     là que vivent le fil d'Ariane, le titre et ce qui doit être signalé. -->
+<div class="entete-page" id="entete-page" hidden>
+  <nav class="fil" id="fil"></nav>
   <div class="ligne-cours">
-    <h1 id="groupe-titre">…</h1>
-    <span class="jeton" id="groupe-prefixe"></span>
+    <div class="titre-bloc">
+      <h1 id="page-titre">…</h1>
+      <p class="note" id="page-sous-titre"></p>
+    </div>
+    <div class="actions" id="page-actions"></div>
   </div>
-  <p class="note" id="groupe-sous-titre"></p>
-  <div id="groupe-avis" hidden></div>
-  <nav class="onglets" id="onglets">
+  <p class="nomenclature" id="page-nomenclature" hidden></p>
+  <div id="page-avis" class="avis-pile" hidden></div>
+  <nav class="onglets" id="onglets" hidden>
     <button type="button" data-vue="travaux" class="actif">Travaux</button>
     <button type="button" data-vue="etudiants">Étudiants</button>
     <button type="button" data-vue="groupe-reglages">Réglages du groupe</button>
@@ -52,7 +58,7 @@
           <span class="etiquette">Nom de l'organisation</span>
           <input type="text" id="org-libre" class="champ" placeholder="acme">
         </label>
-        <div id="org-avis"></div>
+        <div id="org-avis" class="avis-pile"></div>
       </div>
       <div class="boite-pied">
         <span class="espace"></span>
@@ -63,17 +69,6 @@
 
   <!-- -------------------------------------------- parcours : session, cours, groupe -->
   <section id="vue-parcours" class="vue" hidden>
-    <nav class="fil" id="parcours-fil"></nav>
-    <div class="barre-outils">
-      <div>
-        <h2 id="parcours-titre">Sessions</h2>
-        <p class="note" id="parcours-note"></p>
-      </div>
-      <div class="actions">
-        <button type="button" id="parcours-recharger" class="bouton">Recharger</button>
-        <button type="button" id="groupes-nouveau" class="bouton vert">Nouveau groupe</button>
-      </div>
-    </div>
     <div class="boite" id="parcours-liste"></div>
 
     <div id="candidats-accueil" hidden>
@@ -83,6 +78,9 @@
           <p class="note">Déduits des dépôts déjà présents. En adopter un reprend sa place et
             les comptes qu'on y trouve — rien n'est renommé.</p>
         </div>
+        <div class="actions">
+          <button type="button" id="adoption-ouvrir" class="bouton">Adopter par gabarit…</button>
+        </div>
       </div>
       <div class="boite" id="accueil-candidats"></div>
     </div>
@@ -90,9 +88,6 @@
 
   <!-- --------------------------------------------- déclaration d'un groupe -->
   <section id="vue-nouveau-groupe" class="vue" hidden>
-    <nav class="fil"><button type="button" id="nouveau-retour" class="lien">Groupes</button>
-      <span class="separateur">/</span><span id="fil-nouveau">Nouveau groupe</span></nav>
-
     <div class="boite">
       <div class="boite-entete"><strong>Sa place dans la hiérarchie</strong></div>
       <div class="boite-corps">
@@ -102,6 +97,8 @@
             <input type="text" id="nouveau-session" class="champ" placeholder="a26"
               list="suggestions-sessions">
             <datalist id="suggestions-sessions"></datalist>
+            <span class="aide">« a26 » se lit Automne 2026 ; h, e et p font hiver, été et
+              printemps.</span>
           </label>
           <label class="champ-bloc">
             <span class="etiquette">Nom de la session</span>
@@ -113,7 +110,7 @@
         <div class="rangee">
           <label class="champ-bloc">
             <span class="etiquette">Cours</span>
-            <input type="text" id="nouveau-cours" class="champ" placeholder="5n6">
+            <input type="text" id="nouveau-cours" class="champ" placeholder="5N6">
           </label>
           <label class="champ-bloc">
             <span class="etiquette">Groupe</span>
@@ -127,7 +124,7 @@
           nettoyé.</p>
         <label class="champ-bloc">
           <span class="etiquette">Nom affiché du groupe</span>
-          <input type="text" id="nouveau-nom" class="champ" placeholder="5N6 — groupe 01">
+          <input type="text" id="nouveau-nom" class="champ" placeholder="Groupe 01">
         </label>
       </div>
     </div>
@@ -135,21 +132,17 @@
     <div class="boite">
       <div class="boite-entete"><strong>Étudiants</strong></div>
       <div class="boite-corps">
-        <div class="rangee">
-          <label class="champ-bloc">
-            <span class="etiquette">Fichier CSV de la machine</span>
-            <span class="ligne-champ">
-              <input type="text" id="nouveau-chemin" class="champ" placeholder="cohorte.csv"
-                list="suggestions-roster">
-              <datalist id="suggestions-roster"></datalist>
-              <button type="button" id="nouveau-charger" class="bouton">Charger</button>
-            </span>
-          </label>
-          <label class="champ-bloc">
-            <span class="etiquette">…ou un fichier déposé ici</span>
-            <input type="file" id="nouveau-fichier" accept=".csv,.tsv,.txt">
-          </label>
-        </div>
+        <label class="champ-bloc">
+          <span class="etiquette">Fichier CSV de la machine</span>
+          <span class="ligne-champ">
+            <input type="text" id="nouveau-chemin" class="champ" placeholder="cohorte.csv"
+              list="suggestions-roster">
+            <datalist id="suggestions-roster"></datalist>
+            <button type="button" class="bouton" data-parcourir="nouveau-chemin"
+              data-titre="Choisir la liste des étudiants">Parcourir…</button>
+            <button type="button" id="nouveau-charger" class="bouton">Charger</button>
+          </span>
+        </label>
         <label class="champ-bloc">
           <span class="etiquette">…ou une liste collée : « nom complet, compte GitHub » par ligne</span>
           <textarea id="nouveau-texte" class="champ" rows="5"
@@ -159,7 +152,7 @@
           <button type="button" id="nouveau-lire" class="bouton">Lire la liste</button>
           <span class="note" id="nouveau-resume"></span>
         </div>
-        <div id="nouveau-rejets"></div>
+        <div id="nouveau-rejets" class="avis-pile"></div>
         <table class="tableau" id="nouveau-table" hidden>
           <thead><tr><th>Étudiant</th><th>Compte GitHub</th></tr></thead>
           <tbody></tbody>
@@ -168,6 +161,62 @@
       <div class="boite-pied">
         <span class="espace"></span>
         <button type="button" id="nouveau-creer" class="bouton vert">Créer le groupe</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------- adoption par gabarit -->
+  <section id="vue-adoption" class="vue" hidden>
+    <div class="boite">
+      <div class="boite-entete"><strong>Lire les dépôts</strong></div>
+      <div class="boite-corps">
+        <p class="note">Toutes les organisations n'ont pas suivi de convention. Écrivez comment
+          leurs noms sont faits : le reste s'en déduit, et aucun dépôt n'est renommé.</p>
+        <label class="champ-bloc">
+          <span class="etiquette">Gabarit des noms de dépôts</span>
+          <span class="ligne-champ">
+            <input type="text" id="adoption-gabarit" class="champ"
+              placeholder="projet-{assignment}-{student}">
+            <button type="button" id="adoption-essayer" class="bouton">Essayer</button>
+          </span>
+          <span class="aide"><code>{assignment}</code> est le travail, <code>{student}</code> la
+            personne — son compte GitHub, ou son nom. Le reste est pris à la lettre. Sans
+            <code>{assignment}</code>, tous les dépôts trouvés forment un seul travail.</span>
+        </label>
+        <div class="actions" id="adoption-exemples"></div>
+        <div id="adoption-avis" class="avis-pile"></div>
+        <p class="note" id="adoption-resume"></p>
+        <table class="tableau" id="adoption-table" hidden>
+          <thead><tr><th>Dépôt</th><th>Travail</th><th>Personne</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="boite" id="adoption-suite" hidden>
+      <div class="boite-entete"><strong>Le groupe à déclarer</strong></div>
+      <div class="boite-corps">
+        <label class="champ-bloc">
+          <span class="etiquette">Nom affiché du groupe</span>
+          <input type="text" id="adoption-nom" class="champ" placeholder="Projets web">
+        </label>
+        <fieldset class="groupe-radio">
+          <legend class="etiquette">Ce que le groupe retient des personnes trouvées</legend>
+          <label class="case"><input type="radio" name="adoption-comptes" value="comptes" checked>
+            <span><strong>Ce sont des comptes GitHub</strong>
+            <span class="aide">Ils deviennent la liste des étudiants ; les noms complets se
+              retrouvent ensuite.</span></span></label>
+          <label class="case"><input type="radio" name="adoption-comptes" value="noms">
+            <span><strong>Ce sont des noms de personnes</strong>
+            <span class="aide">La liste reste à importer : un nom ne dit pas quel compte
+              GitHub lui répond.</span></span></label>
+        </fieldset>
+        <p class="note">Le groupe suivra ce gabarit jusqu'à sa migration. « Réglages du groupe »
+          propose ensuite de renommer ses dépôts vers la nomenclature courante.</p>
+      </div>
+      <div class="boite-pied">
+        <span class="espace"></span>
+        <button type="button" id="adoption-creer" class="bouton vert">Adopter ces dépôts</button>
       </div>
     </div>
   </section>
@@ -189,9 +238,6 @@
 
   <!-- ------------------------------------------------------ détail d'un travail -->
   <section id="vue-travail" class="vue" hidden>
-    <nav class="fil"><button type="button" id="travail-retour" class="lien">Travaux</button>
-      <span class="separateur">/</span><span id="fil-travail"></span></nav>
-
     <div class="barre-outils">
       <div>
         <h2 id="detail-titre"></h2>
@@ -231,9 +277,6 @@
 
   <!-- ------------------------------------------ nouveau travail : l'assistant -->
   <section id="vue-assistant" class="vue" hidden>
-    <nav class="fil"><button type="button" id="assistant-retour" class="lien">Travaux</button>
-      <span class="separateur">/</span><span id="fil-assistant">Nouveau travail</span></nav>
-
     <ol class="etapes" id="etapes">
       <li data-etape="1"><span class="pastille">1</span><span class="libelle">Bases du travail</span></li>
       <li data-etape="2"><span class="pastille">2</span><span class="libelle">Code de départ</span></li>
@@ -248,8 +291,8 @@
           <span class="etiquette">Nom du travail</span>
           <input type="text" id="travail-nom" class="champ" placeholder="tp1">
           <span class="aide">Chaque dépôt s'appellera
-            <code id="apercu-nom">cours.groupe.tp1.prenom-nom</code> — le nom de l'étudiant,
-            pas son compte GitHub.</span>
+            <code id="apercu-nom">session.cours.groupe.tp1.prenom-nom</code> — le nom de
+            l'étudiant, pas son compte GitHub.</span>
         </label>
         <label class="champ-bloc">
           <span class="etiquette">Gabarit de description</span>
@@ -301,6 +344,8 @@
           <span class="ligne-champ">
             <input type="text" id="reglage-starter" class="champ" list="suggestions-starter">
             <datalist id="suggestions-starter"></datalist>
+            <button type="button" class="bouton" data-parcourir="reglage-starter"
+              data-dossier="1" data-titre="Choisir le dossier de départ">Parcourir…</button>
             <button type="button" id="starter-inspecter" class="bouton">Inspecter</button>
           </span>
           <span class="aide">Un dossier de cette machine, déposé dans chaque dépôt en un seul commit.</span>
@@ -311,7 +356,7 @@
           <input type="text" id="reglage-commit" class="champ">
         </label>
 
-        <div id="starter-resume"></div>
+        <div id="starter-resume" class="avis-pile"></div>
 
         <div class="pied-etape">
           <button type="button" class="bouton" data-continuer="1">Revenir</button>
@@ -335,8 +380,8 @@
           <div class="liste-cases" id="dest-liste"></div>
         </div>
 
-        <div id="deja-servis"></div>
-        <div id="plan-erreur"></div>
+        <div id="deja-servis" class="avis-pile"></div>
+        <div id="plan-erreur" class="avis-pile"></div>
         <table class="tableau" id="plan-table" hidden>
           <thead><tr><th>Dépôt</th><th>Étudiant</th><th>Compte</th><th>Description</th></tr></thead>
           <tbody></tbody>
@@ -372,7 +417,7 @@
 
     <div class="boite">
       <table class="tableau" id="etudiants-table">
-        <thead><tr><th>Étudiant</th><th>Compte GitHub</th><th>Travaux</th></tr></thead>
+        <thead><tr><th>Étudiant</th><th>Compte GitHub</th><th>Travaux</th><th class="etroit"></th></tr></thead>
         <tbody></tbody>
       </table>
       <div class="boite-vide" id="etudiants-vide" hidden>
@@ -383,54 +428,30 @@
 
   <!-- ------------------------------------------------- réglages du groupe -->
   <section id="vue-groupe-reglages" class="vue" hidden>
-    <div class="barre-outils">
-      <div>
-        <h2>Réglages du groupe</h2>
-        <p class="note">Ce que les prochains travaux du groupe reprendront par défaut.</p>
-      </div>
-    </div>
-
     <div class="boite">
-      <div class="boite-entete"><strong>Identité</strong></div>
+      <div class="boite-entete"><strong>Nom affiché</strong></div>
       <div class="boite-corps">
-        <div class="rangee">
-          <label class="champ-bloc">
-            <span class="etiquette">Nom du groupe</span>
-            <input type="text" id="gr-nom" class="champ">
-          </label>
-          <label class="champ-bloc">
-            <span class="etiquette">Organisation</span>
-            <input type="text" id="gr-org" class="champ">
-          </label>
-          <label class="champ-bloc">
-            <span class="etiquette">Session</span>
-            <input type="text" id="gr-session" class="champ">
-          </label>
-          <label class="champ-bloc">
-            <span class="etiquette">Nom de la session</span>
-            <input type="text" id="gr-session-nom" class="champ" placeholder="Automne 2026">
-          </label>
-          <label class="champ-bloc">
-            <span class="etiquette">Cours</span>
-            <input type="text" id="gr-cours" class="champ">
-          </label>
-          <label class="champ-bloc">
-            <span class="etiquette">Groupe</span>
-            <input type="text" id="gr-section" class="champ">
-            <span class="aide">Les changer ne renomme aucun dépôt : ils changent ce que le
-              groupe regarde.</span>
-          </label>
-        </div>
+        <label class="champ-bloc">
+          <span class="etiquette">Nom du groupe</span>
+          <input type="text" id="gr-nom" class="champ">
+          <span class="aide">Ce nom ne sert qu'à l'affichage dans cette interface : les dépôts,
+            eux, portent la place du groupe dans la hiérarchie.</span>
+        </label>
+        <label class="champ-bloc" id="gr-session-nom-bloc">
+          <span class="etiquette">Nom de la session</span>
+          <input type="text" id="gr-session-nom" class="champ" placeholder="Automne 2026">
+          <span class="aide">Partagé par tous les groupes de la même session.</span>
+        </label>
+      </div>
+      <div class="boite-pied">
+        <button type="button" id="gr-nom-enregistrer" class="bouton vert">Enregistrer les noms</button>
       </div>
     </div>
 
-    <div class="boite" id="migration-boite" hidden>
-      <div class="boite-entete"><strong>Migrer vers la nomenclature courante</strong></div>
+    <div class="boite" id="migration-boite">
+      <div class="boite-entete"><strong id="migration-titre">Déplacer le groupe</strong></div>
       <div class="boite-corps">
-        <p class="note">Les dépôts de ce groupe sont nommés à l'ancienne, tout en tirets. Les
-          migrer les renomme en <code>cours.groupe.travail.étudiant</code>. GitHub garde une
-          redirection depuis l'ancien nom : les clones et les liens déjà distribués continuent
-          de fonctionner.</p>
+        <p class="note" id="migration-note"></p>
         <div class="rangee">
           <label class="champ-bloc">
             <span class="etiquette">Session</span>
@@ -438,18 +459,19 @@
           </label>
           <label class="champ-bloc">
             <span class="etiquette">Cours</span>
-            <input type="text" id="mig-cours" class="champ" placeholder="5n6">
+            <input type="text" id="mig-cours" class="champ" placeholder="5N6">
           </label>
           <label class="champ-bloc">
             <span class="etiquette">Groupe</span>
             <input type="text" id="mig-section" class="champ" placeholder="01">
           </label>
         </div>
+        <p class="aide">Les dépôts deviendront <code id="mig-apercu"></code>.</p>
         <div class="actions">
-          <button type="button" id="mig-apercu" class="bouton">Prévisualiser le renommage</button>
+          <button type="button" id="mig-apercu-bouton" class="bouton">Prévisualiser le renommage</button>
           <span class="note" id="mig-resume"></span>
         </div>
-        <div id="mig-avis"></div>
+        <div id="mig-avis" class="avis-pile"></div>
         <table class="tableau" id="mig-table" hidden>
           <thead><tr><th>Dépôt actuel</th><th>Nouveau nom</th></tr></thead>
           <tbody></tbody>
@@ -502,16 +524,6 @@
 
   <!-- ------------------------------------------------------ réglages généraux -->
   <section id="vue-reglages" class="vue" hidden>
-    <nav class="fil"><button type="button" id="reglages-retour" class="lien">Groupes</button>
-      <span class="separateur">/</span><span>Réglages</span></nav>
-
-    <div class="barre-outils">
-      <div>
-        <h2>Réglages</h2>
-        <p class="note">Ce que l'outil retient d'une session à l'autre, et où il l'écrit.</p>
-      </div>
-    </div>
-
     <div class="boite">
       <div class="boite-entete"><strong>Organisation</strong></div>
       <div class="boite-corps">
@@ -525,7 +537,7 @@
         </label>
         <p class="note">En changer remet la navigation à zéro : les groupes déclarés dans une
           autre organisation restent en place, mais ne s'affichent plus ici.</p>
-        <div id="reglages-org-avis"></div>
+        <div id="reglages-org-avis" class="avis-pile"></div>
       </div>
     </div>
 
@@ -554,6 +566,16 @@
           <input type="number" id="reglage-delay" class="champ" min="0" step="0.5">
           <span class="aide">GitHub limite les écritures en rafale.</span>
         </label>
+        <label class="champ-bloc">
+          <span class="etiquette">Dossier des clones</span>
+          <span class="ligne-champ">
+            <input type="text" id="reglage-clone-dir" class="champ" placeholder=".">
+            <button type="button" class="bouton" data-parcourir="reglage-clone-dir"
+              data-dossier="1" data-titre="Choisir le dossier des clones">Parcourir…</button>
+          </span>
+          <span class="aide">Là où « Cloner » proposera de déposer les dépôts.</span>
+        </label>
+        <p class="note" id="reglages-selecteur"></p>
       </div>
       <div class="boite-pied">
         <button type="button" id="reglages-enregistrer" class="bouton">Mémoriser</button>
@@ -588,6 +610,27 @@
   </form>
 </dialog>
 
-<script src="app.js"></script>
+<!-- L'explorateur de repli : quand la plateforme n'a pas de fenêtre à offrir. -->
+<dialog id="explorateur">
+  <form method="dialog">
+    <h3 id="explorateur-titre">Choisir</h3>
+    <div class="explorateur-barre">
+      <button type="button" id="explorateur-parent" class="bouton petit">Dossier parent</button>
+      <button type="button" id="explorateur-maison" class="bouton petit">Dossier personnel</button>
+      <code id="explorateur-chemin"></code>
+    </div>
+    <div class="explorateur-liste" id="explorateur-liste"></div>
+    <label class="champ-bloc">
+      <span class="etiquette">Chemin retenu</span>
+      <input type="text" id="explorateur-saisie" class="champ">
+    </label>
+    <menu>
+      <button value="annuler" id="explorateur-annuler" class="bouton">Annuler</button>
+      <button value="ok" id="explorateur-ok" class="bouton vert">Choisir</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="/app.js"></script>
 </body>
 </html>

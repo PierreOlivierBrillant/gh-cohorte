@@ -65,7 +65,10 @@ type classroomInput struct {
 	SessionName string `json:"session_name"`
 	// Prefix n'est renseigné que pour adopter un groupe de l'ancienne
 	// nomenclature, en attendant sa migration.
-	Prefix     string             `json:"prefix"`
+	Prefix string `json:"prefix"`
+	// Pattern adopte des dépôts que rien n'organise, en disant comment lire
+	// leurs noms : « projet-{assignment}-{student} ».
+	Pattern    string             `json:"pattern"`
 	Students   []roster.Person    `json:"students"`
 	RosterPath string             `json:"roster_path"`
 	Defaults   classroom.Defaults `json:"defaults"`
@@ -81,7 +84,8 @@ func (s *Server) handleCreateClassroom(writer http.ResponseWriter, request *http
 	}
 	cree, err := s.classrooms.Add(classroom.Classroom{
 		Name: body.Name, Org: body.Org, Session: body.Session,
-		Course: body.Course, Group: body.Group, LegacyPrefix: body.Prefix,
+		Course: body.Course, Group: body.Group,
+		LegacyPrefix: body.Prefix, LegacyPattern: body.Pattern,
 		Students: body.Students, RosterPath: body.RosterPath,
 		Defaults: s.defaultsOr(body.Defaults),
 	})
@@ -138,10 +142,11 @@ func (s *Server) handleUpdateClassroom(writer http.ResponseWriter, request *http
 	}
 	cours.Name, cours.Org = body.Name, body.Org
 	cours.Session, cours.Course, cours.Group = body.Session, body.Course, body.Group
+	cours.LegacyPrefix, cours.LegacyPattern = body.Prefix, body.Pattern
 	if strings.TrimSpace(body.Session) != "" {
-		// Le groupe rejoint la nomenclature courante : son préfixe
-		// hérité n'a plus cours.
-		cours.LegacyPrefix = ""
+		// Le groupe rejoint la nomenclature courante : ce qui décrivait son
+		// ancienne façon de lire les dépôts n'a plus cours.
+		cours.LegacyPrefix, cours.LegacyPattern = "", ""
 	}
 	cours.Defaults = s.defaultsOr(body.Defaults)
 	if body.Students != nil {

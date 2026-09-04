@@ -16,6 +16,9 @@ import (
 //	a26-5n6-tp1-emilie-cote      tout en tirets, rien ne dit où finit le travail
 //	5n6.a26-01.tp1.emilie-cote   quatre niveaux, sans la session
 //
+// À quoi s'ajoute ce que rien n'organise, adopté par gabarit — voir
+// « pattern.go ». Le principe est le même : lisible, migrable, jamais créé.
+//
 // Rien n'y est créé — ces dépôts se lisent, se listent, et se migrent. Le jour
 // où plus aucune organisation n'en contient, le fichier disparaît d'un bloc.
 
@@ -28,6 +31,9 @@ const LegacyNamePattern = "{assignment}" + groups.Separator + "{username}"
 // seule personne —, et la détection par préfixe, qui rattrape les travaux dont
 // aucun étudiant inscrit n'a de dépôt.
 func (c Classroom) legacyAssignments(repos []groups.RepoInfo) []Assignment {
+	if gabarit, ok := c.gabarit(); ok {
+		return c.patternAssignments(gabarit, repos)
+	}
 	if strings.Contains(c.LegacyPrefix, naming.Separator) {
 		return c.dottedAssignments(repos)
 	}
@@ -81,6 +87,75 @@ func (c Classroom) legacyAssignments(repos []groups.RepoInfo) []Assignment {
 	trouves = withoutUmbrellas(trouves)
 	sortAssignments(trouves)
 	return trouves
+}
+
+// patternAssignments lit les travaux d'un groupe adopté par gabarit.
+func (c Classroom) patternAssignments(gabarit Pattern, repos []groups.RepoInfo) []Assignment {
+	parNom := map[string]*Assignment{}
+	ajouter := func(travail string, inscrit bool, repo groups.RepoInfo) {
+		if travail == "" {
+			travail = c.Name
+		}
+		cle := strings.ToLower(travail)
+		trouve, deja := parNom[cle]
+		if !deja {
+			trouve = &Assignment{ID: travail, Name: travail}
+			parNom[cle] = trouve
+		}
+		trouve.Repos++
+		if inscrit {
+			trouve.Students++
+		} else {
+			trouve.Others++
+		}
+		if repo.PushedAt > trouve.PushedAt {
+			trouve.PushedAt = repo.PushedAt
+		}
+	}
+
+	for _, repo := range repos {
+		if travail, _, inscrit := c.patternParts(gabarit, repo.Name); inscrit || travail != "" {
+			ajouter(travail, inscrit, repo)
+			continue
+		}
+		if travail, _, reconnu := gabarit.Match(repo.Name); reconnu {
+			ajouter(travail, false, repo)
+		}
+	}
+
+	trouves := make([]Assignment, 0, len(parNom))
+	for _, travail := range parNom {
+		trouves = append(trouves, *travail)
+	}
+	sortAssignments(trouves)
+	return trouves
+}
+
+// patternParts découpe un nom en s'appuyant sur la liste du groupe : c'est la
+// lecture exacte, celle qui ne se trompe pas quand un compte contient le
+// séparateur. Le booléen dit qu'une personne inscrite a été reconnue.
+func (c Classroom) patternParts(gabarit Pattern, repoName string) (string, roster.Person, bool) {
+	for fragment, student := range c.patternFragments() {
+		if travail, reconnu := gabarit.MatchFor(repoName, fragment); reconnu {
+			return travail, student, true
+		}
+	}
+	return "", roster.Person{}, false
+}
+
+// patternFragments associe à chaque étudiant ce qui peut le nommer dans un
+// dépôt adopté : son compte GitHub, et son nom complet quand il est connu.
+func (c Classroom) patternFragments() map[string]roster.Person {
+	connus := map[string]roster.Person{}
+	for _, student := range c.Students {
+		if student.Username != "" {
+			connus[strings.ToLower(student.Username)] = student
+		}
+		if fragment, err := naming.Student(student.FullName); err == nil {
+			connus[strings.ToLower(fragment)] = student
+		}
+	}
+	return connus
 }
 
 // dottedAssignments lit les travaux d'un groupe de la nomenclature à quatre
@@ -138,6 +213,10 @@ func (c Classroom) dottedParts(repoName string) (string, string, bool) {
 // réservé, le nom tout en tirets ne se découpe pas : il faut le confronter au
 // gabarit, compte par compte. La forme à quatre niveaux, elle, se lit.
 func (c Classroom) legacyStudentOf(repoName string) (roster.Person, bool) {
+	if gabarit, ok := c.gabarit(); ok {
+		_, student, reconnu := c.patternParts(gabarit, repoName)
+		return student, reconnu
+	}
 	if strings.Contains(c.LegacyPrefix, naming.Separator) {
 		_, etudiant, reconnu := c.dottedParts(repoName)
 		if !reconnu {
@@ -163,6 +242,16 @@ func (c Classroom) legacyStudentOf(repoName string) (roster.Person, bool) {
 // GitHub, l'autre le nom de l'étudiant.
 func (c Classroom) legacyServed(assignmentID string, repos []groups.RepoInfo) map[string]bool {
 	servis := map[string]bool{}
+	if gabarit, ok := c.gabarit(); ok {
+		for _, repo := range repos {
+			travail, student, reconnu := c.patternParts(gabarit, repo.Name)
+			if !reconnu || !strings.EqualFold(c.AssignmentID(nomOuGroupe(travail, c.Name)), assignmentID) {
+				continue
+			}
+			servis[strings.ToLower(student.Username)] = true
+		}
+		return servis
+	}
 	if strings.Contains(c.LegacyPrefix, naming.Separator) {
 		connus := c.fragments()
 		for _, repo := range c.legacyRepos(assignmentID, repos) {
@@ -183,6 +272,9 @@ func (c Classroom) legacyServed(assignmentID string, repos []groups.RepoInfo) ma
 
 // legacyRepos rassemble les dépôts d'un travail hérité.
 func (c Classroom) legacyRepos(assignmentID string, repos []groups.RepoInfo) []groups.Repo {
+	if gabarit, ok := c.gabarit(); ok {
+		return c.patternRepos(gabarit, assignmentID, repos)
+	}
 	if !strings.Contains(c.LegacyPrefix, naming.Separator) {
 		return groups.Build(assignmentID, repos).Repos
 	}
@@ -205,6 +297,46 @@ func (c Classroom) legacyRepos(assignmentID string, repos []groups.RepoInfo) []g
 		return strings.ToLower(trouves[i].Name) < strings.ToLower(trouves[j].Name)
 	})
 	return trouves
+}
+
+// patternRepos rassemble les dépôts d'un travail adopté par gabarit.
+func (c Classroom) patternRepos(gabarit Pattern, assignmentID string,
+	repos []groups.RepoInfo) []groups.Repo {
+	trouves := make([]groups.Repo, 0)
+	for _, repo := range repos {
+		travail, etudiant := "", ""
+		if nom, student, reconnu := c.patternParts(gabarit, repo.Name); reconnu {
+			travail, etudiant = nom, student.Username
+		} else if nom, personne, reconnu := gabarit.Match(repo.Name); reconnu {
+			travail, etudiant = nom, personne
+		} else {
+			continue
+		}
+		if !strings.EqualFold(nomOuGroupe(travail, c.Name), assignmentID) {
+			continue
+		}
+		pousse := repo.PushedAt
+		if len(pousse) > 10 {
+			pousse = pousse[:10]
+		}
+		trouves = append(trouves, groups.Repo{
+			Name: repo.Name, Suffix: etudiant, Private: repo.Private,
+			URL: repo.HTMLURL, PushedAt: pousse,
+		})
+	}
+	sort.Slice(trouves, func(i, j int) bool {
+		return strings.ToLower(trouves[i].Name) < strings.ToLower(trouves[j].Name)
+	})
+	return trouves
+}
+
+// nomOuGroupe remplace un travail anonyme — gabarit sans {assignment} — par le
+// nom du groupe : il faut bien appeler le seul travail qu'il porte.
+func nomOuGroupe(travail, nomDuGroupe string) string {
+	if travail == "" {
+		return nomDuGroupe
+	}
+	return travail
 }
 
 // withoutUmbrellas écarte les identifiants qui ne font que chapeauter d'autres

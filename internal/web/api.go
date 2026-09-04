@@ -14,6 +14,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/orgs"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/picker"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -47,6 +48,9 @@ type contextPayload struct {
 	SaveConfig   bool              `json:"save_config"`
 	Jobs         int               `json:"jobs"`
 	Depth        int               `json:"depth"`
+	// NativePicker nomme la fenêtre de sélection du système quand il y en a
+	// une ; vide, l'interface montre son propre explorateur.
+	NativePicker string `json:"native_picker"`
 }
 
 // handleContext décrit la session en cours.
@@ -72,6 +76,7 @@ func (s *Server) handleContext(writer http.ResponseWriter, _ *http.Request) {
 		SaveConfig:   s.deps.SaveConfig,
 		Jobs:         s.deps.Jobs,
 		Depth:        s.deps.Depth,
+		NativePicker: picker.Name(),
 	})
 }
 
