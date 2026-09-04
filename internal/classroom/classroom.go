@@ -660,3 +660,35 @@ func Places(repos []groups.RepoInfo) []string {
 	sort.Strings(trouvees)
 	return trouvees
 }
+
+// Rename remplace la fiche d'un étudiant du groupe : son nom complet, son
+// compte GitHub, ou les deux. C'est la seule façon de corriger une inscription
+// sans repasser par le fichier — remplacer la liste entière pour un accent
+// oublié touchait tout le monde.
+//
+// Le compte reste ce qui identifie la personne : le changer est accepté, mais
+// pas vers un compte que quelqu'un d'autre occupe déjà.
+func (c Classroom) Rename(username string, person roster.Person) (Classroom, error) {
+	person, err := person.Validate()
+	if err != nil {
+		return c, err
+	}
+	position := -1
+	for index, student := range c.Students {
+		if strings.EqualFold(student.Username, username) {
+			position = index
+			break
+		}
+	}
+	if position < 0 {
+		return c, valid.Errorf("@%s n'est pas dans « %s ».", strings.TrimSpace(username), c.Label())
+	}
+	for index, student := range c.Students {
+		if index != position && strings.EqualFold(student.Username, person.Username) {
+			return c, valid.Errorf("@%s est déjà dans « %s ».", person.Username, c.Label())
+		}
+	}
+	c.Students = append([]roster.Person(nil), c.Students...)
+	c.Students[position] = person
+	return c, nil
+}

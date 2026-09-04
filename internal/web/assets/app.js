@@ -1678,10 +1678,15 @@ async function chargerEtudiants(force) {
               target: '_blank', rel: 'noreferrer noopener', texte: travail.name,
             })))),
       el('td', ligne.pushed_at ? { texte: ligne.pushed_at } : { classe: 'vide', texte: 'jamais' }),
-      el('td', {}, el('button', {
-        classe: 'bouton petit', type: 'button', texte: 'Déplacer…',
-        onclick: () => deplacerEtudiants([ligne]),
-      }))));
+      el('td', {}, el('span', { classe: 'actions' },
+        el('button', {
+          classe: 'bouton petit', type: 'button', texte: 'Renommer…',
+          onclick: () => renommerEtudiant(ligne),
+        }),
+        el('button', {
+          classe: 'bouton petit', type: 'button', texte: 'Déplacer…',
+          onclick: () => deplacerEtudiants([ligne]),
+        })))));
   }
 
   const filtre = donnees.shown !== donnees.total;
@@ -1928,6 +1933,75 @@ $('etudiants-ajouter').addEventListener('click', async () => {
   await ouvrirGroupe(etat.groupe.scope, true, true);
   afficherVue('etudiants');
 });
+
+// --- renommer un étudiant
+
+// Un prénom mal orthographié, un accent oublié, un compte changé : corriger une
+// seule fiche passait par le remplacement de la liste entière — donc celle de
+// tout le monde, et le fichier à retrouver.
+//
+// Le nom complet est le dernier niveau du nom des dépôts. Les renommer est une
+// écriture sur GitHub : elle est proposée ici, jamais imposée.
+async function renommerEtudiant(ligne) {
+  const nom = el('input', { type: 'text', classe: 'champ',
+    value: ligne.full_name || '', placeholder: 'Jean-Luc Picard' });
+  const compte = el('input', { type: 'text', classe: 'champ', value: ligne.username });
+  const depots = ligne.assignments.length;
+  const avecDepots = el('input', { type: 'checkbox', checked: depots > 0 });
+
+  const confirme = await demander(
+    `Renommer ${ligne.full_name || '@' + ligne.username}`, el('div', {},
+      el('label', { classe: 'champ-bloc' },
+        el('span', { classe: 'etiquette', texte: 'Nom complet' }), nom,
+        el('span', { classe: 'aide',
+          texte: 'C’est lui qui nomme ses dépôts. Le corriger ne renomme pas ceux ' +
+            'qui existent déjà, à moins de le demander ci-dessous.' })),
+      el('label', { classe: 'champ-bloc' },
+        el('span', { classe: 'etiquette', texte: 'Compte GitHub' }), compte,
+        el('span', { classe: 'aide',
+          texte: 'Il n’entre pas dans le nom des dépôts : le changer ne touche qu’à ' +
+            'la liste. Le nouveau compte est vérifié sur GitHub.' })),
+      depots === 0
+        ? el('p', { classe: 'note',
+            texte: 'Cette personne n’a encore aucun dépôt : il n’y a rien à renommer ' +
+              'sur GitHub.' })
+        : el('label', { classe: 'case' }, avecDepots,
+            el('span', {}, el('strong', { texte: `Renommer aussi ses ${depots} dépôt(s)` }),
+              el('span', { classe: 'aide',
+                texte: 'Ils prennent son nouveau nom. GitHub garde une redirection depuis ' +
+                  'chaque ancien nom.' })))),
+    'Renommer');
+  if (!confirme) return;
+
+  const corps = {
+    username: ligne.username,
+    full_name: nom.value.trim(),
+    new_username: compte.value.trim(),
+    repos: depots > 0 && avecDepots.checked,
+  };
+  // Une fiche inchangée n'a rien à enregistrer : l'envoyer quand même ferait
+  // croire à une correction qui n'a pas eu lieu.
+  if (corps.full_name === (ligne.full_name || '') &&
+      corps.new_username.toLowerCase() === ligne.username.toLowerCase()) {
+    message('Ni le nom ni le compte n’ont changé.', 'alerte');
+    return;
+  }
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/students/rename`, corps), 'Étudiant');
+  if (!fiche) return;
+
+  // Sans dépôt à renommer, le serveur répond directement ; sinon c'est un
+  // travail de fond, avec son journal.
+  const bilan = fiche.id ? await suivre(fiche) : fiche;
+  if (!bilan) return;
+  message(`${bilan.student.full_name || '@' + bilan.student.username} mis à jour` +
+    (bilan.renamed ? ` · ${bilan.renamed} dépôt(s) renommé(s)` : '') +
+    (bilan.failed ? ` · ${bilan.failed} en échec` : ''),
+    bilan.failed ? 'alerte' : 'succes');
+  await ouvrirGroupe(etat.groupe.scope, true, true);
+  afficherVue('etudiants');
+}
 
 $('etudiants-importer').addEventListener('click', async () => {
   const chemin = el('input', {

@@ -964,6 +964,145 @@ func TestEtudiantAjouteRecoitLesTravauxCoches(t *testing.T) {
 	}
 }
 
+// Une faute dans un prénom ne devrait pas obliger à remplacer la liste de tout
+// le monde : la fiche se corrige seule, et ses dépôts la suivent si on le
+// demande.
+func TestEtudiantRenommeSeulEtSesDepotsAvecLui(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp2.emilie-cote",
+		"a26.5n6.01.tp1.jean-luc-picard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	id := h.groupe("a26", "5n6", "01",
+		"Émilie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard")
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/students/rename",
+		map[string]any{
+			"username": "emilie-cote", "full_name": "Émilie Côté-Tremblay", "repos": true,
+		})
+	if bilan["status"] != "terminé" {
+		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
+	}
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["renamed"] != float64(2) || resultat["failed"] != float64(0) {
+		t.Fatalf("bilan : %+v", resultat)
+	}
+
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	attendu := "a26.5n6.01.tp1.emilie-cote-tremblay,a26.5n6.01.tp1.jean-luc-picard," +
+		"a26.5n6.01.tp2.emilie-cote-tremblay"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts : %v", noms)
+	}
+
+	// La liste n'a pas grossi : la fiche a été remplacée, pas doublée.
+	var liste struct {
+		Students []struct {
+			FullName string `json:"full_name"`
+			Username string `json:"username"`
+		} `json:"students"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id, nil, &liste)
+	if len(liste.Students) != 2 {
+		t.Fatalf("liste : %+v", liste.Students)
+	}
+	for _, personne := range liste.Students {
+		if personne.Username == "emilie-cote" && personne.FullName != "Émilie Côté-Tremblay" {
+			t.Fatalf("fiche non corrigée : %+v", personne)
+		}
+	}
+}
+
+// Le compte n'entre pas dans le nom des dépôts : le changer ne touche qu'à la
+// liste, et un compte introuvable sur GitHub est refusé comme à l'inscription.
+func TestCompteRenommeSansToucherAuxDepots(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	h := nouveau(t, state)
+	id := h.groupe("a26", "5n6", "01", "Émilie Côté", "emilie-cote")
+
+	var bilan struct {
+		Student struct {
+			FullName string `json:"full_name"`
+			Username string `json:"username"`
+		} `json:"student"`
+		Renamed int `json:"renamed"`
+	}
+	h.json(http.MethodPost, "/api/classrooms/"+id+"/students/rename", map[string]any{
+		"username": "emilie-cote", "full_name": "Émilie Côté",
+		"new_username": "aminata-d", "repos": true,
+	}, &bilan)
+	// Le nom n'a pas changé : il n'y avait rien à renommer, et le serveur a
+	// répondu sans passer par un travail de fond.
+	if bilan.Student.Username != "aminata-d" || bilan.Renamed != 0 {
+		t.Fatalf("bilan : %+v", bilan)
+	}
+	if noms := h.State.RepoNames("acme"); strings.Join(noms, ",") != "a26.5n6.01.tp1.emilie-cote" {
+		t.Fatalf("dépôts : %v", noms)
+	}
+
+	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/students/rename",
+		map[string]any{"username": "aminata-d", "full_name": "Émilie Côté",
+			"new_username": "fantome-introuvable"})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+	if !strings.Contains(string(contenu), "n'existe pas sur GitHub") {
+		t.Fatalf("message : %s", contenu)
+	}
+}
+
+// Le plan se compose en entier avant la première écriture : un nom déjà pris
+// refuse le renommage au lieu de l'interrompre à mi-chemin.
+func TestRenommageRefuseAvantDEcrireQuoiQueCeSoit(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp2.emilie-cote",
+		"a26.5n6.01.tp2.jean-luc-picard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	id := h.groupe("a26", "5n6", "01",
+		"Émilie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard")
+
+	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/students/rename",
+		map[string]any{
+			"username": "emilie-cote", "full_name": "Jean-Luc Picard", "repos": true,
+		})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+	if !strings.Contains(string(contenu), "existe déjà") {
+		t.Fatalf("message : %s", contenu)
+	}
+
+	// Ni les dépôts ni la liste n'ont bougé.
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	attendu := "a26.5n6.01.tp1.emilie-cote,a26.5n6.01.tp2.emilie-cote," +
+		"a26.5n6.01.tp2.jean-luc-picard"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts : %v", noms)
+	}
+	var liste struct {
+		Students []struct {
+			FullName string `json:"full_name"`
+			Username string `json:"username"`
+		} `json:"students"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id, nil, &liste)
+	for _, personne := range liste.Students {
+		if personne.Username == "emilie-cote" && personne.FullName != "Émilie Côté" {
+			t.Fatalf("la fiche a été enregistrée malgré le refus : %+v", personne)
+		}
+	}
+}
+
 func TestSuppressionExigeLeNomExact(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddRepo("acme", "tp1-jlpicard", true)
