@@ -3,6 +3,7 @@ package classroom_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -377,12 +378,19 @@ func TestMagasinEcritEtRelit(t *testing.T) {
 		t.Fatalf("place %q", cree.Scope())
 	}
 
-	info, err := os.Stat(chemin)
-	if err != nil {
+	if _, err := os.Stat(chemin); err != nil {
 		t.Fatalf("fichier absent : %v", err)
 	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		t.Fatalf("permissions %o, attendu 600", mode)
+	// Le fichier contient des noms d'étudiants : il est écrit en 0600. Windows
+	// ne porte pas ces bits — les y vérifier ne dirait rien.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(chemin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode := info.Mode().Perm(); mode != 0o600 {
+			t.Errorf("permissions %o, attendu 600", mode)
+		}
 	}
 
 	relu := classroom.Open(chemin)
