@@ -214,6 +214,26 @@ type Session struct {
 	Name  string `json:"name"`
 }
 
+// SessionsOf rassemble des noms courts en sessions nommées, sans doublon et de
+// la plus récente à la plus ancienne. Toutes les interfaces passent par ici :
+// l'ordre des sessions ne se décide qu'une fois.
+func SessionsOf(shorts []string) []Session {
+	vues := map[string]bool{}
+	sessions := make([]Session, 0, len(shorts))
+	for _, court := range shorts {
+		court = strings.TrimSpace(court)
+		if court == "" || vues[strings.ToLower(court)] {
+			continue
+		}
+		vues[strings.ToLower(court)] = true
+		sessions = append(sessions, Session{Short: court, Name: SessionName(court)})
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		return naming.CompareSessions(sessions[i].Short, sessions[j].Short) < 0
+	})
+	return sessions
+}
+
 // Scope désigne ce que le groupe couvre : son préfixe pour la nomenclature
 // courante, et pour un groupe adopté, le gabarit lui-même — deux gabarits
 // différents ne regardent pas les mêmes dépôts, même s'ils commencent pareil.

@@ -377,6 +377,31 @@ func TestGroupeDeclareEtRelu(t *testing.T) {
 	}
 }
 
+func TestSessionsListeesDeLaPlusRecenteALaPlusAncienne(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	state.AddRepo("acme", "h27.5n6.01.tp1.emilie-cote", true)
+	state.AddRepo("acme", "h26.4w6.01.tp1.emilie-cote", true)
+	h := nouveau(t, state)
+
+	var liste struct {
+		Sessions []struct {
+			Short string `json:"short"`
+			Name  string `json:"name"`
+		} `json:"sessions"`
+	}
+	h.json(http.MethodGet, "/api/classrooms", nil, &liste)
+	// L'ordre remonte le calendrier, il ne suit pas l'alphabet : « h27 » vient
+	// avant « a26 », qui vient avant « h26 ».
+	rendu := make([]string, 0, len(liste.Sessions))
+	for _, session := range liste.Sessions {
+		rendu = append(rendu, session.Short)
+	}
+	if strings.Join(rendu, " ") != "h27 a26 h26" {
+		t.Fatalf("sessions : %+v", liste.Sessions)
+	}
+}
+
 func TestGroupeVisibleSansAvoirEteDeclare(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
