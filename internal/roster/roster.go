@@ -37,6 +37,23 @@ func (p Person) Key() string { return strings.ToLower(p.Username) }
 // String affiche la personne de façon lisible.
 func (p Person) String() string { return p.FullName + " <@" + p.Username + ">" }
 
+// Validate met une personne en forme et refuse ce qui ne peut pas la désigner.
+// Le nom complet, lui, peut manquer : il se retrouve ensuite depuis le profil
+// GitHub, et son absence n'empêche que de nommer un dépôt.
+func (p Person) Validate() (Person, error) {
+	username, err := valid.Login(p.Username, "Compte GitHub")
+	if err != nil {
+		return p, err
+	}
+	fullName := strings.TrimSpace(p.FullName)
+	if fullName != "" {
+		if fullName, err = valid.FullName(fullName); err != nil {
+			return p, err
+		}
+	}
+	return Person{FullName: fullName, Username: username}, nil
+}
+
 // Issue décrit un problème détecté sur une ligne de la liste.
 type Issue struct {
 	Line    int    `json:"line"`

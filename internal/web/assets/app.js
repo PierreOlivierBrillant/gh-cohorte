@@ -87,6 +87,10 @@ const etat = {
   selection: new Set(),
   acces: new Map(),
   etudiants: [],
+  // Ce que la liste des étudiants montre, et de qui elle est cochée. Le tri et
+  // le filtre partent au serveur : c'est lui qui sait ce qu'ils veulent dire.
+  filtre: { texte: '', travail: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false },
+  deplaces: new Set(),
   destinataires: new Set(),
   reglagesTravail: {},
   nouveau: { org: '', etudiants: [], rejets: [] },
@@ -398,6 +402,7 @@ function dessinerEntete(nom, onglet) {
   const entete = $('entete-page');
   entete.hidden = nom === 'organisation';
   $('onglets').hidden = !onglet;
+  entete.classList.toggle('avec-onglets', !!onglet);
   if (entete.hidden) return;
 
   const fiche = ficheDeLEntete(nom);
@@ -700,6 +705,10 @@ async function ouvrirGroupe(id, force, sansHistorique) {
   const groupe = await tenter(() => api('GET',
     `/api/classrooms/${encode(id)}${force ? '?refresh=1' : ''}`), 'Groupe');
   if (!groupe) return false;
+  // Le filtre et la sélection appartiennent au groupe qu'on regarde : passer à
+  // un autre les remet à zéro, plutôt que d'y cacher des étudiants sans qu'on
+  // s'y attende.
+  if (!etat.groupe || etat.groupe.scope !== groupe.scope) reinitialiserFiltre();
   etat.groupe = groupe;
   etat.travail = null;
   etat.etudiants = [];
@@ -1607,21 +1616,56 @@ async function distribuer(simulation) {
 
 // ------------------------------------------------------------------ étudiants
 
+// Le tri et le filtre ne sont pas appliqués ici : l'adresse les transmet, et le
+// serveur répond la liste déjà réduite et ordonnée. C'est ce qui fait que
+// « dernier envoi avant le 1er octobre » veut dire la même chose au navigateur
+// et au terminal.
+function adresseEtudiants(force) {
+  const filtre = etat.filtre;
+  const parametres = new URLSearchParams();
+  if (filtre.texte) parametres.set('q', filtre.texte);
+  if (filtre.travail) parametres.set('assignment', filtre.travail);
+  if (filtre.activite) parametres.set('activity', filtre.activite);
+  if (filtre.apres) parametres.set('after', filtre.apres);
+  if (filtre.avant) parametres.set('before', filtre.avant);
+  if (filtre.tri !== 'nom') parametres.set('sort', filtre.tri);
+  if (filtre.desc) parametres.set('desc', '1');
+  if (force) parametres.set('refresh', '1');
+  const suite = parametres.toString();
+  return `/api/classrooms/${encode(etat.groupe.scope)}/students${suite ? '?' + suite : ''}`;
+}
+
 async function chargerEtudiants(force) {
-  const donnees = await tenter(() => api('GET',
-    `/api/classrooms/${encode(etat.groupe.scope)}/students${force ? '?refresh=1' : ''}`), 'Étudiants');
+  const donnees = await tenter(() => api('GET', adresseEtudiants(force)), 'Étudiants');
   if (!donnees) return;
   etat.etudiants = donnees.students || [];
+
+  // Une sélection ne survit pas à ce que le filtre écarte : on déplace ce
+  // qu'on voit, et rien d'autre.
+  const visibles = new Set(etat.etudiants.map((ligne) => ligne.username));
+  etat.deplaces = new Set([...etat.deplaces].filter((compte) => visibles.has(compte)));
+
+  remplirTravauxDuFiltre(donnees.assignments || []);
 
   const corps = $('etudiants-table').querySelector('tbody');
   vider(corps);
   $('etudiants-table').hidden = etat.etudiants.length === 0;
   $('etudiants-vide').hidden = etat.etudiants.length > 0;
+  $('etudiants-vide').textContent = donnees.total === 0
+    ? 'Aucun étudiant dans ce groupe. Importez une liste « nom complet, compte GitHub ».'
+    : 'Aucun étudiant ne répond à ces critères.';
 
-  let sansNom = 0;
   for (const ligne of etat.etudiants) {
-    if (!ligne.full_name) sansNom++;
     corps.append(el('tr', {},
+      el('td', {}, el('input', {
+        type: 'checkbox',
+        checked: etat.deplaces.has(ligne.username),
+        onchange: (evenement) => {
+          if (evenement.target.checked) etat.deplaces.add(ligne.username);
+          else etat.deplaces.delete(ligne.username);
+          majSelectionEtudiants();
+        },
+      })),
       el('td', ligne.full_name
         ? { texte: ligne.full_name }
         : { classe: 'vide', texte: 'nom inconnu' }),
@@ -1633,19 +1677,181 @@ async function chargerEtudiants(force) {
               classe: 'jeton lien', href: travail.url,
               target: '_blank', rel: 'noreferrer noopener', texte: travail.name,
             })))),
+      el('td', ligne.pushed_at ? { texte: ligne.pushed_at } : { classe: 'vide', texte: 'jamais' }),
       el('td', {}, el('button', {
         classe: 'bouton petit', type: 'button', texte: 'Déplacer…',
-        onclick: () => deplacerEtudiant(ligne),
+        onclick: () => deplacerEtudiants([ligne]),
       }))));
   }
 
+  const filtre = donnees.shown !== donnees.total;
   $('etudiants-resume').textContent =
-    `${etat.etudiants.length} étudiant(s) · ${travaux((donnees.assignments || []).length)}`;
-  $('etudiants-noms').disabled = sansNom === 0;
-  $('etudiants-noms').textContent = sansNom === 0
+    (filtre ? `${donnees.shown} étudiant(s) sur ${donnees.total}` : `${donnees.total} étudiant(s)`) +
+    ` · ${travaux((donnees.assignments || []).length)}`;
+  majEntetesDuTri();
+  majBoutonFiltre();
+  $('etudiants-noms').disabled = donnees.missing_names === 0;
+  $('etudiants-noms').textContent = donnees.missing_names === 0
     ? 'Noms complets connus'
-    : `Retrouver ${sansNom} nom(s) complet(s)`;
+    : `Retrouver ${donnees.missing_names} nom(s) complet(s)`;
+  majSelectionEtudiants();
 }
+
+// remplirTravauxDuFiltre garde le travail retenu s'il existe encore : recharger
+// la liste ne doit pas défaire le filtre en cours.
+function remplirTravauxDuFiltre(liste) {
+  const choix = $('filtre-travail');
+  const retenu = etat.filtre.travail;
+  vider(choix);
+  choix.append(el('option', { value: '', texte: 'tous' }));
+  for (const travail of liste) {
+    choix.append(el('option', { value: travail.name, texte: travail.name }));
+  }
+  choix.value = liste.some((travail) => travail.name === retenu) ? retenu : '';
+  etat.filtre.travail = choix.value;
+}
+
+function majSelectionEtudiants() {
+  const total = etat.etudiants.length;
+  const choisis = etat.deplaces.size;
+  $('etudiants-selection').textContent = choisis === 0
+    ? `${total} étudiant(s) affiché(s)`
+    : `${choisis} sur ${total} sélectionné(s)`;
+  $('etudiants-tout').checked = total > 0 && choisis === total;
+  $('etudiants-deplacer').disabled = choisis === 0;
+}
+
+$('etudiants-tout').addEventListener('change', (evenement) => {
+  etat.deplaces = evenement.target.checked
+    ? new Set(etat.etudiants.map((ligne) => ligne.username))
+    : new Set();
+  for (const case_ of $('etudiants-table').querySelectorAll('tbody input[type="checkbox"]')) {
+    case_.checked = evenement.target.checked;
+  }
+  majSelectionEtudiants();
+});
+
+$('etudiants-deplacer').addEventListener('click', () => {
+  const choisis = etat.etudiants.filter((ligne) => etat.deplaces.has(ligne.username));
+  if (choisis.length) deplacerEtudiants(choisis);
+});
+
+// --- filtres et tri
+
+// Le tri vit dans l'en-tête de la colonne qu'il ordonne, et la recherche reste
+// sous la main. Le reste des critères — travail, dépôts, dates — tient dans un
+// menu qu'on n'ouvre qu'au besoin : ils servent rarement, et l'écran leur était
+// entièrement donné.
+
+// Le sens par défaut suit ce qu'on cherche : un nom se lit de A à Z, une date
+// du plus récent au plus ancien.
+const sensParDefaut = { nom: false, compte: false, envoi: true };
+
+for (const entete of $('etudiants-table').querySelectorAll('th[data-tri]')) {
+  entete.querySelector('button').addEventListener('click', () => {
+    const colonne = entete.dataset.tri;
+    // Recliquer la colonne déjà triée retourne l'ordre ; en choisir une autre
+    // repart de son sens naturel.
+    etat.filtre.desc = etat.filtre.tri === colonne
+      ? !etat.filtre.desc
+      : sensParDefaut[colonne];
+    etat.filtre.tri = colonne;
+    rechargerEtudiants();
+  });
+}
+
+function majEntetesDuTri() {
+  for (const entete of $('etudiants-table').querySelectorAll('th[data-tri]')) {
+    const actif = entete.dataset.tri === etat.filtre.tri;
+    if (actif) entete.setAttribute('aria-sort', etat.filtre.desc ? 'descending' : 'ascending');
+    else entete.removeAttribute('aria-sort');
+    entete.querySelector('.fleche').textContent = actif ? (etat.filtre.desc ? '▼' : '▲') : '';
+  }
+}
+
+// Le bouton dit combien de critères sont posés : un filtre replié dans un menu
+// ne doit pas pouvoir se faire oublier.
+function majBoutonFiltre() {
+  const poses = ['travail', 'activite', 'apres', 'avant']
+    .filter((critere) => etat.filtre[critere]).length;
+  $('filtre-ouvrir').textContent = poses ? `Filtrer · ${poses}` : 'Filtrer';
+  $('filtre-ouvrir').classList.toggle('vert', poses > 0);
+}
+
+function ouvrirFiltre(ouvert) {
+  const menu = $('filtre-menu');
+  menu.hidden = !ouvert;
+  $('filtre-ouvrir').setAttribute('aria-expanded', String(ouvert));
+  if (!ouvert) return;
+  // Sa largeur ne se connaît qu'une fois affiché : la place se calcule après.
+  const bouton = $('filtre-ouvrir').getBoundingClientRect();
+  menu.style.top = `${bouton.bottom + 6}px`;
+  menu.style.left = `${Math.max(8, bouton.right - menu.offsetWidth)}px`;
+}
+
+$('filtre-ouvrir').addEventListener('click', () => ouvrirFiltre($('filtre-menu').hidden));
+
+// Le menu se referme comme tout menu : ailleurs, à l'échappement, ou dès que la
+// page bouge sous lui — sa place a été calculée pour l'endroit qu'elle occupait.
+document.addEventListener('click', (evenement) => {
+  if (!$('filtre-menu').hidden && !evenement.target.closest('.menu-ancre')) ouvrirFiltre(false);
+});
+document.addEventListener('keydown', (evenement) => {
+  if (evenement.key === 'Escape' && !$('filtre-menu').hidden) {
+    ouvrirFiltre(false);
+    $('filtre-ouvrir').focus();
+  }
+});
+window.addEventListener('scroll', () => {
+  if (!$('filtre-menu').hidden) ouvrirFiltre(false);
+}, true);
+
+// Une frappe ne part pas au serveur avant que la main se soit arrêtée.
+function differer(action, delai = 250) {
+  let minuteur = 0;
+  return (...arguments_) => {
+    clearTimeout(minuteur);
+    minuteur = setTimeout(() => action(...arguments_), delai);
+  };
+}
+
+const rechargerEtudiants = () => { if (etat.groupe) chargerEtudiants(); };
+const rechargerPlusTard = differer(rechargerEtudiants);
+
+$('filtre-texte').addEventListener('input', (evenement) => {
+  etat.filtre.texte = evenement.target.value.trim();
+  rechargerPlusTard();
+});
+
+for (const [identifiant, champ] of [
+  ['filtre-travail', 'travail'], ['filtre-activite', 'activite'],
+  ['filtre-apres', 'apres'], ['filtre-avant', 'avant'],
+]) {
+  $(identifiant).addEventListener('change', (evenement) => {
+    etat.filtre[champ] = evenement.target.value;
+    rechargerEtudiants();
+  });
+}
+
+// reinitialiserFiltre remet la barre et l'état dans le même état : c'est la
+// même remise à zéro qu'on change de groupe ou qu'on efface les critères.
+function reinitialiserFiltre() {
+  etat.filtre = { texte: '', travail: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false };
+  etat.deplaces = new Set();
+  $('filtre-texte').value = '';
+  $('filtre-travail').value = '';
+  $('filtre-activite').value = '';
+  $('filtre-apres').value = '';
+  $('filtre-avant').value = '';
+  majEntetesDuTri();
+  majBoutonFiltre();
+}
+
+$('filtre-vider').addEventListener('click', () => {
+  reinitialiserFiltre();
+  ouvrirFiltre(false);
+  rechargerEtudiants();
+});
 
 $('etudiants-recharger').addEventListener('click', () => chargerEtudiants(true));
 
@@ -1657,6 +1863,69 @@ $('etudiants-noms').addEventListener('click', async () => {
   if (!bilan) return;
   message(`${bilan.resolved} nom(s) complet(s) retrouvé(s).`);
   await ouvrirGroupe(etat.groupe.scope);
+  afficherVue('etudiants');
+});
+
+// Une inscription tardive n'a pas à passer par le fichier : deux champs
+// suffisent, et le reste de la liste ne bouge pas. Les travaux cochés lui sont
+// remis dans la foulée, aux réglages que le groupe retient — sans quoi il
+// faudrait revenir distribuer travail par travail.
+$('etudiants-ajouter').addEventListener('click', async () => {
+  const nom = el('input', { type: 'text', classe: 'champ', placeholder: 'Jean-Luc Picard' });
+  const compte = el('input', { type: 'text', classe: 'champ', placeholder: 'jlpicard' });
+
+  const existants = etat.groupe.assignments || [];
+  const cases = new Map();
+  for (const travail of existants) {
+    cases.set(travail.name, el('input', { type: 'checkbox' }));
+  }
+  const reglages = etat.groupe.defaults || {};
+  const listeTravaux = existants.length === 0
+    ? el('p', { classe: 'note', texte: "Le groupe n'a encore aucun travail distribué." })
+    : el('div', {},
+        el('span', { classe: 'etiquette', texte: 'Lui créer les dépôts de' }),
+        el('div', { classe: 'cases-travaux' }, existants.map((travail) =>
+          el('label', { classe: 'case' }, cases.get(travail.name),
+            el('span', {},
+              el('strong', { texte: travail.name }),
+              el('span', { classe: 'aide',
+                texte: `déjà remis à ${travail.students} étudiant(s) du groupe` }))))),
+        el('p', { classe: 'aide',
+          texte: `Aux réglages du groupe : ${reglages.visibility === 'public' ? 'public' : 'privé'}, ` +
+            (reglages.add_collaborator
+              ? `invitation en « ${reglages.permission} »` : 'sans invitation') +
+            (reglages.template ? `, modèle ${reglages.template}` : ', dépôt neuf') + '.' }));
+
+  const confirme = await demander('Ajouter un étudiant', el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nom complet' }), nom,
+      el('span', { classe: 'aide',
+        texte: 'C’est lui qui nomme ses dépôts. Laissé vide, il se retrouvera depuis ' +
+          'son profil GitHub — mais aucun dépôt ne pourra lui être remis d’ici là.' })),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Compte GitHub' }), compte),
+    listeTravaux), 'Ajouter');
+  if (!confirme) return;
+
+  const choisis = [...cases.entries()]
+    .filter(([, coche]) => coche.checked).map(([travail]) => travail);
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/students/add`, {
+      full_name: nom.value.trim(),
+      username: compte.value.trim(),
+      assignments: choisis,
+    }), 'Étudiant');
+  if (!fiche) return;
+
+  // Sans dépôt à créer, le serveur répond directement ; sinon c'est un travail
+  // de fond, avec son journal.
+  const bilan = fiche.id ? await suivre(fiche) : fiche;
+  if (!bilan) return;
+  message(`@${bilan.student.username} ajouté à « ${etat.groupe.label} »` +
+    (bilan.created ? ` · ${bilan.created} dépôt(s) créé(s)` : '') +
+    (bilan.failed ? ` · ${bilan.failed} en échec` : ''),
+    bilan.failed ? 'alerte' : 'succes');
+  await ouvrirGroupe(etat.groupe.scope, true, true);
   afficherVue('etudiants');
 });
 
@@ -2075,21 +2344,24 @@ $('adoption-creer').addEventListener('click', async () => {
   await ouvrirGroupe(cree.scope);
 });
 
-// -------------------------------------------- déplacer un étudiant de groupe
+// ------------------------------------------- déplacer des étudiants de groupe
 
-// Une personne change de groupe en cours de session : c'est fréquent. Sa fiche
-// suit toujours ; ses dépôts, seulement si on le demande, parce que les
-// renommer est une écriture sur GitHub.
-async function deplacerEtudiant(personne) {
+// Une personne change de groupe en cours de session : c'est fréquent, et cela
+// arrive rarement à une seule. Les fiches suivent toujours ; les dépôts,
+// seulement si on le demande, parce que les renommer est une écriture sur
+// GitHub.
+//
+// Le groupe d'arrivée n'a pas à exister d'avance : le déplacement peut le
+// déclarer au passage, plutôt que d'obliger à sortir d'ici pour le créer.
+
+const GROUPE_NEUF = '\u0000neuf';
+
+async function deplacerEtudiants(personnes) {
   // Arriver droit sur un groupe par son adresse ne charge pas les autres.
   if (etat.groupes.length === 0) await chargerGroupes();
   const ailleurs = etat.groupes.filter((groupe) =>
     groupe.scope !== etat.groupe.scope &&
     groupe.org.toLowerCase() === etat.groupe.org.toLowerCase());
-  if (ailleurs.length === 0) {
-    message('Aucun autre groupe dans cette organisation.', 'alerte');
-    return;
-  }
 
   const choix = el('select', { classe: 'champ' });
   for (const groupe of ailleurs) {
@@ -2098,36 +2370,91 @@ async function deplacerEtudiant(personne) {
       : 'nomenclature dépassée';
     choix.append(el('option', { value: groupe.scope, texte: `${groupe.label} · ${place}` }));
   }
-  const avecDepots = el('input', { type: 'checkbox', checked: true });
+  choix.append(el('option', { value: GROUPE_NEUF, texte: '\uff0b Nouveau groupe…' }));
+  if (ailleurs.length === 0) choix.value = GROUPE_NEUF;
 
-  const confirme = await demander(`Déplacer ${personne.full_name || '@' + personne.username}`,
-    el('div', {},
+  const session = el('input', { classe: 'champ', type: 'text',
+    value: etat.groupe.session || '', placeholder: 'a26' });
+  const cours = el('input', { classe: 'champ', type: 'text',
+    value: etat.groupe.course || '', placeholder: '5n6' });
+  const numero = el('input', { classe: 'champ', type: 'text', placeholder: '02' });
+  const place = el('p', { classe: 'note' });
+
+  // La place se compose au fil de la frappe : c'est elle qui sera écrite dans
+  // le nom de chaque dépôt, autant la voir avant de valider.
+  const majPlace = () => {
+    const niveaux = [session.value, cours.value, numero.value].map((valeur) => valeur.trim());
+    place.textContent = niveaux.every(Boolean)
+      ? `Place du groupe : ${niveaux.join('.')}`
+      : 'Session, cours et groupe sont tous les trois nécessaires.';
+  };
+  for (const champ of [session, cours, numero]) champ.addEventListener('input', majPlace);
+  majPlace();
+
+  const neuf = el('div', {},
+    el('div', { classe: 'rangee serree' },
       el('label', { classe: 'champ-bloc' },
-        el('span', { classe: 'etiquette', texte: "Groupe d'arrivée" }), choix),
-      el('label', { classe: 'case' }, avecDepots,
-        el('span', {}, el('strong', { texte: 'Renommer aussi ses dépôts' }),
-          el('span', { classe: 'aide',
-            texte: 'Ils prennent la place du groupe d’arrivée. GitHub garde une redirection ' +
-              'depuis chaque ancien nom.' }))),
-      el('p', { classe: 'note',
-        texte: 'Sans renommage, ses dépôts restent au nom du groupe actuel : celui-ci ' +
-          'continuera de les montrer.' })), 'Déplacer');
+        el('span', { classe: 'etiquette', texte: 'Session' }), session),
+      el('label', { classe: 'champ-bloc' },
+        el('span', { classe: 'etiquette', texte: 'Cours' }), cours),
+      el('label', { classe: 'champ-bloc' },
+        el('span', { classe: 'etiquette', texte: 'Groupe' }), numero)),
+    place);
+  const majNeuf = () => { neuf.hidden = choix.value !== GROUPE_NEUF; };
+  choix.addEventListener('change', majNeuf);
+  majNeuf();
+
+  const avecDepots = el('input', { type: 'checkbox', checked: true });
+  const seule = personnes.length === 1;
+  const titre = seule
+    ? `Déplacer ${personnes[0].full_name || '@' + personnes[0].username}`
+    : `Déplacer ${personnes.length} étudiants`;
+  const leurs = seule ? 'ses' : 'leurs';
+
+  const confirme = await demander(titre, el('div', {},
+    seule ? null : el('p', { classe: 'note',
+      texte: personnes.map((personne) =>
+        personne.full_name || '@' + personne.username).join(', ') }),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: "Groupe d'arrivée" }), choix),
+    neuf,
+    el('label', { classe: 'case' }, avecDepots,
+      el('span', {}, el('strong', { texte: `Renommer aussi ${leurs} dépôts` }),
+        el('span', { classe: 'aide',
+          texte: 'Ils prennent la place du groupe d’arrivée. GitHub garde une redirection ' +
+            'depuis chaque ancien nom.' }))),
+    el('p', { classe: 'note',
+      texte: `Sans renommage, ${leurs} dépôts restent au nom du groupe actuel : celui-ci ` +
+        'continuera de les montrer.' })), 'Déplacer');
   if (!confirme) return;
 
+  const corps = {
+    usernames: personnes.map((personne) => personne.username),
+    repos: avecDepots.checked,
+  };
+  if (choix.value === GROUPE_NEUF) {
+    corps.new_group = {
+      session: session.value.trim(), course: cours.value.trim(), group: numero.value.trim(),
+    };
+  } else {
+    corps.target = choix.value;
+  }
+
   const fiche = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.scope)}/students/move`, {
-      username: personne.username,
-      target: choix.value,
-      repos: avecDepots.checked,
-    }), 'Déplacement');
+    `/api/classrooms/${encode(etat.groupe.scope)}/students/move`, corps), 'Déplacement');
   if (!fiche) return;
 
   // Sans dépôt à renommer, le serveur répond directement ; sinon c'est un
   // travail de fond, avec son journal.
   const bilan = fiche.id ? await suivre(fiche) : fiche;
   if (!bilan) return;
-  message(`@${bilan.moved} déplacé vers « ${bilan.target} »` +
+  const qui = bilan.count === 1
+    ? `@${bilan.moved[0]} déplacé`
+    : `${bilan.count} étudiants déplacés`;
+  message(`${qui} vers « ${bilan.target} »` +
+    (bilan.created ? ' · groupe créé' : '') +
     (bilan.renamed ? ` · ${bilan.renamed} dépôt(s) renommé(s)` : ''));
+  etat.deplaces = new Set();
   await chargerGroupes(true);
   await ouvrirGroupe(etat.groupe.scope, true, true);
   afficherVue('etudiants');

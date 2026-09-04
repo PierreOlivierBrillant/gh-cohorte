@@ -34,11 +34,11 @@ un trou silencieux.
 
 La règle qui rend cela tenable : **la logique vit dans les paquets du domaine**
 (`internal/naming`, `internal/classroom`, `internal/plan`, `internal/groups`,
-`internal/roster`, `internal/runner`, `internal/clone`), et les trois interfaces
-n'en sont que des façades. Une validation, un gabarit, un refus de collision ne
-doivent jamais être écrits dans `internal/web` ou dans `internal/app` : les deux
-interfaces divergeraient. Un comportement ajouté au bon endroit est
-automatiquement disponible partout.
+`internal/roster`, `internal/students`, `internal/runner`, `internal/clone`), et
+les trois interfaces n'en sont que des façades. Une validation, un gabarit, un
+refus de collision ne doivent jamais être écrits dans `internal/web` ou dans
+`internal/app` : les deux interfaces divergeraient. Un comportement ajouté au
+bon endroit est automatiquement disponible partout.
 
 ## Le reste
 

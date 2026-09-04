@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
@@ -90,18 +91,35 @@ func triees(ensemble map[string]bool) []string {
 	return liste
 }
 
-// handleMoveStudent déplace un étudiant d'un groupe vers un autre. Sa fiche
-// suit ; ses dépôts, eux, ne bougent que si on le demande — les renommer est
-// une écriture sur GitHub, pas un rangement local.
+// movePlace décrit un groupe d'arrivée qui n'existe pas encore : le
+// déplacement le déclare au passage, plutôt que d'obliger à le créer d'abord
+// puis à revenir.
+type movePlace struct {
+	Session string `json:"session"`
+	Course  string `json:"course"`
+	Group   string `json:"group"`
+}
+
+// moveInput est ce que l'interface envoie pour déplacer des étudiants.
+type moveInput struct {
+	// Username désigne une personne seule ; Usernames, plusieurs. Les deux se
+	// cumulent : l'interface envoie l'un ou l'autre selon ce qui est coché.
+	Username  string   `json:"username"`
+	Usernames []string `json:"usernames"`
+	// Target est la place d'un groupe qui existe déjà.
+	Target string `json:"target"`
+	// NewGroup, à sa place, décrit un groupe à déclarer pour l'occasion.
+	NewGroup *movePlace `json:"new_group"`
+	// Repos demande de renommer aussi les dépôts des personnes déplacées pour
+	// qu'ils rejoignent le groupe d'arrivée.
+	Repos bool `json:"repos"`
+}
+
+// handleMoveStudent déplace une ou plusieurs personnes d'un groupe vers un
+// autre — existant, ou déclaré pour l'occasion. Leurs fiches suivent ; leurs
+// dépôts, eux, ne bougent que si on le demande.
 func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Request) {
-	var body struct {
-		Username string `json:"username"`
-		// Target est la place du groupe d'arrivée.
-		Target string `json:"target"`
-		// Repos demande de renommer aussi les dépôts de la personne pour
-		// qu'ils rejoignent le groupe d'arrivée.
-		Repos bool `json:"repos"`
-	}
+	var body moveInput
 	if err := decode(request, &body); err != nil {
 		fail(writer, err)
 		return
@@ -112,7 +130,12 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		fail(writer, err)
 		return
 	}
-	arrivee, err := s.placeAt(body.Target)
+	repos, _, err := s.repos(depart.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	arrivee, neuf, err := s.moveTarget(body, repos)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -122,53 +145,44 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
-	personne, trouvee := depart.Find(body.Username)
-	if !trouvee {
-		fail(writer, valid.Errorf(
-			"@%s n'est pas dans « %s ».", body.Username, depart.Label()))
-		return
-	}
-	if arrivee.Has(personne.Username) {
-		fail(writer, valid.Errorf(
-			"@%s est déjà dans « %s ».", personne.Username, arrivee.Label()))
+	personnes, err := movers(depart, arrivee, body)
+	if err != nil {
+		fail(writer, err)
 		return
 	}
 
 	// Les dépôts sont relevés avant de toucher aux listes : après, le groupe
 	// de départ ne reconnaîtrait plus les siens.
-	var renommages []migrationRow
+	var renommages []classroom.Move
 	if body.Repos {
-		repos, _, err := s.repos(depart.Org, false)
-		if err != nil {
-			fail(writer, err)
-			return
-		}
-		renommages, err = s.moveRows(depart, arrivee, personne, repos)
+		renommages, err = classroom.PlanMove(depart, arrivee, personnes, repos)
 		if err != nil {
 			fail(writer, err)
 			return
 		}
 	}
 
-	depart.Students = sansPersonne(depart.Students, personne.Username)
-	arrivee.Students = append(append([]roster.Person(nil), arrivee.Students...), personne)
-	if _, err := s.classrooms.Save(depart); err != nil {
+	if _, err := s.classrooms.Save(depart.Without(comptes(personnes)...)); err != nil {
 		fail(writer, err)
 		return
 	}
-	if _, err := s.classrooms.Save(arrivee); err != nil {
+	if _, err := s.classrooms.Save(arrivee.With(personnes...)); err != nil {
 		fail(writer, err)
 		return
 	}
 
+	bilan := map[string]any{
+		"moved": comptes(personnes), "count": len(personnes),
+		"target": arrivee.Label(), "target_scope": arrivee.Scope(),
+		"created": neuf, "renamed": 0,
+	}
 	if len(renommages) == 0 {
-		writeJSON(writer, http.StatusOK, map[string]any{
-			"moved": personne.Username, "target": arrivee.Label(), "renamed": 0,
-		})
+		writeJSON(writer, http.StatusOK, bilan)
 		return
 	}
 
-	label := "Déplacement de @" + personne.Username + " vers « " + arrivee.Label() + " »"
+	label := "Déplacement de " + personnesEnMots(personnes) +
+		" vers « " + arrivee.Label() + " »"
 	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
 		for index, ligne := range renommages {
@@ -187,69 +201,93 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 			job.Progress(index+1, len(renommages), ligne.Repo)
 		}
 		s.forget(depart.Org)
-		return map[string]any{
-			"moved": personne.Username, "target": arrivee.Label(),
-			"renamed": renommes, "failed": echecs,
-		}, nil
+		bilan["renamed"], bilan["failed"] = renommes, echecs
+		return bilan, nil
 	})
 	writeJSON(writer, http.StatusAccepted, job.State())
 }
 
-// moveRows compose le renommage des dépôts d'une personne qui change de groupe.
-// Un groupe d'arrivée qui ne suit pas la nomenclature courante ne sait pas
-// nommer : le déplacement se fait alors sans les dépôts.
-func (s *Server) moveRows(depart, arrivee classroom.Classroom, personne roster.Person,
-	repos []groups.RepoInfo) ([]migrationRow, error) {
-	if arrivee.Legacy() {
-		return nil, valid.Errorf(
-			"« %s » suit une nomenclature dépassée : ses dépôts ne peuvent pas être "+
-				"nommés. Renommez-les d'abord, ou déplacez l'étudiant sans ses dépôts.",
-			arrivee.Label())
+// moveTarget résout le groupe d'arrivée : une place déjà occupée, ou une place
+// libre que le déplacement déclare. Déclarer sur une place occupée serait une
+// fusion déguisée : elle est refusée, la place se choisit alors dans la liste.
+func (s *Server) moveTarget(body moveInput, repos []groups.RepoInfo) (
+	classroom.Classroom, bool, error) {
+	if body.NewGroup == nil {
+		arrivee, err := s.placeAt(body.Target)
+		return arrivee, false, err
 	}
-	fragment, err := naming.Student(personne.FullName)
+	session, err := naming.Fragment(body.NewGroup.Session, "Session")
 	if err != nil {
-		return nil, valid.Errorf(
-			"Le nom complet de @%s manque : sans lui, ses dépôts ne peuvent pas être "+
-				"renommés.", personne.Username)
+		return classroom.Classroom{}, false, err
 	}
-
-	existants := map[string]bool{}
-	for _, repo := range repos {
-		existants[strings.ToLower(repo.Name)] = true
+	course, err := naming.Fragment(body.NewGroup.Course, "Cours")
+	if err != nil {
+		return classroom.Classroom{}, false, err
 	}
-
-	var lignes []migrationRow
-	for _, travail := range depart.Assignments(repos) {
-		nom, err := naming.Fragment(depart.ShortName(travail.ID), "Travail")
-		if err != nil {
-			continue
-		}
-		for _, repo := range depart.Repos(travail.ID, repos) {
-			student, inscrit := depart.StudentOf(repo.Name)
-			if !inscrit || !strings.EqualFold(student.Username, personne.Username) {
-				continue
-			}
-			cible := naming.Compose(arrivee.Session, arrivee.Course, arrivee.Group, nom, fragment)
-			if existants[strings.ToLower(cible)] {
-				return nil, valid.Errorf("« %s » existe déjà.", cible)
-			}
-			lignes = append(lignes, migrationRow{
-				Repo: repo.Name, Target: cible,
-				Student: fragment, Username: personne.Username,
-			})
+	group, err := naming.Fragment(body.NewGroup.Group, "Groupe")
+	if err != nil {
+		return classroom.Classroom{}, false, err
+	}
+	place := naming.Prefix(session, course, group)
+	for _, connu := range s.visibles(s.org(), repos) {
+		if classroom.NormalizeScope(connu.Scope()) == classroom.NormalizeScope(place) {
+			return classroom.Classroom{}, false, valid.Errorf(
+				"« %s » existe déjà : choisissez-le dans la liste des groupes.", place)
 		}
 	}
-	return lignes, nil
+	arrivee, err := classroom.AtScope(s.org(), place, classroom.DefaultsFrom(s.Settings()))
+	return arrivee, true, err
 }
 
-// sansPersonne retire un compte d'une liste d'étudiants.
-func sansPersonne(liste []roster.Person, username string) []roster.Person {
-	restants := make([]roster.Person, 0, len(liste))
-	for _, personne := range liste {
-		if strings.EqualFold(personne.Username, username) {
+// movers rassemble les personnes à déplacer, en refusant d'emblée celles que le
+// groupe de départ ne connaît pas et celles que l'arrivée connaît déjà.
+func movers(depart, arrivee classroom.Classroom, body moveInput) ([]roster.Person, error) {
+	demandes := append([]string(nil), body.Usernames...)
+	if strings.TrimSpace(body.Username) != "" {
+		demandes = append(demandes, body.Username)
+	}
+
+	vus := map[string]bool{}
+	personnes := make([]roster.Person, 0, len(demandes))
+	for _, demande := range demandes {
+		username, err := valid.Login(demande, "Compte GitHub")
+		if err != nil {
+			return nil, err
+		}
+		if vus[strings.ToLower(username)] {
 			continue
 		}
-		restants = append(restants, personne)
+		vus[strings.ToLower(username)] = true
+
+		personne, trouvee := depart.Find(username)
+		if !trouvee {
+			return nil, valid.Errorf("@%s n'est pas dans « %s ».", username, depart.Label())
+		}
+		if arrivee.Has(personne.Username) {
+			return nil, valid.Errorf("@%s est déjà dans « %s ».",
+				personne.Username, arrivee.Label())
+		}
+		personnes = append(personnes, personne)
 	}
-	return restants
+	if len(personnes) == 0 {
+		return nil, valid.Errorf("Aucune personne à déplacer.")
+	}
+	return personnes, nil
+}
+
+// comptes rend les comptes GitHub d'une liste de personnes.
+func comptes(personnes []roster.Person) []string {
+	liste := make([]string, 0, len(personnes))
+	for _, personne := range personnes {
+		liste = append(liste, personne.Username)
+	}
+	return liste
+}
+
+// personnesEnMots nomme ce qu'un déplacement emporte, pour le titre du journal.
+func personnesEnMots(personnes []roster.Person) string {
+	if len(personnes) == 1 {
+		return "@" + personnes[0].Username
+	}
+	return strconv.Itoa(len(personnes)) + " étudiants"
 }

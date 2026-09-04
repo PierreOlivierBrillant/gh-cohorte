@@ -181,7 +181,33 @@ inconnu s'affiche par son suffixe, en gris.
 | Cloner | tout ou partie du groupe vers un dossier désigné |
 | Mettre à jour des clones | `git pull --ff-only` groupé sur un dossier déjà cloné |
 | Supprimer un dépôt | suppression définitive, confirmation renforcée |
+| Filtrer ou trier la liste | réduit et ordonne l'affichage, et les sélections avec lui |
 | Recharger, changer de groupe, quitter | navigation |
+
+### Filtrer et trier la liste
+
+**Filtrer ou trier la liste** réduit ce que le groupe montre et l'ordonne :
+chercher un nom ou un compte, ne garder que les envois postérieurs ou
+antérieurs à une date, ne garder que les dépôts sans aucun envoi, et trier par
+nom complet, par compte GitHub ou par dernier envoi, dans un sens ou dans
+l'autre. Les critères en vigueur sont rappelés sous la liste : un filtre qui ne
+se voit pas se retourne contre celui qui l'a posé.
+
+**Les sélections suivent la liste** : cloner, exporter les URL ou mettre à jour
+des clones ne portent que sur ce qui est affiché. Les actions, elles, continuent
+de connaître le groupe entier — filtrer sert à choisir, pas à faire oublier des
+dépôts.
+
+Les mêmes critères s'écrivent en ligne de commande, pour un script :
+
+```bash
+gh cohorte --cli --manage tp1 --pushed-before 2026-10-01 --sort envoi
+gh cohorte --cli --manage tp1 --never-pushed
+```
+
+La recherche ignore la casse et les accents : `cote` trouve « Émilie Côté ». Une
+personne qui n'a jamais rien envoyé n'a pas de date : elle n'est ni avant ni
+après une borne, et c'est `--never-pushed` qui la retrouve.
 
 **Le dépôt modèle est retrouvé tout seul** : l'outil interroge un dépôt existant
 du groupe et réutilise son `template_repository`, pour que les dépôts ajoutés
@@ -553,8 +579,50 @@ Le groupe retient les réglages du dernier travail distribué : le suivant n'a p
 
 La liste du groupe et, pour chaque personne, les travaux où elle a déjà un dépôt
 — l'équivalent de la colonne « accepté » de Classroom, déduit des dépôts plutôt
-que d'une invitation. De là : retrouver les noms complets manquants (une fois
-retrouvés, ils sont retenus), et remplacer la liste.
+que d'une invitation — avec **la date de son dernier envoi**, tous travaux
+confondus. De là : retrouver les noms complets manquants (une fois retrouvés,
+ils sont retenus), et remplacer la liste.
+
+**Ajouter un étudiant** demande un nom complet et un compte GitHub : une
+inscription tardive n'a pas à passer par le fichier, et le reste de la liste ne
+bouge pas. Le compte est vérifié sur GitHub, et un compte déjà présent est
+refusé plutôt que fondu — l'ajouter deux fois ne ferait rien, et le taire
+laisserait croire le contraire.
+
+Le dialogue liste aussi **les travaux déjà distribués, à cocher** : les dépôts
+correspondants sont créés dans la foulée, **aux réglages que le groupe retient**
+— visibilité, dépôt modèle, invitation, fichiers de départ —, ceux-là mêmes qui
+ont servi aux autres. Une arrivée en cours de session se règle donc d'un seul
+écran, au lieu de revenir distribuer travail par travail. Rien coché, la
+personne rejoint seulement la liste.
+
+Tout est préparé avant la première écriture : un travail qu'on ne saurait pas
+nommer, ou un dossier de fichiers de départ disparu depuis la dernière
+distribution, refuse l'ajout entier plutôt que de laisser quelqu'un inscrit à
+moitié servi. Le nom complet peut manquer si aucun travail n'est coché : il se
+retrouve ensuite depuis le profil, mais aucun dépôt ne peut être nommé d'ici là.
+
+**Le tri est dans l'en-tête des colonnes** : cliquer sur *Étudiant*, *Compte
+GitHub* ou *Dernier envoi* trie dessus, recliquer retourne l'ordre. Une flèche
+marque la colonne active, et chaque colonne part de son sens naturel — un nom de
+A à Z, une date du plus récent au plus ancien.
+
+**Le filtre tient sur une seule ligne** : un champ de recherche, qui sert à
+chaque fois, et un bouton *Filtrer* qui replie le reste dans un menu — le
+travail, la présence de dépôts (avec, sans, ou avec mais sans le moindre envoi),
+et les bornes du dernier envoi. Le bouton compte les critères posés et se colore
+quand il y en a : un filtre replié ne doit pas pouvoir se faire oublier.
+
+La recherche ignore la casse et les accents : `cote` trouve « Émilie Côté ».
+
+Le filtrage et le tri se font **sur le serveur local**, pas dans la page : ce
+sont les mêmes critères, décidés au même endroit, que ceux de l'assistant du
+terminal. « Avant le 1er octobre » veut donc dire la même chose des deux côtés.
+Le résumé dit toujours combien de personnes sont affichées sur combien.
+
+Chaque ligne porte une case, et le bandeau au-dessus déplace **la sélection
+entière**. Une sélection ne survit pas à ce que le filtre écarte : on déplace ce
+qu'on voit.
 
 ### Réglages du groupe
 
@@ -570,14 +638,25 @@ Deux blocs, qui ne font pas la même chose :
   Avec, en dessous, de quoi **oublier** la liste et les réglages retenus pour ce
   groupe, sans toucher à un seul dépôt.
 
-### Déplacer un étudiant
+### Déplacer des étudiants
 
-Une personne change de groupe en cours de session : « Déplacer… », dans la liste
-des étudiants, la fait passer d'un groupe à l'autre à l'intérieur d'une même
-organisation. Sa fiche suit toujours ; **ses dépôts, seulement si on le
+Une personne change de groupe en cours de session, et rarement seule :
+« Déplacer… » sur une ligne, ou **« Déplacer la sélection… »** pour toutes celles
+qui sont cochées, les fait passer d'un groupe à l'autre à l'intérieur d'une même
+organisation. Leurs fiches suivent toujours ; **leurs dépôts, seulement si on le
 demande** — les renommer est une écriture sur GitHub, et le groupe d'arrivée
-doit suivre la nomenclature courante pour savoir les nommer. Sans renommage, ses
-dépôts restent au nom du groupe de départ, qui continue de les montrer.
+doit suivre la nomenclature courante pour savoir les nommer. Sans renommage,
+leurs dépôts restent au nom du groupe de départ, qui continue de les montrer.
+
+Le groupe d'arrivée n'a pas à exister d'avance. La liste des destinations se
+termine par **« ＋ Nouveau groupe… »**, qui demande la session, le cours et le
+numéro, et montre la place composée au fil de la frappe — `a26.5n6.03`. Le
+groupe est déclaré au passage, sans avoir à quitter la liste pour le créer
+ailleurs. Une place déjà occupée est refusée : ce serait une fusion déguisée, et
+le groupe se choisit alors dans la liste.
+
+Le plan de renommage est composé en entier avant la première écriture : un nom
+déjà pris arrête le déplacement au lieu de l'interrompre à mi-chemin.
 
 ---
 
@@ -587,7 +666,16 @@ progression, ligne par ligne, avec un bouton d'annulation.
 
 L'assistant du terminal ignore les groupes : il continue de travailler par
 préfixe (`--manage tp1`), ce qui revient au même puisque le préfixe d'un travail
-est son identifiant. Les deux interfaces lisent les mêmes dépôts.
+est son identifiant. Les deux interfaces lisent les mêmes dépôts, et le filtre
+et le tri de la liste y sont les mêmes, drapeaux compris — `--filter`,
+`--pushed-after`, `--pushed-before`, `--never-pushed`, `--sort`, `--sort-desc`.
+
+**Ce qui n'existe que dans l'interface web**, faute d'une notion de groupe au
+terminal : déclarer un groupe, le renommer, l'adopter par gabarit, tenir sa
+liste d'étudiants, et en déplacer d'un groupe à l'autre. Un préfixe ne dit pas
+où commence le groupe et où finit le travail ; l'assistant ne peut donc pas les
+distinguer, et il n'a pas de liste à tenir — la sienne est le fichier CSV que
+`--roster` désigne.
 
 Le clonage, les fichiers de départ et les listes CSV désignent des chemins **de
 la machine**, pas du navigateur. Chaque champ de chemin a donc un bouton
@@ -650,6 +738,12 @@ terminal.
 ```
 --org ORG                organisation GitHub cible
 --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
+--filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
+--pushed-after DATE      ne lister que les envois postérieurs à DATE (AAAA-MM-JJ)
+--pushed-before DATE     ne lister que les envois antérieurs à DATE
+--never-pushed           ne lister que les dépôts sans aucun envoi
+--sort nom|compte|envoi  colonne de tri de la liste (défaut : nom)
+--sort-desc              trier du plus grand au plus petit
 --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
 --assignment NOM         identifiant du travail (préfixe des dépôts)
 --template ORG/DEPOT     dépôt modèle (vide = dépôt neuf initialisé)
@@ -739,7 +833,8 @@ sortie propre hors terminal.
 | `internal/groups` | détection des groupes de dépôts, sélections |
 | `internal/naming` | la nomenclature des dépôts : composition et relecture |
 | `internal/picker` | la fenêtre de sélection du système, et l'explorateur de repli |
-| `internal/classroom` | groupes : étudiants, place dans la nomenclature, travaux |
+| `internal/classroom` | groupes : étudiants, place dans la nomenclature, travaux, déplacements |
+| `internal/students` | liste des étudiants d'un groupe : construction, filtre, tri |
 | `internal/orgs` | inventaire des organisations : rôle et droit de créer |
 | `internal/starter` | lecture d'un dossier de fichiers de départ |
 | `internal/config`, `internal/cache` | réglages et cache disque |

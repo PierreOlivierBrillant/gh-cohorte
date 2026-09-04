@@ -11,6 +11,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 )
 
 // groupe prépare une organisation contenant un groupe de dépôts déjà créés.
@@ -50,6 +51,57 @@ func TestGestionAfficheLeGroupe(t *testing.T) {
 		"Jean-Luc Picard", "privé", "2026-08-21")
 	// Le suffixe tient lieu de nom quand le profil GitHub n'en porte aucun.
 	h.contient("aminata-d")
+}
+
+// La liste du terminal se filtre et se trie comme celle du navigateur : ce sont
+// les mêmes critères, décidés au même endroit.
+func TestGestionListeFiltreeEtTriee(t *testing.T) {
+	state := fakegh.NewState()
+	envois := map[string]string{
+		"tp1-emilie-cote": "2026-09-20T09:00:00Z",
+		"tp1-jlpicard":    "2026-10-15T09:00:00Z",
+		"tp1-aminata-d":   "",
+	}
+	for nom, envoi := range envois {
+		state.AddRepo("acme", nom, true).PushedAt = envoi
+	}
+
+	h := gestion(t, state, "tp1")
+	h.Options.Filter = students.Filter{PushedAfter: "2026-10-01"}
+	if code, _ := h.script("quitter"); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("1 affiché(s)", "tp1-jlpicard", "envoi après le 2026-10-01")
+	h.absent("tp1-emilie-cote")
+
+	// Les dépôts sans aucun envoi se retrouvent à part : une borne ne les
+	// range ni avant ni après.
+	muet := gestion(t, state, "tp1")
+	muet.Options.Filter = students.Filter{Activity: students.Silent}
+	if code, _ := muet.script("quitter"); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, muet.texte())
+	}
+	muet.contient("tp1-aminata-d", "aucun envoi")
+	muet.absent("tp1-jlpicard")
+}
+
+// Le menu du terminal offre les mêmes critères que la barre du navigateur, et
+// la sélection suit ce que la liste montre.
+func TestGestionFiltreDepuisLeMenu(t *testing.T) {
+	h := gestion(t, groupe(t), "tp1")
+	code, scripte := h.script(
+		"filtrer", "chercher", "picard", "retour", // ne garder que Picard
+		"urls", "", "n", // les URL ne portent plus que sur lui
+		"quitter",
+	)
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	if scripte.Remaining() != 0 {
+		t.Errorf("%d réponse(s) inutilisée(s)", scripte.Remaining())
+	}
+	h.contient("1 affiché(s)", "« picard »", "https://github.com/acme/tp1-jlpicard")
+	h.absent("https://github.com/acme/tp1-emilie-cote")
 }
 
 func TestGestionDetecteLesGroupes(t *testing.T) {

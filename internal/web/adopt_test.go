@@ -178,12 +178,13 @@ func TestEtudiantDeplaceSansSesDepots(t *testing.T) {
 	arrivee := h.groupe("a26", "5n6", "02", "Aminata Diallo", "aminata-d")
 
 	var bilan struct {
-		Moved   string `json:"moved"`
-		Renamed int    `json:"renamed"`
+		Moved   []string `json:"moved"`
+		Count   int      `json:"count"`
+		Renamed int      `json:"renamed"`
 	}
 	h.json(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
 		map[string]any{"username": "jlpicard", "target": arrivee, "repos": false}, &bilan)
-	if bilan.Moved != "jlpicard" || bilan.Renamed != 0 {
+	if bilan.Count != 1 || bilan.Moved[0] != "jlpicard" || bilan.Renamed != 0 {
 		t.Fatalf("bilan : %+v", bilan)
 	}
 	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
@@ -212,6 +213,105 @@ func TestDeplacementRefuseUnGroupeQuiNeSaitPasNommer(t *testing.T) {
 	// Rien n'a bougé : ni les dépôts, ni les listes.
 	if noms := h.State.RepoNames("acme"); len(noms) != 2 {
 		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+func TestPlusieursEtudiantsDeplacesEnsemble(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.01.tp1.jean-luc-picard", "a26.5n6.01.tp1.emilie-cote",
+		"a26.5n6.01.tp1.aminata-diallo",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	depart := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard",
+		"Émilie Côté", "emilie-cote", "Aminata Diallo", "aminata-d")
+	arrivee := h.groupe("a26", "5n6", "02")
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
+		map[string]any{
+			"usernames": []string{"jlpicard", "aminata-d"},
+			"target":    arrivee, "repos": true,
+		})
+	if bilan["status"] != "terminé" {
+		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
+	}
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["count"] != float64(2) || resultat["renamed"] != float64(2) {
+		t.Fatalf("bilan : %+v", resultat)
+	}
+
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	attendu := "a26.5n6.01.tp1.emilie-cote," +
+		"a26.5n6.02.tp1.aminata-diallo,a26.5n6.02.tp1.jean-luc-picard"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts : %v", noms)
+	}
+
+	var reste struct {
+		Students []struct {
+			Username string `json:"username"`
+		} `json:"students"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+depart, nil, &reste)
+	if len(reste.Students) != 1 || reste.Students[0].Username != "emilie-cote" {
+		t.Fatalf("groupe de départ : %+v", reste.Students)
+	}
+}
+
+// Le groupe d'arrivée n'a pas à exister d'avance : c'est le déplacement qui le
+// déclare, sans qu'on ait à sortir de la liste des étudiants pour le créer.
+func TestDeplacementDeclareLeGroupeDArrivee(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
+	h := nouveau(t, state)
+	depart := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
+		map[string]any{
+			"usernames": []string{"jlpicard"},
+			"new_group": map[string]string{"session": "a26", "course": "5n6", "group": "03"},
+			"repos":     true,
+		})
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["created"] != true || resultat["target_scope"] != "a26.5n6.03" {
+		t.Fatalf("bilan : %+v", resultat)
+	}
+	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+		noms[0] != "a26.5n6.03.tp1.jean-luc-picard" {
+		t.Fatalf("dépôts : %v", noms)
+	}
+
+	var neuf struct {
+		Students []struct {
+			Username string `json:"username"`
+		} `json:"students"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/a26.5n6.03", nil, &neuf)
+	if len(neuf.Students) != 1 || neuf.Students[0].Username != "jlpicard" {
+		t.Fatalf("groupe déclaré : %+v", neuf.Students)
+	}
+}
+
+// Déclarer sur une place déjà occupée serait une fusion déguisée : elle est
+// refusée, et la place se choisit alors dans la liste.
+func TestNouveauGroupeSurUnePlaceOccupeeRefuse(t *testing.T) {
+	h := nouveau(t, nil)
+	depart := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
+	h.groupe("a26", "5n6", "02", "Émilie Côté", "emilie-cote")
+
+	reponse, contenu := h.requete(http.MethodPost,
+		"/api/classrooms/"+depart+"/students/move", map[string]any{
+			"usernames": []string{"jlpicard"},
+			"new_group": map[string]string{"session": "a26", "course": "5n6", "group": "02"},
+		})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+	if !strings.Contains(string(contenu), "existe déjà") {
+		t.Fatalf("message : %s", contenu)
 	}
 }
 

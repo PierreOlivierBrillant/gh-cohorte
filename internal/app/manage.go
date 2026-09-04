@@ -17,6 +17,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -30,6 +31,7 @@ var manageMenu = ui.Options(
 	"cloner", "Cloner des dépôts en local",
 	"pull", "Mettre à jour des clones existants",
 	"supprimer", "Supprimer un dépôt",
+	"filtrer", "Filtrer ou trier la liste",
 	"rafraichir", "Recharger la liste",
 	"changer", "Changer de groupe",
 	"quitter", "Quitter",
@@ -43,6 +45,12 @@ type manageSession struct {
 	resolver      *identity.Resolver
 	repos         []groups.RepoInfo
 	loaded        bool
+	// Ce que la liste montre et dans quel ordre. Les actions, elles,
+	// continuent de travailler sur le groupe entier : filtrer sert à choisir,
+	// pas à faire oublier des dépôts.
+	filter   students.Filter
+	sortKey  students.Key
+	sortDesc bool
 }
 
 func newManageSession(session *Session, initialPrefix string) *manageSession {
@@ -54,6 +62,9 @@ func newManageSession(session *Session, initialPrefix string) *manageSession {
 		session:       session,
 		org:           session.Settings.Org,
 		initialPrefix: initialPrefix,
+		filter:        session.Options.Filter,
+		sortKey:       session.Options.Sort,
+		sortDesc:      session.Options.SortDesc,
 		resolver: identity.New(session.Client, session.Cache, reportDir,
 			session.Options.Jobs),
 	}
@@ -215,14 +226,73 @@ func (m *manageSession) names(group *groups.Group) map[string]string {
 	return names
 }
 
+// visible rend les dépôts que le filtre retient, dans l'ordre du tri. C'est ce
+// que la liste montre et ce parmi quoi les sélections se font : on choisit ce
+// qu'on voit.
+func (m *manageSession) visible(group *groups.Group) []groups.Repo {
+	parNom := make(map[string]groups.Repo, group.Len())
+	for _, repo := range group.Repos {
+		parNom[repo.Name] = repo
+	}
+	lignes := students.Apply(students.FromGroup(*group, m.names(group)),
+		m.filter, m.sortKey, m.sortDesc)
+
+	retenus := make([]groups.Repo, 0, len(lignes))
+	for _, ligne := range lignes {
+		if len(ligne.Repos) == 0 {
+			continue
+		}
+		if repo, connu := parNom[ligne.Repos[0].Name]; connu {
+			retenus = append(retenus, repo)
+		}
+	}
+	return retenus
+}
+
+// criteria dit en une ligne ce que la liste retient et comment elle est
+// ordonnée : un filtre qui ne se voit pas se retourne contre celui qui l'a posé.
+func (m *manageSession) criteria() string {
+	parts := []string{}
+	if m.filter.Text != "" {
+		parts = append(parts, "« "+m.filter.Text+" »")
+	}
+	if m.filter.PushedAfter != "" {
+		parts = append(parts, "envoi après le "+m.filter.PushedAfter)
+	}
+	if m.filter.PushedBefore != "" {
+		parts = append(parts, "envoi avant le "+m.filter.PushedBefore)
+	}
+	if m.filter.Activity == students.Silent {
+		parts = append(parts, "aucun envoi")
+	}
+	sens := "croissant"
+	if m.sortDesc {
+		sens = "décroissant"
+	}
+	tri := map[students.Key]string{
+		students.ByName: "nom", students.ByUsername: "compte", students.ByPushed: "dernier envoi",
+	}[m.sortKey]
+	if tri == "" {
+		tri = "nom"
+	}
+	parts = append(parts, "tri par "+tri+" ("+sens+")")
+	return strings.Join(parts, " · ")
+}
+
 // show affiche le groupe : dépôt, nom complet, visibilité, dernier envoi.
 func (m *manageSession) show(group *groups.Group) {
 	console := m.session.Console
-	console.Heading("Groupe « " + group.Prefix + " » — " + itoa(group.Len()) + " dépôt(s)")
 	names := m.names(group)
+	visibles := m.visible(group)
 
-	rows := make([][]string, 0, group.Len())
-	for index, repo := range group.Repos {
+	titre := "Groupe « " + group.Prefix + " » — " + itoa(group.Len()) + " dépôt(s)"
+	if len(visibles) != group.Len() {
+		titre += ", " + itoa(len(visibles)) + " affiché(s)"
+	}
+	console.Heading(titre)
+
+	rows := make([][]string, 0, len(visibles))
+	for index, repo := range visibles {
 		fullName := names[repo.Name]
 		if fullName == "" {
 			fullName = console.Dim(repo.Suffix)
@@ -234,15 +304,20 @@ func (m *manageSession) show(group *groups.Group) {
 		rows = append(rows, []string{itoa(index + 1), repo.Name, fullName, repo.Visibility(), pushed})
 	}
 	console.Table([]string{"#", "Dépôt", "Nom complet", "Visibilité", "Dernier envoi"}, rows, 40)
+	if len(visibles) == 0 && group.Len() > 0 {
+		console.Warning("Aucun dépôt ne répond aux critères.")
+	}
+	console.Note("%s", m.criteria())
 }
 
 // ---------------------------------------------------------------- sélections
 
-// pickRepo choisit un dépôt du groupe.
+// pickRepo choisit un dépôt parmi ceux que la liste montre.
 func (m *manageSession) pickRepo(group *groups.Group, question string) (*groups.Repo, error) {
 	names := m.names(group)
-	options := make([]ui.Option, 0, group.Len()+1)
-	for _, repo := range group.Repos {
+	visibles := m.visible(group)
+	options := make([]ui.Option, 0, len(visibles)+1)
+	for _, repo := range visibles {
 		label := repo.Name
 		if fullName := names[repo.Name]; fullName != "" {
 			label += "  —  " + fullName
@@ -268,9 +343,10 @@ func (m *manageSession) pickRepo(group *groups.Group, question string) (*groups.
 
 // pickMany choisit plusieurs dépôts, par cases à cocher ou par expression.
 func (m *manageSession) pickMany(group *groups.Group, question string) ([]groups.Repo, error) {
-	options := make([]ui.Option, 0, group.Len())
-	selected := make([]bool, group.Len())
-	for index, repo := range group.Repos {
+	visibles := m.visible(group)
+	options := make([]ui.Option, 0, len(visibles))
+	selected := make([]bool, len(visibles))
+	for index, repo := range visibles {
 		options = append(options, ui.Option{Value: repo.Name, Label: repo.Name})
 		selected[index] = true
 	}
@@ -280,11 +356,124 @@ func (m *manageSession) pickMany(group *groups.Group, question string) ([]groups
 	}
 	chosen := make([]groups.Repo, 0, len(indices))
 	for _, index := range indices {
-		if index >= 0 && index < group.Len() {
-			chosen = append(chosen, group.Repos[index])
+		if index >= 0 && index < len(visibles) {
+			chosen = append(chosen, visibles[index])
 		}
 	}
 	return chosen, nil
+}
+
+// ------------------------------------------------------------------- filtres
+
+// Menu du filtre et du tri.
+var filterMenu = ui.Options(
+	"chercher", "Chercher un nom ou un compte",
+	"apres", "Ne garder que les envois postérieurs à une date",
+	"avant", "Ne garder que les envois antérieurs à une date",
+	"muets", "N'afficher que les dépôts sans aucun envoi",
+	"tri", "Changer le tri",
+	"vider", "Tout effacer",
+	"retour", "Revenir à la liste",
+)
+
+// Colonnes de tri proposées.
+var sortMenu = ui.Options(
+	string(students.ByName), "Nom complet",
+	string(students.ByUsername), "Compte GitHub",
+	string(students.ByPushed), "Dernier envoi",
+)
+
+// filtrer règle ce que la liste montre et comment elle est ordonnée. Ce que
+// signifient les critères est décidé dans « students » : le terminal ne fait
+// que les recueillir, comme le navigateur les recueille dans sa barre.
+func (m *manageSession) filtrer(group *groups.Group) error {
+	for {
+		m.session.Console.Note("%s", m.criteria())
+		action, err := m.session.Prompt.Choose("Filtrer ou trier", filterMenu, "retour")
+		if err != nil {
+			return err
+		}
+		switch action {
+		case "retour":
+			return nil
+		case "vider":
+			m.filter = students.Filter{}
+			m.sortKey, m.sortDesc = students.ByName, false
+		case "chercher":
+			texte, err := m.session.Prompt.Ask(ui.Question{
+				Title:      "Nom ou compte (vide pour tout afficher)",
+				Default:    m.filter.Text,
+				AllowEmpty: true,
+			})
+			if err != nil {
+				return err
+			}
+			m.filter.Text = texte
+		case "apres", "avant":
+			if err := m.askDate(action); err != nil {
+				return err
+			}
+		case "muets":
+			// Un seul état à basculer : ou bien tout, ou bien ce qui n'a rien reçu.
+			if m.filter.Activity == students.Silent {
+				m.filter.Activity = students.AnyActivity
+			} else {
+				m.filter.Activity = students.Silent
+			}
+		case "tri":
+			if err := m.askSort(); err != nil {
+				return err
+			}
+		}
+		if _, err := m.filter.Validate(); err != nil {
+			m.session.Console.Failure("%v", err)
+			continue
+		}
+		m.show(group)
+	}
+}
+
+// askDate recueille une des deux bornes du dernier envoi.
+func (m *manageSession) askDate(borne string) error {
+	titre, courant := "Dernier envoi après (AAAA-MM-JJ, vide pour aucune borne)", m.filter.PushedAfter
+	if borne == "avant" {
+		titre, courant = "Dernier envoi avant (AAAA-MM-JJ, vide pour aucune borne)",
+			m.filter.PushedBefore
+	}
+	date, err := m.session.Prompt.Ask(ui.Question{
+		Title: titre, Default: courant, AllowEmpty: true,
+		Validate: func(value string) (string, error) {
+			return students.ParseDate(value, "Dernier envoi")
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if borne == "avant" {
+		m.filter.PushedBefore = date
+	} else {
+		m.filter.PushedAfter = date
+	}
+	return nil
+}
+
+// askSort recueille la colonne de tri et son sens.
+func (m *manageSession) askSort() error {
+	choix, err := m.session.Prompt.Choose("Trier par", sortMenu, string(m.sortKey))
+	if err != nil {
+		return err
+	}
+	key, err := students.ParseKey(choix)
+	if err != nil {
+		return err
+	}
+	decroissant, err := m.session.Prompt.Confirm("Du plus grand au plus petit ?",
+		key == students.ByPushed)
+	if err != nil {
+		return err
+	}
+	m.sortKey, m.sortDesc = key, decroissant
+	return nil
 }
 
 // ------------------------------------------------------------------- actions
@@ -966,6 +1155,7 @@ func (m *manageSession) run() (int, error) {
 				}
 			}
 
+			// « filtrer » a déjà remontré la liste à chaque changement.
 			showList = action == "ajouter" || action == "supprimer" || action == "rafraichir"
 			if showList {
 				repos, err := m.loadRepos(false)
@@ -997,6 +1187,8 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return m.pullClones(group)
 	case "supprimer":
 		return m.deleteRepo(group)
+	case "filtrer":
+		return m.filtrer(group)
 	case "rafraichir":
 		_, err := m.loadRepos(true)
 		return err
