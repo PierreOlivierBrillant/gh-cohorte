@@ -574,6 +574,16 @@ function nomDeSession(court) {
   return trouve ? trouve.name : court;
 }
 
+// rangDeSession donne la place d'une session dans la suite des sessions. Le
+// serveur les envoie déjà rangées — de la plus récente à la plus ancienne — et
+// refaire ce calcul ici les ferait diverger. Une session qu'il ne connaît pas
+// passe après.
+function rangDeSession(court) {
+  const rang = etat.sessions.findIndex((session) =>
+    session.short.toLowerCase() === court.toLowerCase());
+  return rang < 0 ? etat.sessions.length : rang;
+}
+
 // dessinerParcours montre le niveau courant : les sessions, les cours d'une
 // session, ou les groupes d'un cours.
 function dessinerParcours() {
@@ -618,7 +628,8 @@ function dessinerSessions(conteneur) {
           'toutes pièces.' })));
   }
 
-  const triees = [...parSession.values()].sort((a, b) => a.court.localeCompare(b.court));
+  const triees = [...parSession.values()].sort((a, b) =>
+    rangDeSession(a.court) - rangDeSession(b.court) || a.court.localeCompare(b.court));
   for (const session of triees) {
     const cours = new Set(session.groupes.map((groupe) => groupe.course.toLowerCase()));
     conteneur.append(ligneParcours(

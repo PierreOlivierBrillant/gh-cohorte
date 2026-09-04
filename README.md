@@ -339,6 +339,12 @@ Le **nom long d'une session se déduit de son nom court** : `a26` se lit
 suivre la convention — un nom court qui ne la suit pas s'affiche tel quel — et
 un nom écrit à la main l'emporte toujours.
 
+Les sessions **remontent le calendrier** : la plus récente d'abord, l'année
+puis la saison — automne, été, printemps, hiver. `h27` vient donc avant `a26`,
+qui vient avant `h26` : c'est la session en cours qu'on ouvre, pas celle d'il y
+a trois ans. Un nom court qui ne suit pas la convention ne se range pas dans
+cette suite : il passe après, avec ses semblables, par ordre alphabétique.
+
 L'interface reprend le modèle de GitHub Classroom : un **groupe** rassemble des
 **étudiants**, à qui l'on **distribue des travaux**.
 
@@ -435,8 +441,8 @@ qu'en devinant, et qu'il faut donc confirmer.
 
 ```
 Sessions                                       [Recharger] [Nouveau groupe]
-  Automne 2026        2 cours · 3 groupes                          a26  ›
   Hiver 2027          1 cours · 2 groupes                          h27  ›
+  Automne 2026        2 cours · 3 groupes                          a26  ›
 
 Groupes repérés dans l'organisation           [Adopter par gabarit…]
   a26-5n6      travailsession, tp1  dépassée   24 compte(s)  48 dépôts  Adopter

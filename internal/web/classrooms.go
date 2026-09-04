@@ -2,7 +2,6 @@ package web
 
 import (
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
@@ -59,31 +58,19 @@ func (s *Server) handleClassrooms(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	sessions := map[string]bool{}
 	visibles := s.visibles(org, repos)
 	liste := make([]classroomPayload, 0, len(visibles))
+	courts := make([]string, 0, len(visibles))
 	for _, cours := range visibles {
 		fiche := s.fiche(cours)
 		fiche.Assignments = cours.Assignments(repos)
 		fiche.Source = source
 		liste = append(liste, fiche)
-		if cours.Session != "" {
-			sessions[cours.Session] = true
-		}
+		courts = append(courts, cours.Session)
 	}
-
-	courtes := make([]classroom.Session, 0, len(sessions))
-	for court := range sessions {
-		courtes = append(courtes, classroom.Session{
-			Short: court, Name: classroom.SessionName(court),
-		})
-	}
-	sort.Slice(courtes, func(i, j int) bool {
-		return strings.ToLower(courtes[i].Short) < strings.ToLower(courtes[j].Short)
-	})
 
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"classrooms": liste, "sessions": courtes, "org": org,
+		"classrooms": liste, "sessions": classroom.SessionsOf(courts), "org": org,
 	})
 }
 

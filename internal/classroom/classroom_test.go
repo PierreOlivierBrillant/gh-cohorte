@@ -550,10 +550,11 @@ func TestSessionsDesGroupesRetenus(t *testing.T) {
 		}
 	}
 
-	// Le nom long ne s'écrit nulle part : il se déduit du nom court.
+	// Le nom long ne s'écrit nulle part : il se déduit du nom court. La plus
+	// récente des sessions vient la première.
 	sessions := classroom.Open(chemin).Sessions("acme")
-	if len(sessions) != 2 || sessions[0].Short != "a26" ||
-		sessions[0].Name != "Automne 2026" || sessions[1].Name != "Hiver 2027" {
+	if len(sessions) != 2 || sessions[0].Short != "h27" ||
+		sessions[0].Name != "Hiver 2027" || sessions[1].Name != "Automne 2026" {
 		t.Fatalf("sessions : %+v", sessions)
 	}
 	// Une autre organisation n'a rien à voir ici.
@@ -574,5 +575,36 @@ func TestNomDeSessionDeduitDeLaSaison(t *testing.T) {
 		if nom := naming.SessionLabel(court); nom != attendu {
 			t.Errorf("%s → %q, attendu %q", court, nom, attendu)
 		}
+	}
+}
+
+func TestSessionsRangeesDeLaPlusRecenteALaPlusAncienne(t *testing.T) {
+	// L'ordre remonte le calendrier : la session en cours d'abord, et de là
+	// vers les plus anciennes — l'automne, l'été, le printemps, l'hiver, année
+	// après année.
+	sessions := classroom.SessionsOf([]string{
+		"a27", "e26", "h27", "p26", "a26", "H27", "h26", "e27", "p27",
+	})
+	rendu := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		rendu = append(rendu, session.Short)
+	}
+	attendu := "a27 e27 p27 h27 a26 e26 p26 h26"
+	if strings.Join(rendu, " ") != attendu {
+		t.Fatalf("ordre : %q, attendu %q", strings.Join(rendu, " "), attendu)
+	}
+}
+
+func TestSessionsHorsConventionPassentApres(t *testing.T) {
+	// Rien n'oblige à suivre la convention : ce qui ne s'y lit pas ne se range
+	// pas dans le calendrier, mais ne disparaît pas pour autant.
+	sessions := classroom.SessionsOf([]string{"zeta", "a27", "  ", "alpha", "h26", "alpha"})
+	rendu := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		rendu = append(rendu, session.Short)
+	}
+	attendu := "a27 h26 alpha zeta"
+	if strings.Join(rendu, " ") != attendu {
+		t.Fatalf("ordre : %q, attendu %q", strings.Join(rendu, " "), attendu)
 	}
 }

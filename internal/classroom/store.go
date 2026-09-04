@@ -90,26 +90,18 @@ func awaitingSession(item Classroom) Classroom {
 func SessionName(short string) string { return naming.SessionLabel(short) }
 
 // Sessions renvoie les sessions qui portent au moins un groupe déclaré dans
-// l'organisation. Les noms courts se trient bien : a26, e27, h27.
+// l'organisation, de la plus récente à la plus ancienne.
 func (s *Store) Sessions(org string) []Session {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	vues := map[string]bool{}
-	liste := make([]Session, 0, len(s.items))
+	courts := make([]string, 0, len(s.items))
 	for _, item := range s.items {
-		if !strings.EqualFold(item.Org, org) || item.Session == "" {
+		if !strings.EqualFold(item.Org, org) {
 			continue
 		}
-		if vues[strings.ToLower(item.Session)] {
-			continue
-		}
-		vues[strings.ToLower(item.Session)] = true
-		liste = append(liste, Session{Short: item.Session, Name: SessionName(item.Session)})
+		courts = append(courts, item.Session)
 	}
-	sort.Slice(liste, func(i, j int) bool {
-		return strings.ToLower(liste[i].Short) < strings.ToLower(liste[j].Short)
-	})
-	return liste
+	return SessionsOf(courts)
 }
 
 // Path renvoie l'emplacement du fichier.
