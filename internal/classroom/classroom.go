@@ -83,8 +83,6 @@ func (d Defaults) normalized() Defaults {
 // étudiants. Seul le nom court de la session entre dans les dépôts ; son nom
 // long vit dans le magasin, partagé par tous les groupes de la session.
 type Classroom struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
 	Org     string `json:"org"`
 	Session string `json:"session"`
 	Course  string `json:"course"`
@@ -180,10 +178,6 @@ func (c Classroom) Validate() (Classroom, error) {
 		c.LegacyPrefix, c.LegacyPattern = "", ""
 	}
 
-	c.Name = strings.TrimSpace(c.Name)
-	if c.Name == "" {
-		c.Name = c.Label()
-	}
 	if strings.TrimSpace(c.Defaults.DescriptionPattern) != "" {
 		if _, err := plan.ValidatePattern(
 			c.Defaults.DescriptionPattern, "Gabarit de description", false); err != nil {
@@ -195,7 +189,8 @@ func (c Classroom) Validate() (Classroom, error) {
 	return c, nil
 }
 
-// Label décrit le groupe quand il n'a pas de nom propre.
+// Label nomme le groupe. Il n'y a rien à retenir pour cela : la place dit tout,
+// et elle est dans le nom de chacun de ses dépôts.
 func (c Classroom) Label() string {
 	if c.Legacy() {
 		if c.LegacyPrefix != "" {
@@ -206,8 +201,11 @@ func (c Classroom) Label() string {
 		}
 		return c.LegacyPattern
 	}
-	return c.Course + " " + c.Group
+	return "Groupe " + c.Group
 }
+
+// SessionName rend le nom long de la session du groupe.
+func (c Classroom) SessionName() string { return naming.SessionLabel(c.Session) }
 
 // Session identifie une session : un nom court pour les dépôts, un nom long
 // pour l'affichage.
@@ -575,4 +573,55 @@ func dedupe(people []roster.Person) []roster.Person {
 		uniques = append(uniques, person)
 	}
 	return uniques
+}
+
+// ------------------------------------------------------------------- places
+
+// NormalizeScope met une place sous une forme comparable : GitHub ne distingue
+// pas la casse dans un nom de dépôt, la hiérarchie non plus.
+func NormalizeScope(scope string) string {
+	return strings.ToLower(strings.TrimSpace(scope))
+}
+
+// AtScope compose le groupe qui occupe une place, sans rien savoir de plus. Un
+// groupe n'a pas besoin d'avoir été déclaré pour s'ouvrir : sa place est écrite
+// dans le nom de chacun de ses dépôts, et c'est elle qui l'identifie.
+func AtScope(org, scope string, defauts Defaults) (Classroom, error) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return Classroom{}, valid.Errorf("Aucune place indiquée.")
+	}
+	cours := Classroom{Org: org, Defaults: defauts}
+	switch niveaux := strings.Split(scope, naming.Separator); {
+	case strings.ContainsAny(scope, "{}"):
+		// Un gabarit d'adoption se reconnaît à ses champs.
+		cours.LegacyPattern = scope
+	case len(niveaux) == naming.Levels-2 &&
+		niveaux[0] != "" && niveaux[1] != "" && niveaux[2] != "":
+		cours.Session, cours.Course, cours.Group = niveaux[0], niveaux[1], niveaux[2]
+	default:
+		cours.LegacyPrefix = scope
+	}
+	return cours.Validate()
+}
+
+// Places énumère les groupes que les dépôts dessinent d'eux-mêmes. Seule la
+// nomenclature courante se lit sans rien deviner : les noms qui ne la suivent
+// pas restent des propositions, pas des groupes.
+func Places(repos []groups.RepoInfo) []string {
+	vues := map[string]string{}
+	for _, repo := range repos {
+		parts, reconnu := naming.Parse(repo.Name)
+		if !reconnu {
+			continue
+		}
+		prefixe := naming.Prefix(parts.Session, parts.Course, parts.Group)
+		vues[NormalizeScope(prefixe)] = prefixe
+	}
+	trouvees := make([]string, 0, len(vues))
+	for _, prefixe := range vues {
+		trouvees = append(trouvees, prefixe)
+	}
+	sort.Strings(trouvees)
+	return trouvees
 }

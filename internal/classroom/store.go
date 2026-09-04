@@ -1,32 +1,37 @@
 package classroom
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
+// Ce fichier ne retient pas ce qu'un groupe est — GitHub le dit déjà, dans les
+// noms de ses dépôts. Il retient ce que les dépôts ne peuvent pas dire :
+//
+//   - la liste des étudiants, avec le compte GitHub en face de chaque nom, tant
+//     qu'aucun dépôt ne l'a encore matérialisée ;
+//   - les réglages que les prochains travaux reprendront ;
+//   - un groupe déclaré mais encore vide, en attendant son premier travail.
+//
+// Rien de ce que l'interface affiche n'est inventé ici. Un groupe se reconnaît
+// à sa place — « a26.5n6.1010 » —, et cette place est dans le nom de chacun de
+// ses dépôts.
+
 // FileName est le nom du fichier des groupes, voisin des réglages.
 const FileName = "groupes.json"
 
 // document est ce qui est écrit sur le disque.
 type document struct {
-	Version int `json:"version"`
-	// Sessions donne le nom long d'une session — « a26 » → « Automne 2026 ».
-	// Il est partagé par tous les groupes de la session, et ne sert qu'à
-	// l'affichage : seul le nom court entre dans les dépôts.
-	Sessions   map[string]string `json:"sessions,omitempty"`
-	Classrooms []Classroom       `json:"classrooms"`
+	Version    int         `json:"version"`
+	Classrooms []Classroom `json:"classrooms"`
 }
 
 // PathNextTo place le fichier des groupes à côté du fichier de réglages, pour
@@ -40,14 +45,13 @@ func PathNextTo(configFile string) string {
 type Store struct {
 	path string
 
-	mutex    sync.Mutex
-	items    []Classroom
-	sessions map[string]string
+	mutex sync.Mutex
+	items []Classroom
 }
 
 // Open lit le fichier des groupes ; son absence donne un magasin vide.
 func Open(path string) *Store {
-	store := &Store{path: path, sessions: map[string]string{}}
+	store := &Store{path: path}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return store
@@ -62,9 +66,6 @@ func Open(path string) *Store {
 		// l'écriture : un gabarit dépassé doit être corrigé avant d'être montré.
 		item.Defaults = item.Defaults.normalized()
 		store.items = append(store.items, awaitingSession(item))
-	}
-	for court, long := range lu.Sessions {
-		store.sessions[strings.ToLower(court)] = long
 	}
 	return store
 }
@@ -83,61 +84,32 @@ func awaitingSession(item Classroom) Classroom {
 	return item
 }
 
-// SessionName renvoie le nom long d'une session : celui qu'on lui a donné, ou
-// celui que son nom court laisse déduire — « a26 » se lit « Automne 2026 » sans
-// qu'on ait à l'écrire.
-func (s *Store) SessionName(short string) string {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	return s.sessionNameLocked(short)
-}
+// SessionName rend le nom long d'une session. Il se déduit de son nom court —
+// « a26 » se lit « Automne 2026 » — plutôt que d'être écrit quelque part : un
+// nom retenu localement ne serait vrai que sur cette machine.
+func SessionName(short string) string { return naming.SessionLabel(short) }
 
-func (s *Store) sessionNameLocked(short string) string {
-	if long := s.sessions[strings.ToLower(short)]; long != "" {
-		return long
-	}
-	return naming.SessionLabel(short)
-}
-
-// Sessions renvoie les sessions qui portent au moins un groupe, de la plus
-// récente à la plus ancienne — les noms courts se trient bien : a26, h27, e27.
-func (s *Store) Sessions() []Session {
+// Sessions renvoie les sessions qui portent au moins un groupe déclaré dans
+// l'organisation. Les noms courts se trient bien : a26, e27, h27.
+func (s *Store) Sessions(org string) []Session {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	vues := map[string]bool{}
 	liste := make([]Session, 0, len(s.items))
 	for _, item := range s.items {
-		court := item.Session
-		if court == "" || vues[strings.ToLower(court)] {
+		if !strings.EqualFold(item.Org, org) || item.Session == "" {
 			continue
 		}
-		vues[strings.ToLower(court)] = true
-		liste = append(liste, Session{Short: court, Name: s.sessionNameLocked(court)})
+		if vues[strings.ToLower(item.Session)] {
+			continue
+		}
+		vues[strings.ToLower(item.Session)] = true
+		liste = append(liste, Session{Short: item.Session, Name: SessionName(item.Session)})
 	}
 	sort.Slice(liste, func(i, j int) bool {
 		return strings.ToLower(liste[i].Short) < strings.ToLower(liste[j].Short)
 	})
 	return liste
-}
-
-// SetSessionName retient le nom long d'une session. Vide, il est oublié : la
-// session s'affiche alors par son nom court.
-func (s *Store) SetSessionName(short, name string) error {
-	court, err := naming.Fragment(short, "Session")
-	if err != nil {
-		return err
-	}
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	name = strings.TrimSpace(name)
-	// Un nom qui répète ce que le nom court dit déjà n'a pas à être écrit.
-	if name == "" || strings.EqualFold(name, court) ||
-		strings.EqualFold(name, naming.SessionLabel(court)) {
-		delete(s.sessions, strings.ToLower(court))
-	} else {
-		s.sessions[strings.ToLower(court)] = name
-	}
-	return s.saveLocked()
 }
 
 // Path renvoie l'emplacement du fichier.
@@ -150,59 +122,41 @@ func detach(classroom Classroom) Classroom {
 	return classroom
 }
 
-// List renvoie les groupes, classés par organisation puis par nom.
-func (s *Store) List() []Classroom {
+// List renvoie les groupes déclarés dans une organisation, classés par place.
+func (s *Store) List(org string) []Classroom {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	copie := make([]Classroom, 0, len(s.items))
 	for _, item := range s.items {
+		if !strings.EqualFold(item.Org, org) {
+			continue
+		}
 		copie = append(copie, detach(item))
 	}
 	sort.Slice(copie, func(i, j int) bool {
-		if copie[i].Org != copie[j].Org {
-			return strings.ToLower(copie[i].Org) < strings.ToLower(copie[j].Org)
-		}
-		return strings.ToLower(copie[i].Name) < strings.ToLower(copie[j].Name)
+		return strings.ToLower(copie[i].Scope()) < strings.ToLower(copie[j].Scope())
 	})
 	return copie
 }
 
-// Get retrouve un groupe par son identifiant.
-func (s *Store) Get(id string) (Classroom, bool) {
+// Find retrouve un groupe par sa place dans une organisation. C'est la seule
+// façon de le désigner : un identifiant tiré au hasard ne voudrait rien dire
+// hors de cette machine, alors que la place est dans le nom des dépôts.
+func (s *Store) Find(org, scope string) (Classroom, bool) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	for _, item := range s.items {
-		if item.ID == id {
+		if strings.EqualFold(item.Org, org) && strings.EqualFold(item.Scope(), scope) {
 			return detach(item), true
 		}
 	}
 	return Classroom{}, false
 }
 
-// Add déclare un groupe. Deux groupes ne peuvent pas viser le même préfixe dans
-// la même organisation : ils désigneraient les mêmes dépôts.
-func (s *Store) Add(classroom Classroom) (Classroom, error) {
-	valide, err := classroom.Validate()
-	if err != nil {
-		return classroom, err
-	}
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	for _, item := range s.items {
-		if strings.EqualFold(item.Org, valide.Org) && strings.EqualFold(item.Scope(), valide.Scope()) {
-			return classroom, valid.Errorf(
-				"Un groupe couvre déjà « %s » dans « %s ».", valide.Label(), valide.Org)
-		}
-	}
-	valide.ID = identifier()
-	valide.CreatedAt = time.Now().UTC().Format(time.RFC3339)
-	s.items = append(s.items, detach(valide))
-	return valide, s.saveLocked()
-}
-
-// Update remplace un groupe existant.
-func (s *Store) Update(classroom Classroom) (Classroom, error) {
+// Save écrit ce qu'on retient d'un groupe : sa liste et ses réglages. Il n'y a
+// rien à créer ni à mettre à jour séparément — un groupe est à sa place, ou il
+// n'y est pas.
+func (s *Store) Save(classroom Classroom) (Classroom, error) {
 	valide, err := classroom.Validate()
 	if err != nil {
 		return classroom, err
@@ -211,39 +165,62 @@ func (s *Store) Update(classroom Classroom) (Classroom, error) {
 	defer s.mutex.Unlock()
 
 	for position, item := range s.items {
-		if item.ID != valide.ID {
-			if strings.EqualFold(item.Org, valide.Org) && strings.EqualFold(item.Scope(), valide.Scope()) {
-				return classroom, valid.Errorf(
-					"Un autre groupe couvre déjà « %s » dans « %s ».", valide.Label(), valide.Org)
-			}
-			continue
-		}
-		valide.CreatedAt = item.CreatedAt
-		s.items[position] = detach(valide)
-	}
-	for _, item := range s.items {
-		if item.ID == valide.ID {
+		if strings.EqualFold(item.Org, valide.Org) &&
+			strings.EqualFold(item.Scope(), valide.Scope()) {
+			s.items[position] = detach(valide)
 			return valide, s.saveLocked()
 		}
 	}
-	return classroom, valid.Errorf("Groupe inconnu.")
+	s.items = append(s.items, detach(valide))
+	return valide, s.saveLocked()
 }
 
-// Delete retire un groupe de la liste. Aucun dépôt n'est touché sur GitHub.
-func (s *Store) Delete(id string) error {
+// Move suit un groupe qui change de place : ses dépôts viennent d'être
+// renommés, et ce qu'on retient de lui doit les suivre.
+func (s *Store) Move(org, scope string, cible Classroom) (Classroom, error) {
+	valide, err := cible.Validate()
+	if err != nil {
+		return cible, err
+	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for _, item := range s.items {
+		if strings.EqualFold(item.Org, valide.Org) &&
+			strings.EqualFold(item.Scope(), valide.Scope()) &&
+			!strings.EqualFold(item.Scope(), scope) {
+			return cible, valid.Errorf(
+				"Un groupe couvre déjà « %s » dans « %s ».", valide.Scope(), valide.Org)
+		}
+	}
+	restants := make([]Classroom, 0, len(s.items)+1)
+	for _, item := range s.items {
+		if strings.EqualFold(item.Org, org) && strings.EqualFold(item.Scope(), scope) {
+			continue
+		}
+		restants = append(restants, item)
+	}
+	s.items = append(restants, detach(valide))
+	return valide, s.saveLocked()
+}
+
+// Forget oublie ce qu'on retenait d'un groupe. Aucun dépôt n'est touché : s'il
+// en reste, le groupe continue d'exister sur GitHub et de s'afficher — sans sa
+// liste ni ses réglages.
+func (s *Store) Forget(org, scope string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	restants := make([]Classroom, 0, len(s.items))
 	trouve := false
 	for _, item := range s.items {
-		if item.ID == id {
+		if strings.EqualFold(item.Org, org) && strings.EqualFold(item.Scope(), scope) {
 			trouve = true
 			continue
 		}
 		restants = append(restants, item)
 	}
 	if !trouve {
-		return valid.Errorf("Groupe inconnu.")
+		return valid.Errorf("Aucune liste retenue pour « %s ».", scope)
 	}
 	s.items = restants
 	return s.saveLocked()
@@ -255,7 +232,7 @@ func (s *Store) saveLocked() error {
 		return valid.Errorf("Groupes non enregistrés : %v", err)
 	}
 	payload, err := json.MarshalIndent(
-		document{Version: 1, Sessions: s.sessions, Classrooms: s.items}, "", "  ")
+		document{Version: 2, Classrooms: s.items}, "", "  ")
 	if err != nil {
 		return valid.Errorf("Groupes non enregistrés : %v", err)
 	}
@@ -263,14 +240,4 @@ func (s *Store) saveLocked() error {
 		return valid.Errorf("Groupes non enregistrés : %v", err)
 	}
 	return nil
-}
-
-// identifier tire un identifiant de groupe stable, indépendant du préfixe : le
-// renommer ne doit pas casser les adresses de l'interface.
-func identifier() string {
-	raw := make([]byte, 8)
-	if _, err := rand.Read(raw); err != nil {
-		return hex.EncodeToString([]byte(time.Now().Format(time.RFC3339Nano)))
-	}
-	return hex.EncodeToString(raw)
 }

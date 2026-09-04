@@ -94,7 +94,7 @@ func (c Classroom) patternAssignments(gabarit Pattern, repos []groups.RepoInfo) 
 	parNom := map[string]*Assignment{}
 	ajouter := func(travail string, inscrit bool, repo groups.RepoInfo) {
 		if travail == "" {
-			travail = c.Name
+			travail = c.Label()
 		}
 		cle := strings.ToLower(travail)
 		trouve, deja := parNom[cle]
@@ -245,7 +245,7 @@ func (c Classroom) legacyServed(assignmentID string, repos []groups.RepoInfo) ma
 	if gabarit, ok := c.gabarit(); ok {
 		for _, repo := range repos {
 			travail, student, reconnu := c.patternParts(gabarit, repo.Name)
-			if !reconnu || !strings.EqualFold(c.AssignmentID(nomOuGroupe(travail, c.Name)), assignmentID) {
+			if !reconnu || !strings.EqualFold(c.AssignmentID(nomOuGroupe(travail, c.Label())), assignmentID) {
 				continue
 			}
 			servis[strings.ToLower(student.Username)] = true
@@ -312,7 +312,7 @@ func (c Classroom) patternRepos(gabarit Pattern, assignmentID string,
 		} else {
 			continue
 		}
-		if !strings.EqualFold(nomOuGroupe(travail, c.Name), assignmentID) {
+		if !strings.EqualFold(nomOuGroupe(travail, c.Label()), assignmentID) {
 			continue
 		}
 		pousse := repo.PushedAt
@@ -330,8 +330,8 @@ func (c Classroom) patternRepos(gabarit Pattern, assignmentID string,
 	return trouves
 }
 
-// nomOuGroupe remplace un travail anonyme — gabarit sans {assignment} — par le
-// nom du groupe : il faut bien appeler le seul travail qu'il porte.
+// nomOuGroupe remplace un travail anonyme — gabarit sans {assignment} — par ce
+// qui désigne le groupe : il faut bien appeler le seul travail qu'il porte.
 func nomOuGroupe(travail, nomDuGroupe string) string {
 	if travail == "" {
 		return nomDuGroupe

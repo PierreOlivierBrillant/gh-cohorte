@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -79,15 +80,11 @@ func TestGroupeAdopteParGabaritLitSesTravaux(t *testing.T) {
 	h := nouveau(t, state)
 
 	var cree struct {
-		ID          string `json:"id"`
-		Pattern     string `json:"pattern"`
-		Assignments []struct {
-			Name  string `json:"name"`
-			Repos int    `json:"repos"`
-		} `json:"assignments"`
+		Scope   string `json:"scope"`
+		Pattern string `json:"pattern"`
 	}
 	h.json(http.MethodPost, "/api/classrooms", map[string]any{
-		"org": "acme", "pattern": "projet-{assignment}-{student}", "name": "Projets",
+		"pattern": "projet-{assignment}-{student}",
 		"students": []map[string]string{
 			{"username": "jlpicard", "full_name": ""},
 			{"username": "emilie-cote", "full_name": ""},
@@ -105,7 +102,7 @@ func TestGroupeAdopteParGabaritLitSesTravaux(t *testing.T) {
 			Students int    `json:"students"`
 		} `json:"assignments"`
 	}
-	h.json(http.MethodGet, "/api/classrooms/"+cree.ID, nil, &fiche)
+	h.json(http.MethodGet, "/api/classrooms/"+url.PathEscape(cree.Scope), nil, &fiche)
 	if len(fiche.Assignments) != 2 {
 		t.Fatalf("travaux : %+v", fiche.Assignments)
 	}
@@ -117,7 +114,7 @@ func TestGroupeAdopteParGabaritLitSesTravaux(t *testing.T) {
 
 	// Un groupe adopté ainsi reste à migrer : on ne lui distribue pas.
 	reponse, contenu := h.requete(http.MethodPost,
-		"/api/classrooms/"+cree.ID+"/assignments/preview",
+		"/api/classrooms/"+url.PathEscape(cree.Scope)+"/assignments/preview",
 		map[string]any{"name": "tp3", "settings": map[string]any{}})
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)

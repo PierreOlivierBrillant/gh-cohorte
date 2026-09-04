@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
@@ -17,54 +18,85 @@ import (
 )
 
 // classroomPayload est un groupe accompagné de ce que les dépôts en disent.
+// Tout ce qu'il porte se lit ailleurs : sa place et ses travaux dans les noms
+// de dépôts, le nom de sa session dans son nom court. Le fichier local n'ajoute
+// que la liste des étudiants et les réglages des prochains travaux.
 type classroomPayload struct {
 	classroom.Classroom
-	// SessionName est le nom long de la session : « Automne 2026 ». Il ne sert
-	// qu'à l'affichage, et vit dans le magasin plutôt que dans chaque groupe.
+	// Scope désigne le groupe : c'est par là que l'interface le rouvre.
+	Scope string `json:"scope"`
+	// Label et SessionName se déduisent de la place ; ils ne sont pas retenus.
+	Label       string                 `json:"label"`
 	SessionName string                 `json:"session_name,omitempty"`
 	Assignments []classroom.Assignment `json:"assignments"`
 	Source      string                 `json:"source,omitempty"`
+	// Known dit qu'une liste d'étudiants et des réglages sont retenus pour ce
+	// groupe ; sinon, il n'existe que par ses dépôts.
+	Known bool `json:"known"`
 }
 
-// fiche habille un groupe de son nom de session.
+// fiche habille un groupe de ce que sa place laisse déduire.
 func (s *Server) fiche(cours classroom.Classroom) classroomPayload {
+	_, connu := s.classrooms.Find(cours.Org, cours.Scope())
 	return classroomPayload{
 		Classroom:   cours,
-		SessionName: s.classrooms.SessionName(cours.Session),
+		Scope:       cours.Scope(),
+		Label:       cours.Label(),
+		SessionName: cours.SessionName(),
 		Assignments: []classroom.Assignment{},
+		Known:       connu,
 	}
 }
 
-// handleClassrooms liste les groupes déclarés, avec le nombre de leurs travaux
-// quand l'inventaire de leur organisation est joignable.
-func (s *Server) handleClassrooms(writer http.ResponseWriter, _ *http.Request) {
-	declares := s.classrooms.List()
-	liste := make([]classroomPayload, 0, len(declares))
-	for _, cours := range declares {
-		fiche := s.fiche(cours)
-		if repos, source, err := s.repos(cours.Org, false); err == nil {
-			fiche.Assignments = cours.Assignments(repos)
-			fiche.Source = source
-		}
-		liste = append(liste, fiche)
+// handleClassrooms liste les groupes de l'organisation : ceux que les dépôts
+// dessinent, et ceux qu'on a déclarés sans qu'un travail n'ait encore été
+// distribué.
+func (s *Server) handleClassrooms(writer http.ResponseWriter, request *http.Request) {
+	org := s.org()
+	repos, source, err := s.repos(org, request.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		fail(writer, err)
+		return
 	}
+
+	sessions := map[string]bool{}
+	visibles := s.visibles(org, repos)
+	liste := make([]classroomPayload, 0, len(visibles))
+	for _, cours := range visibles {
+		fiche := s.fiche(cours)
+		fiche.Assignments = cours.Assignments(repos)
+		fiche.Source = source
+		liste = append(liste, fiche)
+		if cours.Session != "" {
+			sessions[cours.Session] = true
+		}
+	}
+
+	courtes := make([]classroom.Session, 0, len(sessions))
+	for court := range sessions {
+		courtes = append(courtes, classroom.Session{
+			Short: court, Name: classroom.SessionName(court),
+		})
+	}
+	sort.Slice(courtes, func(i, j int) bool {
+		return strings.ToLower(courtes[i].Short) < strings.ToLower(courtes[j].Short)
+	})
+
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"classrooms": liste, "sessions": s.classrooms.Sessions(),
+		"classrooms": liste, "sessions": courtes, "org": org,
 	})
 }
 
-// classroomInput est ce que l'interface envoie pour déclarer ou modifier un groupe.
+// classroomInput est ce que l'interface envoie pour déclarer un groupe ou
+// changer ce qu'on retient de lui. Ni nom d'affichage, ni nom de session : ils
+// se déduisent de la place, et les inventer localement ne les rendrait vrais
+// que sur cette machine.
 type classroomInput struct {
-	Name    string `json:"name"`
-	Org     string `json:"org"`
 	Session string `json:"session"`
 	Course  string `json:"course"`
 	Group   string `json:"group"`
-	// SessionName est le nom long de la session, retenu pour toutes celles qui
-	// portent le même nom court.
-	SessionName string `json:"session_name"`
-	// Prefix n'est renseigné que pour adopter un groupe de l'ancienne
-	// nomenclature, en attendant sa migration.
+	// Prefix n'est renseigné que pour adopter un groupe d'une nomenclature
+	// dépassée, en attendant son renommage.
 	Prefix string `json:"prefix"`
 	// Pattern adopte des dépôts que rien n'organise, en disant comment lire
 	// leurs noms : « projet-{assignment}-{student} ».
@@ -74,30 +106,29 @@ type classroomInput struct {
 	Defaults   classroom.Defaults `json:"defaults"`
 }
 
-// handleCreateClassroom déclare un groupe. Rien n'est écrit sur GitHub : un
-// groupe n'est qu'un préfixe, une liste d'étudiants et des réglages.
+// classroom compose le groupe décrit par une requête.
+func (s *Server) fromInput(body classroomInput) classroom.Classroom {
+	return classroom.Classroom{
+		Org: s.org(), Session: body.Session, Course: body.Course, Group: body.Group,
+		LegacyPrefix: body.Prefix, LegacyPattern: body.Pattern,
+		Students: body.Students, RosterPath: body.RosterPath,
+		Defaults: s.defaultsOr(body.Defaults),
+	}
+}
+
+// handleCreateClassroom retient une liste et des réglages pour une place. Rien
+// n'est écrit sur GitHub : le groupe existera vraiment quand ses dépôts
+// existeront.
 func (s *Server) handleCreateClassroom(writer http.ResponseWriter, request *http.Request) {
 	var body classroomInput
 	if err := decode(request, &body); err != nil {
 		fail(writer, err)
 		return
 	}
-	cree, err := s.classrooms.Add(classroom.Classroom{
-		Name: body.Name, Org: body.Org, Session: body.Session,
-		Course: body.Course, Group: body.Group,
-		LegacyPrefix: body.Prefix, LegacyPattern: body.Pattern,
-		Students: body.Students, RosterPath: body.RosterPath,
-		Defaults: s.defaultsOr(body.Defaults),
-	})
+	cree, err := s.classrooms.Save(s.fromInput(body))
 	if err != nil {
 		fail(writer, err)
 		return
-	}
-	if strings.TrimSpace(body.SessionName) != "" && cree.Session != "" {
-		if err := s.classrooms.SetSessionName(cree.Session, body.SessionName); err != nil {
-			fail(writer, err)
-			return
-		}
 	}
 	writeJSON(writer, http.StatusCreated, s.fiche(cree))
 }
@@ -112,9 +143,9 @@ func (s *Server) defaultsOr(defauts classroom.Defaults) classroom.Defaults {
 
 // handleClassroom ouvre un groupe : ses réglages, ses étudiants, ses travaux.
 func (s *Server) handleClassroom(writer http.ResponseWriter, request *http.Request) {
-	cours, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		fail(writer, valid.Errorf("Groupe inconnu."))
+	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
 		return
 	}
 	repos, source, err := s.repos(cours.Org, request.URL.Query().Get("refresh") == "1")
@@ -128,25 +159,19 @@ func (s *Server) handleClassroom(writer http.ResponseWriter, request *http.Reque
 	writeJSON(writer, http.StatusOK, fiche)
 }
 
-// handleUpdateClassroom modifie le nom, le préfixe ou les réglages d'un groupe.
+// handleUpdateClassroom change ce qu'on retient d'un groupe : sa liste et ses
+// réglages. Sa place, elle, ne se change pas ici — il faudrait renommer ses
+// dépôts, ce que fait « migration ».
 func (s *Server) handleUpdateClassroom(writer http.ResponseWriter, request *http.Request) {
-	cours, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		fail(writer, valid.Errorf("Groupe inconnu."))
+	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
 		return
 	}
 	var body classroomInput
 	if err := decode(request, &body); err != nil {
 		fail(writer, err)
 		return
-	}
-	cours.Name, cours.Org = body.Name, body.Org
-	cours.Session, cours.Course, cours.Group = body.Session, body.Course, body.Group
-	cours.LegacyPrefix, cours.LegacyPattern = body.Prefix, body.Pattern
-	if strings.TrimSpace(body.Session) != "" {
-		// Le groupe rejoint la nomenclature courante : ce qui décrivait son
-		// ancienne façon de lire les dépôts n'a plus cours.
-		cours.LegacyPrefix, cours.LegacyPattern = "", ""
 	}
 	cours.Defaults = s.defaultsOr(body.Defaults)
 	if body.Students != nil {
@@ -156,28 +181,24 @@ func (s *Server) handleUpdateClassroom(writer http.ResponseWriter, request *http
 		cours.RosterPath = body.RosterPath
 	}
 
-	modifie, err := s.classrooms.Update(cours)
+	modifie, err := s.classrooms.Save(cours)
 	if err != nil {
 		fail(writer, err)
 		return
 	}
-	if modifie.Session != "" {
-		if err := s.classrooms.SetSessionName(modifie.Session, body.SessionName); err != nil {
-			fail(writer, err)
-			return
-		}
-	}
 	writeJSON(writer, http.StatusOK, s.fiche(modifie))
 }
 
-// handleDeleteClassroom retire un groupe de la liste, sans toucher aux dépôts.
-func (s *Server) handleDeleteClassroom(writer http.ResponseWriter, request *http.Request) {
-	if err := s.classrooms.Delete(request.PathValue("id")); err != nil {
+// handleForgetClassroom oublie ce qu'on retenait d'un groupe. Aucun dépôt n'est
+// touché : s'il en reste, le groupe continue d'exister et de s'afficher — sans
+// sa liste ni ses réglages.
+func (s *Server) handleForgetClassroom(writer http.ResponseWriter, request *http.Request) {
+	if err := s.classrooms.Forget(s.org(), request.PathValue("scope")); err != nil {
 		fail(writer, err)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]string{
-		"message": "Groupe retiré de la liste. Aucun dépôt n'a été supprimé sur GitHub.",
+		"message": "Liste et réglages oubliés. Aucun dépôt n'a été supprimé sur GitHub.",
 	})
 }
 
@@ -202,9 +223,9 @@ type studentAssignment struct {
 // c'est l'équivalent du « a accepté le devoir » de GitHub Classroom, déduit des
 // dépôts existants plutôt que d'une invitation.
 func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *http.Request) {
-	cours, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		fail(writer, valid.Errorf("Groupe inconnu."))
+	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
 		return
 	}
 	repos, _, err := s.repos(cours.Org, request.URL.Query().Get("refresh") == "1")
@@ -250,9 +271,9 @@ func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *ht
 // handleSetStudents remplace la liste des étudiants du groupe, depuis un fichier
 // de la machine ou depuis une liste déjà lue.
 func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Request) {
-	cours, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		fail(writer, valid.Errorf("Groupe inconnu."))
+	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
 		return
 	}
 	var body struct {
@@ -289,7 +310,7 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 		cours.Students = people
 	}
 
-	modifie, err := s.classrooms.Update(cours)
+	modifie, err := s.classrooms.Save(cours)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -301,9 +322,9 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 
 // handleResolveStudentNames retrouve les noms complets manquants et les retient.
 func (s *Server) handleResolveStudentNames(writer http.ResponseWriter, request *http.Request) {
-	cours, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		fail(writer, valid.Errorf("Groupe inconnu."))
+	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
 		return
 	}
 	pairs := make([]identity.Pair, 0, len(cours.Students))
@@ -319,7 +340,7 @@ func (s *Server) handleResolveStudentNames(writer http.ResponseWriter, request *
 
 	resolver := s.resolver(cours.Org)
 	total := len(pairs)
-	job := s.jobs.Start("noms", "Noms complets de « "+cours.Name+" »", func(job *Job) (any, error) {
+	job := s.jobs.Start("noms", "Noms complets de « "+cours.Label()+" »", func(job *Job) (any, error) {
 		noms := resolver.Resolve(pairs, true, func(done, _ int, login string) {
 			job.Progress(done, total, "@"+login)
 		})
@@ -330,7 +351,7 @@ func (s *Server) handleResolveStudentNames(writer http.ResponseWriter, request *
 				complets++
 			}
 		}
-		modifie, err := s.classrooms.Update(cours)
+		modifie, err := s.classrooms.Save(cours)
 		if err != nil {
 			return nil, err
 		}
@@ -356,9 +377,9 @@ type assignmentRepo struct {
 // assignmentOf résout le groupe et le travail désignés par l'adresse.
 func (s *Server) assignmentOf(request *http.Request) (
 	classroom.Classroom, string, []groups.RepoInfo, error) {
-	cours, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		return cours, "", nil, valid.Errorf("Groupe inconnu.")
+	cours, err := s.place(request)
+	if err != nil {
+		return cours, "", nil, err
 	}
 	nom := strings.TrimSpace(request.PathValue("name"))
 	if nom == "" {
@@ -447,14 +468,15 @@ type assignmentInput struct {
 func (s *Server) prepare(request *http.Request, body assignmentInput) (
 	classroom.Classroom, config.Settings, []roster.Person, []roster.Person, error) {
 	var vide config.Settings
-	cours, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		return cours, vide, nil, nil, valid.Errorf("Groupe inconnu.")
+	cours, err := s.place(request)
+	if err != nil {
+		return cours, vide, nil, nil, err
 	}
 	if cours.Legacy() {
 		return cours, vide, nil, nil, valid.Errorf(
-			"« %s » suit l'ancienne nomenclature. Migrez-le vers « cours%sgroupe » "+
-				"avant de lui distribuer un travail.", cours.Name, naming.Separator)
+			"« %s » suit une nomenclature dépassée. Renommez ses dépôts en "+
+				"« session%[2]scours%[2]sgroupe » avant de lui distribuer un travail.",
+			cours.Label(), naming.Separator)
 	}
 	// Le nom du dépôt contient désormais le nom de l'étudiant : sans lui, il n'y
 	// a pas de dépôt à nommer.
@@ -568,7 +590,7 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 	// Le groupe retient les réglages du dernier travail distribué : le suivant
 	// n'aura pas à les retaper.
 	cours.Defaults.StarterDir = settings.StarterDir
-	if _, err := s.classrooms.Update(cours); err != nil {
+	if _, err := s.classrooms.Save(cours); err != nil {
 		fail(writer, err)
 		return
 	}
@@ -632,14 +654,12 @@ func (s *Server) handleCandidates(writer http.ResponseWriter, request *http.Requ
 
 	// Les préfixes déjà couverts par un groupe ne sont plus à proposer.
 	pris := map[string]bool{}
-	for _, cours := range s.classrooms.List() {
-		if strings.EqualFold(cours.Org, org) {
-			pris[strings.ToLower(cours.Scope())] = true
-		}
+	for _, cours := range s.visibles(org, repos) {
+		pris[classroom.NormalizeScope(cours.Scope())] = true
 	}
 	proposes := make([]classroom.Candidate, 0)
 	for _, candidat := range classroom.Candidates(repos) {
-		if pris[strings.ToLower(candidat.Prefix)] {
+		if pris[classroom.NormalizeScope(candidat.Prefix)] {
 			continue
 		}
 		proposes = append(proposes, candidat)

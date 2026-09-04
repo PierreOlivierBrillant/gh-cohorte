@@ -264,7 +264,7 @@ for (const bouton of $('onglets').querySelectorAll('button')) {
 // qu'il ne connaît pas, ce qui permet de vraies routes plutôt qu'un fragment.
 
 function cheminDeLaVue(nom) {
-  const groupe = etat.groupe ? encode(etat.groupe.id) : '';
+  const groupe = etat.groupe ? encode(etat.groupe.scope) : '';
   switch (nom) {
     case 'organisation': return '/organisation';
     case 'nouveau-groupe': return '/nouveau-groupe';
@@ -337,7 +337,7 @@ async function allerA(route) {
   // groupe par son adresse les demande quand même, pour que le fil d'Ariane
   // sache dire « Automne 2026 » plutôt que « a26 ».
   if (etat.groupes.length === 0) await chargerGroupes();
-  if (!etat.groupe || etat.groupe.id !== route.groupe) {
+  if (!etat.groupe || etat.groupe.scope !== route.groupe) {
     if (!await ouvrirGroupe(route.groupe, false, true)) {
       // L'adresse désigne un groupe retiré depuis : on remonte à l'accueil.
       etat.parcours = { session: '', cours: '' };
@@ -490,15 +490,15 @@ function ficheDeLEntete(nom) {
     fil.push(etapeSession(groupe.session), etapeCours(groupe.session, groupe.course));
   }
   fil.push(nom === 'travaux'
-    ? { texte: groupe.name || '' }
-    : { texte: groupe.name || '', action: () => afficherVue('travaux') });
+    ? { texte: groupe.label || '' }
+    : { texte: groupe.label || '', action: () => afficherVue('travaux') });
   if (nom === 'travail' && etat.travail) fil.push({ texte: etat.travail.name });
   if (nom === 'assistant') fil.push({ texte: etat.assistantTitre || 'Nouveau travail' });
   if (nom === 'etudiants') fil.push({ texte: 'Étudiants' });
   if (nom === 'groupe-reglages') fil.push({ texte: 'Réglages du groupe' });
 
   return {
-    fil, titre: groupe.name || '',
+    fil, titre: groupe.label || '',
     sousTitre: sousTitreDuGroupe(groupe),
     nomenclature: nomenclatureDuGroupe(groupe),
     avis: avisDuGroupe(groupe),
@@ -629,9 +629,9 @@ function dessinerSessions(conteneur) {
   }
 
   for (const groupe of herites()) {
-    conteneur.append(ligneParcours(groupe.name, 'nomenclature dépassée — à renommer',
+    conteneur.append(ligneParcours(groupe.label, 'nomenclature dépassée — à renommer',
       [el('span', { classe: 'jeton non', texte: nomenclatureDuGroupe(groupe) })],
-      () => ouvrirGroupe(groupe.id)));
+      () => ouvrirGroupe(groupe.scope)));
   }
 }
 
@@ -662,10 +662,13 @@ function dessinerGroupesDuCours(conteneur, session, cours) {
     groupe.course.toLowerCase() === cours.toLowerCase());
   for (const groupe of retenus) {
     const sesTravaux = groupe.assignments || [];
-    conteneur.append(ligneParcours(groupe.name,
-      `${(groupe.students || []).length} étudiant(s) · ${travaux(sesTravaux.length)}`,
+    const compte = groupe.known
+      ? `${(groupe.students || []).length} étudiant(s)`
+      : 'aucune liste retenue';
+    conteneur.append(ligneParcours(groupe.label,
+      `${compte} · ${travaux(sesTravaux.length)}`,
       [el('span', { classe: 'jeton', texte: groupe.group })],
-      () => ouvrirGroupe(groupe.id)));
+      () => ouvrirGroupe(groupe.scope)));
   }
 }
 
@@ -827,13 +830,7 @@ async function adopter(candidat, org) {
     message('Ces dépôts ne partagent aucun préfixe : décrivez leurs noms.', 'alerte', 9000);
     return;
   }
-  const nom = el('input', {
-    type: 'text', classe: 'champ',
-    value: candidat.prefix || org,
-  });
   const confirme = await demander(`Adopter « ${candidat.prefix || org} »`, el('div', {},
-    el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Nom affiché du groupe' }), nom),
     el('p', { classe: 'note',
       texte: candidat.legacy
         ? `${travaux(candidat.assignments.length)} et ${candidat.students.length} ` +
@@ -847,13 +844,11 @@ async function adopter(candidat, org) {
   // Un candidat hérité garde son préfixe en attendant sa migration ; un
   // candidat de la nomenclature courante s'adopte par sa place.
   const cree = await tenter(() => api('POST', '/api/classrooms', {
-    org,
     session: candidat.legacy ? '' : candidat.session,
     course: candidat.legacy ? '' : candidat.course,
     group: candidat.legacy ? '' : candidat.group,
     prefix: candidat.legacy ? candidat.prefix : '',
-    name: nom.value.trim() || candidat.prefix || org,
-    session_name: '',
+    pattern: '',
     students: candidat.legacy
       ? candidat.students.map((compte) => ({ username: compte, full_name: '' }))
       : [],
@@ -861,8 +856,8 @@ async function adopter(candidat, org) {
     defaults: {},
   }), 'Groupe');
   if (!cree) return;
-  message(`Groupe « ${cree.name} » adopté.`);
-  await ouvrirGroupe(cree.id);
+  message(`Groupe « ${cree.label} » adopté.`);
+  await ouvrirGroupe(cree.scope);
 }
 
 // --------------------------------------------------- déclaration d'un groupe
@@ -876,11 +871,8 @@ function ouvrirNouveauGroupe() {
 function preparerNouveauGroupe() {
   etat.nouveau = { etudiants: [], rejets: [] };
   $('nouveau-session').value = etat.parcours.session || '';
-  $('nouveau-session-nom').value = etat.parcours.session
-    ? nomDeSession(etat.parcours.session) : '';
   $('nouveau-cours').value = etat.parcours.cours || '';
   $('nouveau-section').value = '';
-  $('nouveau-nom').value = '';
   $('nouveau-chemin').value = etat.reglages.roster_path || '';
   $('nouveau-texte').value = '';
   $('nouveau-resume').textContent = '';
@@ -899,15 +891,6 @@ function preparerNouveauGroupe() {
 for (const id of ['nouveau-session', 'nouveau-cours', 'nouveau-section']) {
   $(id).addEventListener('input', majApercuPrefixe);
 }
-
-// Choisir une session déjà connue reprend son nom long.
-$('nouveau-session').addEventListener('change', () => {
-  const court = $('nouveau-session').value.trim();
-  if (!court || $('nouveau-session-nom').value.trim()) return;
-  const connue = etat.sessions.find((session) =>
-    session.short.toLowerCase() === court.toLowerCase());
-  if (connue) $('nouveau-session-nom').value = connue.name;
-});
 
 function majApercuPrefixe() {
   const session = $('nouveau-session').value.trim() || 'session';
@@ -973,20 +956,17 @@ function dessinerRejets(conteneur, rejets) {
 
 $('nouveau-creer').addEventListener('click', async () => {
   const cree = await tenter(() => api('POST', '/api/classrooms', {
-    org: etat.organisation,
     session: $('nouveau-session').value.trim(),
     course: $('nouveau-cours').value.trim(),
     group: $('nouveau-section').value.trim(),
-    session_name: $('nouveau-session-nom').value.trim(),
-    prefix: '',
-    name: $('nouveau-nom').value.trim(),
+    prefix: '', pattern: '',
     students: etat.nouveau.etudiants,
     roster_path: $('nouveau-chemin').value.trim(),
     defaults: {},
   }), 'Groupe');
   if (!cree) return;
-  message(`Groupe « ${cree.name} » créé.`);
-  await ouvrirGroupe(cree.id);
+  message(`Groupe « ${cree.label} » déclaré.`);
+  await ouvrirGroupe(cree.scope);
 });
 
 // ---------------------------------------------------------------- travaux
@@ -1027,12 +1007,12 @@ function dessinerTravaux() {
   }
 }
 
-$('travaux-recharger').addEventListener('click', () => ouvrirGroupe(etat.groupe.id, true));
+$('travaux-recharger').addEventListener('click', () => ouvrirGroupe(etat.groupe.scope, true));
 
 // ------------------------------------------------------- détail d'un travail
 
 async function ouvrirTravail(travail, force, sansHistorique) {
-  const chemin = `/api/classrooms/${encode(etat.groupe.id)}/assignments/${encode(travail.name)}` +
+  const chemin = `/api/classrooms/${encode(etat.groupe.scope)}/assignments/${encode(travail.name)}` +
     (force ? '?refresh=1' : '');
   const detail = await tenter(() => api('GET', chemin), 'Travail');
   if (!detail) return;
@@ -1116,7 +1096,7 @@ function selectionnes() {
 
 $('detail-acces').addEventListener('click', async () => {
   const fiche = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.id)}/assignments/${encode(etat.travail.name)}/access`),
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/${encode(etat.travail.name)}/access`),
     'Accès');
   if (!fiche) return;
   const resultats = await suivre(fiche);
@@ -1221,7 +1201,7 @@ async function supprimerDepot(repo) {
   if (!fait) return;
   message(fait.message);
   const travail = etat.travail;
-  await ouvrirGroupe(etat.groupe.id, true);
+  await ouvrirGroupe(etat.groupe.scope, true);
   const encore = (etat.groupe.assignments || []).find((item) => item.id === travail.id);
   if (encore) await ouvrirTravail(encore, true);
 }
@@ -1542,7 +1522,7 @@ async function rafraichirApercu() {
   if (!etat.groupe || !$('travail-nom').value.trim()) return;
   try {
     const apercu = await api('POST',
-      `/api/classrooms/${encode(etat.groupe.id)}/assignments/preview`, corpsDuTravail());
+      `/api/classrooms/${encode(etat.groupe.scope)}/assignments/preview`, corpsDuTravail());
     for (const item of apercu.items) {
       corps.append(el('tr', {},
         el('td', {}, el('code', { texte: item.name })),
@@ -1577,7 +1557,7 @@ async function distribuer(simulation) {
 
   if (!simulation) {
     const confirme = await demander('Confirmer la distribution', el('div', {},
-      el('p', { texte: `${corps.usernames.length} étudiant(s) du groupe « ${etat.groupe.name} », ` +
+      el('p', { texte: `${corps.usernames.length} étudiant(s) du groupe « ${etat.groupe.label} », ` +
         `travail « ${corps.name} ».` }),
       el('p', { classe: 'note', texte:
         `Visibilité : ${corps.settings.visibility === 'public' ? 'public' : 'privé'}. ` +
@@ -1589,7 +1569,7 @@ async function distribuer(simulation) {
   }
 
   const fiche = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.id)}/assignments`,
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments`,
     Object.assign({}, corps, {
       dry_run: simulation,
       force_starter: $('creer-force').checked,
@@ -1609,7 +1589,7 @@ async function distribuer(simulation) {
 
   // Une fois distribué, le travail s'ouvre — comme Classroom mène à la page du
   // devoir une fois créé.
-  await ouvrirGroupe(etat.groupe.id, true);
+  await ouvrirGroupe(etat.groupe.scope, true);
   const travail = (etat.groupe.assignments || []).find((item) => item.id === bilan.assignment);
   if (travail) await ouvrirTravail(travail, true);
 }
@@ -1618,7 +1598,7 @@ async function distribuer(simulation) {
 
 async function chargerEtudiants(force) {
   const donnees = await tenter(() => api('GET',
-    `/api/classrooms/${encode(etat.groupe.id)}/students${force ? '?refresh=1' : ''}`), 'Étudiants');
+    `/api/classrooms/${encode(etat.groupe.scope)}/students${force ? '?refresh=1' : ''}`), 'Étudiants');
   if (!donnees) return;
   etat.etudiants = donnees.students || [];
 
@@ -1660,12 +1640,12 @@ $('etudiants-recharger').addEventListener('click', () => chargerEtudiants(true))
 
 $('etudiants-noms').addEventListener('click', async () => {
   const fiche = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.id)}/students/names`), 'Noms');
+    `/api/classrooms/${encode(etat.groupe.scope)}/students/names`), 'Noms');
   if (!fiche) return;
   const bilan = await suivre(fiche);
   if (!bilan) return;
   message(`${bilan.resolved} nom(s) complet(s) retrouvé(s).`);
-  await ouvrirGroupe(etat.groupe.id);
+  await ouvrirGroupe(etat.groupe.scope);
   afficherVue('etudiants');
 });
 
@@ -1702,12 +1682,12 @@ $('etudiants-importer').addEventListener('click', async () => {
   }
 
   const bilan = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.id)}/students`, corps), 'Étudiants');
+    `/api/classrooms/${encode(etat.groupe.scope)}/students`, corps), 'Étudiants');
   if (!bilan) return;
   if (bilan.issues && bilan.issues.length) {
     message(`${bilan.issues.length} ligne(s) rejetée(s).`, 'alerte', 10000);
   }
-  await ouvrirGroupe(etat.groupe.id);
+  await ouvrirGroupe(etat.groupe.scope);
   afficherVue('etudiants');
 });
 
@@ -1722,11 +1702,6 @@ const champsGroupe = {
 
 function ecrireReglagesGroupe() {
   const groupe = etat.groupe;
-  $('gr-nom').value = groupe.name || '';
-  $('gr-session-nom').value = groupe.session_name || '';
-  // Le nom long d'une session n'a de sens que pour un groupe qui en a une.
-  $('gr-session-nom-bloc').hidden = !groupe.session;
-
   preparerMigration(groupe);
   const defauts = groupe.defaults || {};
   for (const [cle, id] of Object.entries(champsGroupe)) {
@@ -1735,15 +1710,13 @@ function ecrireReglagesGroupe() {
   $('gr-collaborateur').checked = defauts.add_collaborator !== false;
 }
 
-// enregistrerGroupe renvoie le groupe entier : le serveur remplace la fiche,
-// et taire un champ l'effacerait.
+// enregistrerGroupe renvoie tout ce qu'on retient du groupe : le serveur
+// remplace la fiche, et taire un champ l'effacerait. Sa place n'y figure pas —
+// elle vient de l'adresse, et la changer renommerait des dépôts.
 async function enregistrerGroupe(modifications) {
   const groupe = etat.groupe;
-  return tenter(() => api('PUT', `/api/classrooms/${encode(groupe.id)}`, Object.assign({
-    name: groupe.name || '',
-    org: groupe.org,
+  return tenter(() => api('PUT', `/api/classrooms/${encode(groupe.scope)}`, Object.assign({
     session: groupe.session || '',
-    session_name: groupe.session_name || '',
     course: groupe.course || '',
     group: groupe.group || '',
     prefix: groupe.prefix || '',
@@ -1753,17 +1726,6 @@ async function enregistrerGroupe(modifications) {
     defaults: groupe.defaults || {},
   }, modifications)), 'Groupe');
 }
-
-$('gr-nom-enregistrer').addEventListener('click', async () => {
-  const modifie = await enregistrerGroupe({
-    name: $('gr-nom').value.trim(),
-    session_name: $('gr-session-nom').value.trim(),
-  });
-  if (!modifie) return;
-  message('Nom enregistré.');
-  await ouvrirGroupe(modifie.id, true, true);
-  afficherVue('groupe-reglages');
-});
 
 $('gr-enregistrer').addEventListener('click', async () => {
   const defauts = Object.assign({}, etat.groupe.defaults);
@@ -1775,7 +1737,7 @@ $('gr-enregistrer').addEventListener('click', async () => {
   const modifie = await enregistrerGroupe({ defaults: defauts });
   if (!modifie) return;
   message('Réglages du groupe enregistrés.');
-  await ouvrirGroupe(modifie.id, true, true);
+  await ouvrirGroupe(modifie.scope, true, true);
   afficherVue('groupe-reglages');
 });
 
@@ -1839,7 +1801,7 @@ function corpsMigration() {
 
 $('mig-apercu-bouton').addEventListener('click', async () => {
   const apercu = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.id)}/migration/preview`, corpsMigration()), 'Migration');
+    `/api/classrooms/${encode(etat.groupe.scope)}/migration/preview`, corpsMigration()), 'Migration');
   vider($('mig-avis'));
   if (!apercu) return;
 
@@ -1875,7 +1837,7 @@ for (const id of ['mig-session', 'mig-cours', 'mig-section', 'mig-ignorer']) {
 $('mig-lancer').addEventListener('click', async () => {
   const corps = corpsMigration();
   const confirme = await demander('Renommer les dépôts', el('div', {},
-    el('p', { texte: `Les dépôts de « ${etat.groupe.name} » seront renommés en ` +
+    el('p', { texte: `Les dépôts de « ${etat.groupe.label} » seront renommés en ` +
       `« ${corps.session}.${corps.course}.${corps.group}.travail.étudiant ».` }),
     el('p', { classe: 'note',
       texte: 'GitHub garde une redirection depuis chaque ancien nom : les clones et les liens ' +
@@ -1883,7 +1845,7 @@ $('mig-lancer').addEventListener('click', async () => {
   if (!confirme) return;
 
   const fiche = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.id)}/migration/apply`, corps), 'Migration');
+    `/api/classrooms/${encode(etat.groupe.scope)}/migration/apply`, corps), 'Migration');
   if (!fiche) return;
   const bilan = await suivre(fiche);
   if (!bilan) return;
@@ -1894,20 +1856,22 @@ $('mig-lancer').addEventListener('click', async () => {
     journaliser('Le groupe reste sur l\'ancienne nomenclature : des dépôts sont restés en ' +
       'arrière.', 'warn');
   }
-  await ouvrirGroupe(etat.groupe.id, true, true);
+  await ouvrirGroupe(etat.groupe.scope, true, true);
   afficherVue('groupe-reglages');
 });
 
 $('gr-supprimer').addEventListener('click', async () => {
-  const confirme = await demander(`Retirer « ${etat.groupe.name} » ?`, el('div', {},
-    el('p', { texte: 'Le groupe disparaît de cette liste.' }),
+  const confirme = await demander(`Oublier « ${etat.groupe.label} » ?`, el('div', {},
+    el('p', { texte: 'La liste des étudiants et les réglages retenus pour ce groupe sont ' +
+      'oubliés.' }),
     el('p', { classe: 'note',
-      texte: "Aucun dépôt n'est supprimé sur GitHub : le groupe n'est qu'une vue locale." })),
-    'Retirer le groupe');
+      texte: "Aucun dépôt n'est supprimé sur GitHub. S'il en reste, le groupe continue de " +
+        "s'afficher — sans sa liste." })),
+    'Oublier');
   if (!confirme) return;
 
   const fait = await tenter(() =>
-    api('DELETE', `/api/classrooms/${encode(etat.groupe.id)}`), 'Suppression');
+    api('DELETE', `/api/classrooms/${encode(etat.groupe.scope)}`), 'Suppression');
   if (!fait) return;
   message(fait.message, 'succes', 10000);
   etat.groupe = null;
@@ -2017,7 +1981,6 @@ function ouvrirAdoption(gabarit) {
 function preparerAdoption(gabarit) {
   etat.adoption = { rows: [], students: [], pattern: '' };
   $('adoption-gabarit').value = gabarit || '{assignment}-{student}';
-  $('adoption-nom').value = '';
   $('adoption-suite').hidden = true;
   $('adoption-table').hidden = true;
   $('adoption-resume').textContent = '';
@@ -2077,7 +2040,6 @@ async function essayerGabarit() {
     $('adoption-avis').append(el('div', { classe: 'avis',
       texte: `Les 200 premiers dépôts sont montrés ; les ${essai.matched} seront adoptés.` }));
   }
-  $('adoption-nom').value = $('adoption-nom').value.trim() || essai.prefix || 'Dépôts adoptés';
   $('adoption-suite').hidden = false;
 }
 
@@ -2089,11 +2051,8 @@ $('adoption-creer').addEventListener('click', async () => {
   }
   const comptes = document.querySelector('input[name="adoption-comptes"]:checked').value === 'comptes';
   const cree = await tenter(() => api('POST', '/api/classrooms', {
-    org: etat.organisation,
     session: '', course: '', group: '', prefix: '',
     pattern: adoption.pattern,
-    name: $('adoption-nom').value.trim() || 'Dépôts adoptés',
-    session_name: '',
     students: comptes
       ? adoption.students.map((compte) => ({ username: compte, full_name: '' }))
       : [],
@@ -2101,8 +2060,8 @@ $('adoption-creer').addEventListener('click', async () => {
     defaults: {},
   }), 'Groupe');
   if (!cree) return;
-  message(`Groupe « ${cree.name} » adopté : ${adoption.rows.length} dépôt(s).`);
-  await ouvrirGroupe(cree.id);
+  message(`Groupe « ${cree.label} » adopté : ${adoption.rows.length} dépôt(s).`);
+  await ouvrirGroupe(cree.scope);
 });
 
 // -------------------------------------------- déplacer un étudiant de groupe
@@ -2114,7 +2073,7 @@ async function deplacerEtudiant(personne) {
   // Arriver droit sur un groupe par son adresse ne charge pas les autres.
   if (etat.groupes.length === 0) await chargerGroupes();
   const ailleurs = etat.groupes.filter((groupe) =>
-    groupe.id !== etat.groupe.id &&
+    groupe.scope !== etat.groupe.scope &&
     groupe.org.toLowerCase() === etat.groupe.org.toLowerCase());
   if (ailleurs.length === 0) {
     message('Aucun autre groupe dans cette organisation.', 'alerte');
@@ -2126,7 +2085,7 @@ async function deplacerEtudiant(personne) {
     const place = groupe.session
       ? `${groupe.session} · ${sigle(groupe.course)} · ${groupe.group}`
       : 'nomenclature dépassée';
-    choix.append(el('option', { value: groupe.id, texte: `${groupe.name} — ${place}` }));
+    choix.append(el('option', { value: groupe.scope, texte: `${groupe.label} · ${place}` }));
   }
   const avecDepots = el('input', { type: 'checkbox', checked: true });
 
@@ -2145,7 +2104,7 @@ async function deplacerEtudiant(personne) {
   if (!confirme) return;
 
   const fiche = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.id)}/students/move`, {
+    `/api/classrooms/${encode(etat.groupe.scope)}/students/move`, {
       username: personne.username,
       target: choix.value,
       repos: avecDepots.checked,
@@ -2159,7 +2118,7 @@ async function deplacerEtudiant(personne) {
   message(`@${bilan.moved} déplacé vers « ${bilan.target} »` +
     (bilan.renamed ? ` · ${bilan.renamed} dépôt(s) renommé(s)` : ''));
   await chargerGroupes(true);
-  await ouvrirGroupe(etat.groupe.id, true, true);
+  await ouvrirGroupe(etat.groupe.scope, true, true);
   afficherVue('etudiants');
 }
 

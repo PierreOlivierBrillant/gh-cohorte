@@ -55,10 +55,14 @@ func nouveau(t *testing.T, state *fakegh.State) *harnais {
 	}
 
 	dossier := t.TempDir()
+	// L'interface travaille dans une organisation à la fois : c'est le choix
+	// fait à l'arrivée, et l'API s'y tient.
+	reglages := config.Default()
+	reglages.Org = "acme"
 	serveur, err := web.New(web.Deps{
 		Client:     client,
 		Cache:      cache.NewIn(filepath.Join(dossier, "cache"), true),
-		Settings:   config.Default(),
+		Settings:   reglages,
 		ConfigFile: filepath.Join(dossier, "config.json"),
 		Viewer:     state.Viewer,
 		Host:       "github.com",
@@ -148,7 +152,7 @@ func (h *harnais) json(methode, chemin string, corps any, cible any) {
 	}
 }
 
-// groupe déclare un groupe de la nomenclature courante.
+// groupe déclare un groupe de la nomenclature courante et rend sa place.
 func (h *harnais) groupe(session, cours, section string, couples ...string) string {
 	h.t.Helper()
 	etudiants := make([]map[string]string, 0, len(couples)/2)
@@ -158,16 +162,15 @@ func (h *harnais) groupe(session, cours, section string, couples ...string) stri
 		})
 	}
 	var cree struct {
-		ID string `json:"id"`
+		Scope string `json:"scope"`
 	}
 	h.json(http.MethodPost, "/api/classrooms", map[string]any{
-		"org": "acme", "session": session, "course": cours, "group": section,
-		"name": cours + " " + section, "students": etudiants,
+		"session": session, "course": cours, "group": section, "students": etudiants,
 	}, &cree)
-	if cree.ID == "" {
-		h.t.Fatal("groupe sans identifiant")
+	if cree.Scope == "" {
+		h.t.Fatal("groupe sans place")
 	}
-	return cree.ID
+	return cree.Scope
 }
 
 // heritage déclare un groupe resté à l'ancienne nomenclature.
@@ -180,15 +183,15 @@ func (h *harnais) heritage(prefixe string, comptes ...string) string {
 		etudiants = append(etudiants, map[string]string{"username": compte, "full_name": ""})
 	}
 	var cree struct {
-		ID string `json:"id"`
+		Scope string `json:"scope"`
 	}
 	h.json(http.MethodPost, "/api/classrooms", map[string]any{
-		"org": "acme", "prefix": prefixe, "name": prefixe, "students": etudiants,
+		"prefix": prefixe, "students": etudiants,
 	}, &cree)
-	if cree.ID == "" {
-		h.t.Fatal("groupe sans identifiant")
+	if cree.Scope == "" {
+		h.t.Fatal("groupe sans place")
 	}
-	return cree.ID
+	return cree.Scope
 }
 
 // travail lance une opération en arrière-plan et attend son bilan.
@@ -335,30 +338,89 @@ func TestListeCollectiveLue(t *testing.T) {
 
 func TestGroupeDeclareEtRelu(t *testing.T) {
 	h := nouveau(t, nil)
-	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+	place := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+	if place != "a26.5n6.01" {
+		t.Fatalf("place %q", place)
+	}
 
 	var fiche struct {
-		ID       string `json:"id"`
-		Session  string `json:"session"`
-		Course   string `json:"course"`
-		Group    string `json:"group"`
-		Students []struct {
+		Scope       string `json:"scope"`
+		Label       string `json:"label"`
+		SessionName string `json:"session_name"`
+		Session     string `json:"session"`
+		Course      string `json:"course"`
+		Group       string `json:"group"`
+		Known       bool   `json:"known"`
+		Students    []struct {
 			Username string `json:"username"`
 		} `json:"students"`
 	}
-	h.json(http.MethodGet, "/api/classrooms/"+id, nil, &fiche)
-	if fiche.Session != "a26" || fiche.Course != "5n6" || fiche.Group != "01" || len(fiche.Students) != 2 {
+	h.json(http.MethodGet, "/api/classrooms/"+place, nil, &fiche)
+	if fiche.Session != "a26" || fiche.Course != "5n6" || fiche.Group != "01" ||
+		len(fiche.Students) != 2 || !fiche.Known {
 		t.Fatalf("groupe relu : %+v", fiche)
+	}
+	// Le libellé et le nom de session se déduisent de la place : rien n'est
+	// retenu localement pour les afficher.
+	if fiche.Label != "Groupe 01" || fiche.SessionName != "Automne 2026" {
+		t.Fatalf("libellés : %+v", fiche)
 	}
 
 	var liste struct {
 		Classrooms []struct {
-			ID string `json:"id"`
+			Scope string `json:"scope"`
 		} `json:"classrooms"`
 	}
 	h.json(http.MethodGet, "/api/classrooms", nil, &liste)
-	if len(liste.Classrooms) != 1 || liste.Classrooms[0].ID != id {
+	if len(liste.Classrooms) != 1 || liste.Classrooms[0].Scope != place {
 		t.Fatalf("liste des groupes : %+v", liste)
+	}
+}
+
+func TestGroupeVisibleSansAvoirEteDeclare(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
+	state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	h := nouveau(t, state)
+
+	// Rien n'a été déclaré : le groupe existe parce que ses dépôts existent.
+	var liste struct {
+		Classrooms []struct {
+			Scope       string `json:"scope"`
+			Label       string `json:"label"`
+			SessionName string `json:"session_name"`
+			Known       bool   `json:"known"`
+			Assignments []struct {
+				Name  string `json:"name"`
+				Repos int    `json:"repos"`
+			} `json:"assignments"`
+		} `json:"classrooms"`
+		Sessions []struct {
+			Short string `json:"short"`
+			Name  string `json:"name"`
+		} `json:"sessions"`
+	}
+	h.json(http.MethodGet, "/api/classrooms", nil, &liste)
+	if len(liste.Classrooms) != 1 {
+		t.Fatalf("groupes : %+v", liste.Classrooms)
+	}
+	trouve := liste.Classrooms[0]
+	if trouve.Scope != "a26.5n6.01" || trouve.Known ||
+		len(trouve.Assignments) != 1 || trouve.Assignments[0].Repos != 2 {
+		t.Fatalf("groupe lu des dépôts : %+v", trouve)
+	}
+	if len(liste.Sessions) != 1 || liste.Sessions[0].Name != "Automne 2026" {
+		t.Fatalf("sessions : %+v", liste.Sessions)
+	}
+
+	// Et il s'ouvre par sa place, sans avoir été déclaré.
+	var fiche struct {
+		Label string `json:"label"`
+		Known bool   `json:"known"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/a26.5n6.01", nil, &fiche)
+	if fiche.Label != "Groupe 01" || fiche.Known {
+		t.Fatalf("groupe ouvert : %+v", fiche)
 	}
 }
 
@@ -427,7 +489,7 @@ func TestGroupeHeriteResteLisibleMaisPasDistribuable(t *testing.T) {
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d, attendu 400", reponse.StatusCode)
 	}
-	if !strings.Contains(string(contenu), "ancienne nomenclature") {
+	if !strings.Contains(string(contenu), "nomenclature dépassée") {
 		t.Fatalf("message : %s", contenu)
 	}
 }
@@ -457,19 +519,21 @@ func TestCandidatsProposesDepuisLesDepots(t *testing.T) {
 	for _, candidat := range reponse.Candidates {
 		trouves[candidat.Prefix] = candidat.Legacy
 	}
-	if herite, present := trouves["a26.5n6.01"]; !present || herite {
-		t.Fatalf("candidat courant : %+v", reponse.Candidates)
+	// Une place de la nomenclature courante n'est pas une proposition : elle
+	// est déjà dans la hiérarchie, lue des dépôts.
+	if _, present := trouves["a26.5n6.01"]; present {
+		t.Fatalf("place courante proposée à l'adoption : %+v", reponse.Candidates)
 	}
 	if herite, present := trouves["a26-4w6"]; !present || !herite {
 		t.Fatalf("candidat hérité : %+v", reponse.Candidates)
 	}
 
-	// Une fois le groupe déclaré, sa place n'est plus proposée.
-	h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
+	// Une fois le préfixe hérité adopté, il n'est plus proposé non plus.
+	h.heritage("a26-4w6", "jlpicard", "emilie-cote")
 	h.json(http.MethodGet, "/api/orgs/acme/candidates", nil, &reponse)
 	for _, candidat := range reponse.Candidates {
-		if candidat.Prefix == "a26.5n6.01" {
-			t.Fatalf("la place déjà couverte est encore proposée : %+v", reponse.Candidates)
+		if candidat.Prefix == "a26-4w6" {
+			t.Fatalf("le préfixe déjà couvert est encore proposé : %+v", reponse.Candidates)
 		}
 	}
 }
@@ -996,18 +1060,27 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 		t.Fatalf("dépôts après migration : %v", noms)
 	}
 
-	// Le groupe suit désormais la nouvelle nomenclature, et redevient
-	// distribuable.
+	// Le groupe a changé de place : c'est à sa nouvelle place qu'il se
+	// retrouve, et ce qu'on retenait de lui l'y a suivi.
 	var fiche struct {
-		Session     string `json:"session"`
-		Course      string `json:"course"`
-		Group       string `json:"group"`
-		Prefix      string `json:"prefix"`
+		Session     string     `json:"session"`
+		Course      string     `json:"course"`
+		Group       string     `json:"group"`
+		Prefix      string     `json:"prefix"`
+		Known       bool       `json:"known"`
+		Students    []struct{} `json:"students"`
 		Assignments []struct {
 			ID string `json:"id"`
 		} `json:"assignments"`
 	}
-	h.json(http.MethodGet, "/api/classrooms/"+id+"?refresh=1", nil, &fiche)
+	h.json(http.MethodGet, "/api/classrooms/a26.5n6.01?refresh=1", nil, &fiche)
+	if !fiche.Known || len(fiche.Students) != 2 {
+		t.Fatalf("liste perdue en chemin : %+v", fiche)
+	}
+	if ancien, encore := h.requete(http.MethodGet, "/api/classrooms/"+id, nil); encore != nil &&
+		ancien.StatusCode == http.StatusOK && strings.Contains(string(encore), `"known":true`) {
+		t.Fatalf("l'ancienne place retient encore quelque chose : %s", encore)
+	}
 	if fiche.Session != "a26" || fiche.Course != "5n6" || fiche.Group != "01" || fiche.Prefix != "" {
 		t.Fatalf("groupe après migration : %+v", fiche)
 	}

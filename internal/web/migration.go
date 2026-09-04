@@ -44,9 +44,9 @@ type migrationInput struct {
 func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 	classroom.Classroom, classroom.Classroom, []migrationRow, error) {
 	var vide classroom.Classroom
-	cours, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		return cours, vide, nil, valid.Errorf("Groupe inconnu.")
+	cours, err := s.place(request)
+	if err != nil {
+		return cours, vide, nil, err
 	}
 	cible := cours
 	session, err := naming.Fragment(body.Session, "Session")
@@ -65,7 +65,7 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 	cible.LegacyPrefix, cible.LegacyPattern = "", ""
 	if !cours.Legacy() && strings.EqualFold(cours.Scope(), cible.Scope()) {
 		return cours, vide, nil, valid.Errorf(
-			"« %s » est déjà à cette place.", cours.Name)
+			"« %s » est déjà à cette place.", cours.Label())
 	}
 
 	repos, _, err := s.repos(cours.Org, false)
@@ -183,7 +183,7 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	label := "Déplacement de « " + cours.Name + " » vers " + cible.Scope()
+	label := "Déplacement de « " + cours.Label() + " » vers " + cible.Scope()
 	job := s.jobs.Start("migration", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
 		for index, ligne := range prets {
@@ -211,7 +211,8 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 		// sinon il cesserait de voir les dépôts restés en arrière.
 		bascule := echecs == 0 && !job.Canceled()
 		if bascule {
-			if _, err := s.classrooms.Update(cible); err != nil {
+			// Ce qu'on retenait du groupe suit ses dépôts à leur nouvelle place.
+			if _, err := s.classrooms.Move(cours.Org, cours.Scope(), cible); err != nil {
 				return nil, err
 			}
 		}

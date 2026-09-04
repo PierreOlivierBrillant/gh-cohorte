@@ -35,7 +35,6 @@ func personnes(couples ...string) []roster.Person {
 func groupe(session, cours, section string, etudiants []roster.Person) classroom.Classroom {
 	return classroom.Classroom{
 		Org: "acme", Session: session, Course: cours, Group: section,
-		Name:     cours + " " + section,
 		Students: etudiants,
 		Defaults: classroom.DefaultsFrom(config.Default()),
 	}
@@ -44,7 +43,7 @@ func groupe(session, cours, section string, etudiants []roster.Person) classroom
 // heritage déclare un groupe resté à l'ancienne nomenclature.
 func heritage(prefixe string, comptes ...string) classroom.Classroom {
 	return classroom.Classroom{
-		Org: "acme", LegacyPrefix: prefixe, Name: prefixe,
+		Org: "acme", LegacyPrefix: prefixe,
 		Students: classroom.StudentsOf(comptes),
 		Defaults: classroom.DefaultsFrom(config.Default()),
 	}
@@ -247,7 +246,7 @@ func TestGroupeAQuatreNiveauxRedevientLisible(t *testing.T) {
 		t.Fatalf("écriture : %v", err)
 	}
 
-	cours, ok := classroom.Open(chemin).Get("abc")
+	cours, ok := classroom.Open(chemin).Find("acme", "5n6.a26-01")
 	if !ok {
 		t.Fatal("groupe introuvable")
 	}
@@ -369,12 +368,13 @@ func TestMagasinEcritEtRelit(t *testing.T) {
 	chemin := filepath.Join(t.TempDir(), "groupes.json")
 	magasin := classroom.Open(chemin)
 
-	cree, err := magasin.Add(groupe("a26", "5n6", "01", cohorte))
+	cree, err := magasin.Save(groupe("a26", "5n6", "01", cohorte))
 	if err != nil {
-		t.Fatalf("ajout : %v", err)
+		t.Fatalf("enregistrement : %v", err)
 	}
-	if cree.ID == "" || cree.CreatedAt == "" {
-		t.Fatalf("groupe incomplet : %+v", cree)
+	// Un groupe se désigne par sa place, pas par un numéro inventé ici.
+	if cree.Scope() != "a26.5n6.01" {
+		t.Fatalf("place %q", cree.Scope())
 	}
 
 	info, err := os.Stat(chemin)
@@ -386,58 +386,129 @@ func TestMagasinEcritEtRelit(t *testing.T) {
 	}
 
 	relu := classroom.Open(chemin)
-	retrouve, present := relu.Get(cree.ID)
-	if !present || retrouve.Session != "a26" || retrouve.Course != "5n6" || retrouve.Group != "01" ||
-		len(retrouve.Students) != 3 {
+	retrouve, present := relu.Find("acme", "a26.5n6.01")
+	if !present || retrouve.Session != "a26" || retrouve.Course != "5n6" ||
+		retrouve.Group != "01" || len(retrouve.Students) != 3 {
 		t.Fatalf("groupe relu : %+v", retrouve)
 	}
+	// La casse ne distingue pas deux dépôts : elle ne distingue pas deux places.
+	if _, present := relu.Find("ACME", "A26.5N6.01"); !present {
+		t.Fatal("la place devrait se retrouver sans égard à la casse")
+	}
 
-	retrouve.Name = "5N6 — Automne 2026, groupe 01"
-	if _, err := relu.Update(retrouve); err != nil {
+	retrouve.Defaults.Template = "acme/modele"
+	if _, err := relu.Save(retrouve); err != nil {
 		t.Fatalf("mise à jour : %v", err)
 	}
-	if encore := classroom.Open(chemin); len(encore.List()) != 1 ||
-		encore.List()[0].Name != "5N6 — Automne 2026, groupe 01" {
-		t.Fatalf("mise à jour non enregistrée : %+v", encore.List())
+	encore := classroom.Open(chemin).List("acme")
+	if len(encore) != 1 || encore[0].Defaults.Template != "acme/modele" {
+		t.Fatalf("mise à jour non enregistrée : %+v", encore)
 	}
 
-	if err := relu.Delete(cree.ID); err != nil {
-		t.Fatalf("suppression : %v", err)
+	if err := relu.Forget("acme", "a26.5n6.01"); err != nil {
+		t.Fatalf("oubli : %v", err)
 	}
-	if reste := classroom.Open(chemin); len(reste.List()) != 0 {
-		t.Fatalf("groupe encore présent : %+v", reste.List())
+	if reste := classroom.Open(chemin).List("acme"); len(reste) != 0 {
+		t.Fatalf("groupe encore retenu : %+v", reste)
+	}
+}
+
+func TestMagasinSuitUnGroupeQuiChangeDePlace(t *testing.T) {
+	chemin := filepath.Join(t.TempDir(), "groupes.json")
+	magasin := classroom.Open(chemin)
+	if _, err := magasin.Save(groupe("a26", "5n6", "01", cohorte)); err != nil {
+		t.Fatalf("enregistrement : %v", err)
+	}
+
+	// Les dépôts viennent d'être renommés : la liste doit les suivre.
+	if _, err := magasin.Move("acme", "a26.5n6.01", groupe("h27", "5n6", "02", cohorte)); err != nil {
+		t.Fatalf("déplacement : %v", err)
+	}
+	relu := classroom.Open(chemin)
+	if _, present := relu.Find("acme", "a26.5n6.01"); present {
+		t.Fatal("l'ancienne place ne devrait plus rien retenir")
+	}
+	arrivee, present := relu.Find("acme", "h27.5n6.02")
+	if !present || len(arrivee.Students) != 3 {
+		t.Fatalf("nouvelle place : %+v", arrivee)
 	}
 }
 
 func TestMagasinNePartagePasSesTranches(t *testing.T) {
 	magasin := classroom.Open(filepath.Join(t.TempDir(), "groupes.json"))
-	cree, err := magasin.Add(groupe("a26", "5n6", "01", personnes("", "emilie-cote")))
-	if err != nil {
-		t.Fatalf("ajout : %v", err)
+	if _, err := magasin.Save(groupe("a26", "5n6", "01", personnes("", "emilie-cote"))); err != nil {
+		t.Fatalf("enregistrement : %v", err)
 	}
 
 	// Modifier ce qu'on a reçu ne doit pas écrire dans le magasin.
-	rendu, _ := magasin.Get(cree.ID)
+	rendu, _ := magasin.Find("acme", "a26.5n6.01")
 	rendu.Students[0].FullName = "Écrit par mégarde"
 
-	encore, _ := magasin.Get(cree.ID)
+	encore, _ := magasin.Find("acme", "a26.5n6.01")
 	if encore.Students[0].FullName != "" {
 		t.Fatalf("le magasin a été modifié dans son dos : %q", encore.Students[0].FullName)
 	}
 }
 
-func TestMagasinRefuseDeuxGroupesAuMemeEndroit(t *testing.T) {
-	magasin := classroom.Open(filepath.Join(t.TempDir(), "groupes.json"))
-	if _, err := magasin.Add(groupe("a26", "5n6", "01", cohorte)); err != nil {
-		t.Fatalf("premier ajout : %v", err)
+func TestMagasinNeGardeQuUneListeParPlace(t *testing.T) {
+	chemin := filepath.Join(t.TempDir(), "groupes.json")
+	magasin := classroom.Open(chemin)
+	if _, err := magasin.Save(groupe("a26", "5n6", "01", cohorte)); err != nil {
+		t.Fatalf("premier enregistrement : %v", err)
 	}
-	_, err := magasin.Add(groupe("a26", "5n6", "01", cohorte))
-	if err == nil {
-		t.Fatal("le doublon a été accepté")
+	// Réenregistrer la même place remplace, sans créer de doublon : deux
+	// listes pour les mêmes dépôts n'auraient aucun sens.
+	if _, err := magasin.Save(groupe("a26", "5n6", "01", personnes("Aminata Diallo", "aminata-d"))); err != nil {
+		t.Fatalf("second enregistrement : %v", err)
 	}
-	// Un autre groupe du même cours reste possible.
-	if _, err := magasin.Add(groupe("a26", "5n6", "02", cohorte)); err != nil {
+	retenus := magasin.List("acme")
+	if len(retenus) != 1 || len(retenus[0].Students) != 1 {
+		t.Fatalf("groupes retenus : %+v", retenus)
+	}
+	// Un autre groupe du même cours reste un autre groupe.
+	if _, err := magasin.Save(groupe("a26", "5n6", "02", cohorte)); err != nil {
 		t.Fatalf("second groupe du cours : %v", err)
+	}
+	if len(magasin.List("acme")) != 2 {
+		t.Fatalf("groupes retenus : %+v", magasin.List("acme"))
+	}
+}
+
+func TestPlaceOuvreUnGroupeJamaisDeclare(t *testing.T) {
+	// Un groupe existe parce que ses dépôts existent : il s'ouvre sans avoir
+	// été déclaré nulle part.
+	cours, err := classroom.AtScope("acme", "a26.5n6.01", classroom.DefaultsFrom(config.Default()))
+	if err != nil {
+		t.Fatalf("place : %v", err)
+	}
+	if cours.Legacy() || cours.Session != "a26" || cours.Course != "5n6" || cours.Group != "01" {
+		t.Fatalf("groupe composé : %+v", cours)
+	}
+	if cours.Label() != "Groupe 01" || cours.SessionName() != "Automne 2026" {
+		t.Fatalf("libellés : %q / %q", cours.Label(), cours.SessionName())
+	}
+
+	// Ce qui ne suit pas la nomenclature reste un préfixe hérité.
+	herite, err := classroom.AtScope("acme", "a26-5n6", classroom.DefaultsFrom(config.Default()))
+	if err != nil || !herite.Legacy() || herite.LegacyPrefix != "a26-5n6" {
+		t.Fatalf("préfixe hérité : %+v (%v)", herite, err)
+	}
+	// Et un gabarit d'adoption se reconnaît à ses champs.
+	adopte, err := classroom.AtScope("acme", "projet-{assignment}-{student}",
+		classroom.DefaultsFrom(config.Default()))
+	if err != nil || adopte.LegacyPattern == "" {
+		t.Fatalf("gabarit : %+v (%v)", adopte, err)
+	}
+}
+
+func TestPlacesLuesDansLesDepots(t *testing.T) {
+	places := classroom.Places(depots(
+		"a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp2.emilie-cote",
+		"a26.4w6.02.tp1.jlpicard",
+		"a26-5n6-tp1-jlpicard", // nomenclature dépassée : rien à en tirer
+	))
+	if strings.Join(places, ",") != "a26.4w6.02,a26.5n6.01" {
+		t.Fatalf("places : %v", places)
 	}
 }
 
@@ -446,9 +517,9 @@ func TestMagasinRefuseUnSeparateurDansUnNiveau(t *testing.T) {
 
 	// Le point saisi dans un champ est slugifié, jamais conservé : le groupe
 	// « 01.b » devient « 01-b » et la nomenclature garde ses cinq niveaux.
-	cree, err := magasin.Add(groupe("a26", "5n6", "01.b", cohorte))
+	cree, err := magasin.Save(groupe("a26", "5n6", "01.b", cohorte))
 	if err != nil {
-		t.Fatalf("ajout : %v", err)
+		t.Fatalf("enregistrement : %v", err)
 	}
 	if cree.Group != "01-b" {
 		t.Fatalf("groupe enregistré : %q", cree.Group)
@@ -458,33 +529,28 @@ func TestMagasinRefuseUnSeparateurDansUnNiveau(t *testing.T) {
 	}
 }
 
-func TestNomLongDeSession(t *testing.T) {
+func TestSessionsDesGroupesRetenus(t *testing.T) {
 	chemin := filepath.Join(t.TempDir(), "groupes.json")
 	magasin := classroom.Open(chemin)
-	if _, err := magasin.Add(groupe("a26", "5n6", "01", cohorte)); err != nil {
-		t.Fatalf("ajout : %v", err)
+	for _, cours := range []classroom.Classroom{
+		groupe("a26", "5n6", "01", cohorte),
+		groupe("a26", "4w6", "01", cohorte),
+		groupe("h27", "5n6", "01", cohorte),
+	} {
+		if _, err := magasin.Save(cours); err != nil {
+			t.Fatalf("enregistrement : %v", err)
+		}
 	}
 
-	// Sans rien écrire, le nom court se lit déjà : « a26 » dit la saison.
-	if nom := magasin.SessionName("a26"); nom != "Automne 2026" {
-		t.Fatalf("nom déduit %q", nom)
-	}
-	if err := magasin.SetSessionName("a26", "Automne 2026 — 1re session"); err != nil {
-		t.Fatalf("nom long : %v", err)
-	}
-
-	// Il est partagé par tous les groupes de la session, et survit au fichier.
-	if _, err := magasin.Add(groupe("a26", "4w6", "01", cohorte)); err != nil {
-		t.Fatalf("second groupe : %v", err)
-	}
-	relu := classroom.Open(chemin)
-	if nom := relu.SessionName("A26"); nom != "Automne 2026 — 1re session" {
-		t.Fatalf("nom long relu %q", nom)
-	}
-	sessions := relu.Sessions()
-	if len(sessions) != 1 || sessions[0].Short != "a26" ||
-		sessions[0].Name != "Automne 2026 — 1re session" {
+	// Le nom long ne s'écrit nulle part : il se déduit du nom court.
+	sessions := classroom.Open(chemin).Sessions("acme")
+	if len(sessions) != 2 || sessions[0].Short != "a26" ||
+		sessions[0].Name != "Automne 2026" || sessions[1].Name != "Hiver 2027" {
 		t.Fatalf("sessions : %+v", sessions)
+	}
+	// Une autre organisation n'a rien à voir ici.
+	if autres := classroom.Open(chemin).Sessions("college"); len(autres) != 0 {
+		t.Fatalf("sessions d'une autre organisation : %+v", autres)
 	}
 }
 

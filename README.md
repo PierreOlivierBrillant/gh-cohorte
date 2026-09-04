@@ -393,39 +393,62 @@ deux groupes du même cours, chacun avec sa liste et ses travaux. Et le même
 cours revient d'une session à l'autre : `a26.5n6.01` et `h27.5n6.01` ne se
 mélangent pas.
 
-### Comment un groupe tient sans serveur
+### Ce qui vient de GitHub, et ce qui est retenu ici
 
-**GitHub reste la seule source de vérité** : les travaux ne sont pas des fiches
-enregistrées quelque part, ils sont lus dans l'inventaire de l'organisation.
-Déclarer un groupe n'écrit rien sur GitHub, et le retirer n'y efface rien.
+**GitHub est la seule source de vérité.** Tout ce que l'interface affiche s'y
+lit :
 
-Le fichier local `groupes.json`, voisin des réglages, ne retient que ce que les
-noms de dépôts ne savent pas dire : **qui sont les étudiants** — nom complet et
-compte GitHub — et les réglages que les travaux du groupe reprennent.
+| Affiché | Lu où |
+| --- | --- |
+| les sessions, les cours, les groupes | dans le nom de chaque dépôt |
+| le nom long d'une session — « Automne 2026 » | déduit du nom court, `a26` |
+| le nom d'un groupe — « Groupe 1010 » | déduit de sa place |
+| les travaux, et qui en a un | dans le nom de chaque dépôt |
+| le nom d'un étudiant | dans le nom de son dépôt, ou son profil GitHub |
+| les accès, les invitations | sur le dépôt lui-même |
+
+Un groupe n'a donc **rien à déclarer pour exister** : ses dépôts suffisent, et il
+apparaît dans la hiérarchie dès qu'ils existent. Il se désigne par sa place —
+`a26.5n6.1010` —, celle-là même qui est écrite dans le nom de chacun d'eux, si
+bien qu'un lien vers lui vaut d'une machine à l'autre.
+
+Le fichier local `groupes.json`, voisin des réglages, ne **retient que des choix
+déjà faits**, pour ne pas les redemander :
+
+- la liste « nom complet, compte GitHub » importée d'un CSV — GitHub ne la
+  connaîtra qu'une fois les dépôts créés, et un nom de dépôt ne dit pas quel
+  compte lui répond ;
+- les réglages que les prochains travaux du groupe reprendront ;
+- un groupe déclaré à l'avance, en attendant son premier travail.
+
+Rien de ce qui s'affiche n'y est inventé : oublier ce fichier ne fait perdre
+aucune information sur ce qui existe, seulement la commodité de ne pas le
+retaper. « Oublier la liste et les réglages », dans les réglages d'un groupe,
+fait exactement cela — le groupe continue de s'afficher tant qu'il a des dépôts.
 
 ### Adopter ce qui existe déjà
 
-Une organisation en cours d'année n'a rien à renommer. L'écran d'accueil montre
-vos groupes déclarés et, en dessous, les **groupes repérés dans l'organisation
-choisie**.
+Une organisation en cours d'année n'a rien à renommer. Les groupes qui suivent
+la nomenclature sont déjà dans la hiérarchie, sans rien avoir eu à déclarer. En
+dessous s'affichent les **groupes repérés** — ceux dont les noms ne se lisent
+qu'en devinant, et qu'il faut donc confirmer.
 
 ```
 Sessions                                       [Recharger] [Nouveau groupe]
   Automne 2026        2 cours · 3 groupes                          a26  ›
   Hiver 2027          1 cours · 2 groupes                          h27  ›
 
-Groupes repérés dans l'organisation
-  a26.4w6.02   tp1                              22 étudiant(s)  22 dépôts  Adopter
-  a26-5n6      travailsession, tp1  ancienne    24 compte(s)    48 dépôts  Adopter
-  a26-4w6      tp1                  ancienne    22 compte(s)    22 dépôts  Adopter
+Groupes repérés dans l'organisation           [Adopter par gabarit…]
+  a26-5n6      travailsession, tp1  dépassée   24 compte(s)  48 dépôts  Adopter
+  a26-4w6      tp1                  dépassée   22 compte(s)  22 dépôts  Adopter
 ```
 
 Cliquer une session donne ses cours, un cours donne ses groupes, un groupe donne
 ses travaux. Un fil d'Ariane remonte à chaque niveau.
 
-Les préfixes des nomenclatures dépassées sont signalés comme tels. Un groupe
-adopté ainsi **reste lisible** — ses dépôts, ses travaux, ses accès s'affichent
-— mais on ne lui distribue plus : il faut d'abord le renommer.
+Adopter un tel préfixe **ne renomme rien** : le groupe reste lisible — ses
+dépôts, ses travaux, ses accès s'affichent — mais on ne lui distribue plus tant
+que ses dépôts n'ont pas été renommés.
 
 ### Adopter ce que rien n'organise
 
@@ -529,15 +552,17 @@ retrouvés, ils sont retenus), et remplacer la liste.
 
 ### Réglages du groupe
 
-Trois blocs, qui ne font pas la même chose :
+Deux blocs, qui ne font pas la même chose :
 
-- **Nom affiché** — le nom du groupe dans cette interface, et le nom long de sa
-  session. Rien n'est touché sur GitHub.
 - **Renommer ou déplacer le groupe** — changer la session, le cours ou le numéro
   du groupe **renomme tous ses dépôts**, avec un aperçu avant d'écrire. C'est le
-  même écran qui migre un groupe venu d'une nomenclature dépassée.
+  même écran qui migre un groupe venu d'une nomenclature dépassée. Il n'y a pas
+  d'autre façon de le renommer : son nom est sa place, et sa place est dans le
+  nom de ses dépôts.
 - **Réglages par défaut des travaux** — ce que les prochains travaux
   reprendront : gabarit de description, dépôt modèle, visibilité, droit accordé.
+  Avec, en dessous, de quoi **oublier** la liste et les réglages retenus pour ce
+  groupe, sans toucher à un seul dépôt.
 
 ### Déplacer un étudiant
 
@@ -748,14 +773,27 @@ tranché, et pourquoi.
   moins un préfixe (`--manage tp1`) et refuse de choisir un groupe à votre
   place.
 - **Un groupe est une convention de nommage, pas une base de données.** Le nom
-  d'un dépôt — `préfixe-travail-compte` — porte l'appartenance ; GitHub reste la
-  seule source de vérité, et la nomenclature déjà en place d'une organisation
-  (`a26-5n6-travailsession-…`) est reconnue sans rien renommer. Le fichier local
-  ne retient que ce que les noms ne disent pas : la liste des étudiants et les
-  réglages. Déclarer ou retirer un groupe n'écrit ni n'efface rien sur GitHub.
-  L'alternative — un dépôt de service dans l'organisation pour y stocker la
-  liste — rendrait le groupe partageable entre plusieurs enseignants, au prix
-  d'écritures que personne n'a demandées ; elle reste ouverte.
+  d'un dépôt porte l'appartenance ; GitHub reste la seule source de vérité, et
+  la nomenclature déjà en place d'une organisation (`a26-5n6-travailsession-…`)
+  est reconnue sans rien renommer. Déclarer ou oublier un groupe n'écrit ni
+  n'efface rien sur GitHub.
+- **Un groupe se désigne par sa place, jamais par un identifiant local.** Un
+  numéro tiré au hasard, ou un nom d'affichage saisi à la main, n'auraient de
+  sens que sur la machine qui les a écrits : deux enseignants regardant la même
+  organisation n'y verraient pas la même chose, et un lien ne vaudrait pas d'un
+  poste à l'autre. La place — `a26.5n6.1010` — est dans le nom de chaque dépôt,
+  donc partout la même. Elle sert d'adresse dans l'interface comme dans l'API, et
+  le fichier local s'y greffe au lieu de s'y substituer. C'est aussi pourquoi le
+  nom long d'une session se **déduit** de son nom court plutôt que de s'écrire
+  quelque part : « a26 » se lit « Automne 2026 » sur n'importe quelle machine.
+  Conséquence assumée : renommer un groupe, c'est renommer ses dépôts.
+- **Le fichier local ne retient que des choix déjà faits.** La liste importée
+  d'un CSV, les réglages des prochains travaux, un groupe déclaré à l'avance :
+  rien qui s'affiche n'y est inventé, et le perdre ne fait perdre aucune
+  information sur ce qui existe. L'alternative — un dépôt de service dans
+  l'organisation pour y stocker la liste — rendrait le groupe partageable entre
+  plusieurs enseignants, au prix d'écritures que personne n'a demandées ; elle
+  reste ouverte.
 - **Un séparateur réservé rend les noms de dépôts relisibles.** GitHub
   n'autorise que `.`, `-` et `_` en plus des lettres et des chiffres ; le tiret
   servant déjà à l'intérieur des noms, le **point** sépare les cinq niveaux.

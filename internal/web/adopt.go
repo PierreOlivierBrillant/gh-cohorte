@@ -96,7 +96,8 @@ func triees(ensemble map[string]bool) []string {
 func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Request) {
 	var body struct {
 		Username string `json:"username"`
-		Target   string `json:"target"`
+		// Target est la place du groupe d'arrivée.
+		Target string `json:"target"`
 		// Repos demande de renommer aussi les dépôts de la personne pour
 		// qu'ils rejoignent le groupe d'arrivée.
 		Repos bool `json:"repos"`
@@ -106,36 +107,30 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
-	depart, ok := s.classrooms.Get(request.PathValue("id"))
-	if !ok {
-		fail(writer, valid.Errorf("Groupe inconnu."))
+	depart, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
 		return
 	}
-	arrivee, ok := s.classrooms.Get(body.Target)
-	if !ok {
-		fail(writer, valid.Errorf("Groupe d'arrivée inconnu."))
+	arrivee, err := s.placeAt(body.Target)
+	if err != nil {
+		fail(writer, err)
 		return
 	}
-	if depart.ID == arrivee.ID {
+	if classroom.NormalizeScope(depart.Scope()) == classroom.NormalizeScope(arrivee.Scope()) {
 		fail(writer, valid.Errorf("Le groupe d'arrivée est celui de départ."))
-		return
-	}
-	if !strings.EqualFold(depart.Org, arrivee.Org) {
-		fail(writer, valid.Errorf(
-			"« %s » est dans l'organisation « %s » : un étudiant ne se déplace "+
-				"qu'à l'intérieur d'une organisation.", arrivee.Name, arrivee.Org))
 		return
 	}
 
 	personne, trouvee := depart.Find(body.Username)
 	if !trouvee {
 		fail(writer, valid.Errorf(
-			"@%s n'est pas dans « %s ».", body.Username, depart.Name))
+			"@%s n'est pas dans « %s ».", body.Username, depart.Label()))
 		return
 	}
 	if arrivee.Has(personne.Username) {
 		fail(writer, valid.Errorf(
-			"@%s est déjà dans « %s ».", personne.Username, arrivee.Name))
+			"@%s est déjà dans « %s ».", personne.Username, arrivee.Label()))
 		return
 	}
 
@@ -157,23 +152,23 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 
 	depart.Students = sansPersonne(depart.Students, personne.Username)
 	arrivee.Students = append(append([]roster.Person(nil), arrivee.Students...), personne)
-	if _, err := s.classrooms.Update(depart); err != nil {
+	if _, err := s.classrooms.Save(depart); err != nil {
 		fail(writer, err)
 		return
 	}
-	if _, err := s.classrooms.Update(arrivee); err != nil {
+	if _, err := s.classrooms.Save(arrivee); err != nil {
 		fail(writer, err)
 		return
 	}
 
 	if len(renommages) == 0 {
 		writeJSON(writer, http.StatusOK, map[string]any{
-			"moved": personne.Username, "target": arrivee.Name, "renamed": 0,
+			"moved": personne.Username, "target": arrivee.Label(), "renamed": 0,
 		})
 		return
 	}
 
-	label := "Déplacement de @" + personne.Username + " vers « " + arrivee.Name + " »"
+	label := "Déplacement de @" + personne.Username + " vers « " + arrivee.Label() + " »"
 	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
 		for index, ligne := range renommages {
@@ -193,7 +188,7 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		}
 		s.forget(depart.Org)
 		return map[string]any{
-			"moved": personne.Username, "target": arrivee.Name,
+			"moved": personne.Username, "target": arrivee.Label(),
 			"renamed": renommes, "failed": echecs,
 		}, nil
 	})
@@ -208,8 +203,8 @@ func (s *Server) moveRows(depart, arrivee classroom.Classroom, personne roster.P
 	if arrivee.Legacy() {
 		return nil, valid.Errorf(
 			"« %s » suit une nomenclature dépassée : ses dépôts ne peuvent pas être "+
-				"nommés. Migrez-le d'abord, ou déplacez l'étudiant sans ses dépôts.",
-			arrivee.Name)
+				"nommés. Renommez-les d'abord, ou déplacez l'étudiant sans ses dépôts.",
+			arrivee.Label())
 	}
 	fragment, err := naming.Student(personne.FullName)
 	if err != nil {

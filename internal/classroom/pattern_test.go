@@ -99,7 +99,7 @@ func TestGabaritSansTravail(t *testing.T) {
 
 func TestGroupeAdopteParGabarit(t *testing.T) {
 	cours := classroom.Classroom{
-		Org: "acme", Name: "Projets", LegacyPattern: "projet-{assignment}-{student}",
+		Org: "acme", LegacyPattern: "projet-{assignment}-{student}",
 		Students: personnes("Émilie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard"),
 		Defaults: classroom.DefaultsFrom(config.Default()),
 	}
