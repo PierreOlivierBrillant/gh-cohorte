@@ -131,6 +131,11 @@ func (s *Session) run() (int, error) {
 	if err := s.authenticate(); err != nil {
 		return ExitOK, err
 	}
+	// L'interface web choisit elle-même l'organisation : le terminal n'a plus
+	// de question à poser une fois le jeton résolu.
+	if mode == "web" {
+		return s.serveWeb()
+	}
 	if err := s.chooseOrg(); err != nil {
 		return ExitOK, err
 	}
@@ -155,7 +160,16 @@ func (s *Session) adoptLegacyCache() {
 }
 
 // chooseMode décide du mode : création, gestion d'un groupe, options avancées.
+//
+// Sans rien préciser, l'interface graphique l'emporte : c'est là que tout est
+// accessible. Le terminal reste maître dès qu'un drapeau dit quoi faire, et
+// « --cli » y ramène explicitement — la règle du gh CLI est qu'une commande
+// pilotée par des drapeaux ou branchée sur un tuyau ne doit rien ouvrir ni rien
+// demander.
 func (s *Session) chooseMode() (string, error) {
+	if s.Options.Web {
+		return "web", nil
+	}
 	if s.Options.ManageRequested {
 		return "gerer", nil
 	}
@@ -167,11 +181,15 @@ func (s *Session) chooseMode() (string, error) {
 		s.Options.StarterSet || s.Options.Pattern != "" || s.Options.Yes {
 		return "creer", nil
 	}
+	if !s.Options.CLI {
+		return "web", nil
+	}
 
 	for {
 		choice, err := s.Prompt.Choose("Que voulez-vous faire ?", ui.Options(
 			"creer", "Créer des dépôts pour une liste de personnes",
 			"gerer", "Lister et gérer un groupe de dépôts existant",
+			"web", "Ouvrir l'interface graphique dans le navigateur",
 			"avance", "Options avancées",
 			"quitter", "Quitter",
 		), "creer")

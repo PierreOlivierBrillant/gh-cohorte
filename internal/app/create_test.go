@@ -767,6 +767,7 @@ func TestForcerLesFichiersDeDepartDepuisLaLigneDeCommande(t *testing.T) {
 
 func TestParcoursEnModeLigneSortieRedirigee(t *testing.T) {
 	h := nouveau(t, nil)
+	h.Options.CLI = true
 	csv := h.cohorteCSV("Émilie Côté,emilie-cote", "Jean-Luc Picard,jlpicard")
 
 	// Les réponses arrivent sur l'entrée standard ; la sortie est un fichier.

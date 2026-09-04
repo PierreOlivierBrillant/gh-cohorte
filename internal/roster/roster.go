@@ -39,9 +39,9 @@ func (p Person) String() string { return p.FullName + " <@" + p.Username + ">" }
 
 // Issue décrit un problème détecté sur une ligne de la liste.
 type Issue struct {
-	Line    int
-	Raw     string
-	Message string
+	Line    int    `json:"line"`
+	Raw     string `json:"raw"`
+	Message string `json:"message"`
 }
 
 // Roster est le résultat d'un chargement : les personnes valides et les lignes rejetées.

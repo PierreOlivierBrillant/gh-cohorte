@@ -113,3 +113,50 @@ func TestBuildDescriptionTronquee(t *testing.T) {
 		t.Errorf("description de %d caractères, attendu 350", longueur)
 	}
 }
+
+func TestMatcherRetrouveLeTravailEtLaPersonne(t *testing.T) {
+	personne := roster.Person{FullName: "Émilie Côté", Username: "emilie-cote"}
+	expression := plan.Matcher(config.DefaultNamePattern, personne)
+
+	cas := []struct {
+		depot   string
+		travail string
+		reconnu bool
+	}{
+		// Le compte contient un tiret : seul le fait de le connaître permet de
+		// couper au bon endroit.
+		{"a26-5n6-travailsession-emilie-cote", "a26-5n6-travailsession", true},
+		{"tp1-emilie-cote", "tp1", true},
+		{"TP1-Emilie-Cote", "TP1", true},
+		{"tp1-jlpicard", "", false},
+		{"emilie-cote", "", false},
+		{"tp1-emilie-cote-bis", "", false},
+	}
+	for _, essai := range cas {
+		travail, reconnu := plan.Assignment(expression, essai.depot)
+		if reconnu != essai.reconnu || travail != essai.travail {
+			t.Fatalf("« %s » → (%q, %v), attendu (%q, %v)",
+				essai.depot, travail, reconnu, essai.travail, essai.reconnu)
+		}
+	}
+}
+
+func TestMatcherSuitLeGabarit(t *testing.T) {
+	personne := roster.Person{FullName: "Jean-Luc Picard", Username: "jlpicard"}
+
+	expression := plan.Matcher("{index}-{assignment}-{username}", personne)
+	if travail, reconnu := plan.Assignment(expression, "07-tp2-jlpicard"); !reconnu || travail != "tp2" {
+		t.Fatalf("gabarit indexé : (%q, %v)", travail, reconnu)
+	}
+
+	expression = plan.Matcher("{username}-{assignment}", personne)
+	if travail, reconnu := plan.Assignment(expression, "jlpicard-projet-final"); !reconnu ||
+		travail != "projet-final" {
+		t.Fatalf("gabarit inversé : (%q, %v)", travail, reconnu)
+	}
+
+	// Sans {assignment}, il n'y a rien à relire.
+	if plan.Matcher("{username}", personne) != nil {
+		t.Fatal("un gabarit sans {assignment} ne devrait pas se relire")
+	}
+}

@@ -45,8 +45,8 @@ func (f File) Size() int { return len(f.Content) }
 
 // Skipped décrit un fichier écarté et la raison de son exclusion.
 type Skipped struct {
-	Path   string
-	Reason string
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 // Bundle est le contenu retenu pour le commit initial, et ce qui a été écarté.

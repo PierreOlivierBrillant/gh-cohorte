@@ -146,7 +146,7 @@ func TestParseAide(t *testing.T) {
 		if _, err := app.Parse([]string{drapeau}, sortie); err == nil {
 			t.Errorf("%s : l'aide doit interrompre l'analyse", drapeau)
 		}
-		if !strings.Contains(sortie.String(), "assistant interactif complet") {
+		if !strings.Contains(sortie.String(), "assistant interactif au terminal") {
 			t.Errorf("%s : aide absente :\n%s", drapeau, sortie.String())
 		}
 	}

@@ -9,8 +9,13 @@ suppression.
 Toute l'interface est en français. L'extension est écrite en Go et distribuée
 précompilée : aucune installation de Go n'est nécessaire pour s'en servir.
 
+Deux façons de s'en servir, pour les mêmes opérations : l'assistant du terminal,
+ou une **interface graphique** servie sur la boucle locale et ouverte dans le
+navigateur.
+
 ```
-gh cohorte
+gh cohorte          # assistant au terminal
+gh cohorte --web    # interface graphique
 ```
 
 ## Installation
@@ -41,11 +46,21 @@ l'outil signale un rôle insuffisant avant de tenter quoi que ce soit.
 
 ## Démarrage rapide
 
-Lancée sans argument, l'extension ouvre un menu : créer des dépôts, gérer un
-groupe existant, options avancées, quitter.
+Lancée sans argument, l'extension **ouvre l'interface graphique** dans le
+navigateur : c'est là que tout est accessible.
 
 ```
 gh cohorte
+```
+
+Le terminal reste maître dès qu'un drapeau dit quoi faire — `--roster`,
+`--assignment`, `--manage`, `--yes` —, et quand la sortie est redirigée ou que
+`--non-interactive` est passé, rien ne s'ouvre et rien n'est demandé. `--cli`
+ramène explicitement à l'assistant du terminal, qui ouvre alors un menu : créer
+des dépôts, gérer un groupe existant, options avancées, quitter.
+
+```
+gh cohorte --cli
 ```
 
 L'assistant enchaîne : authentification → organisation → liste des personnes →
@@ -107,6 +122,10 @@ rejetée est signalée **avec son numéro et la raison** ; le reste du fichier
 continue d'être lu.
 
 ## Nommage des dépôts
+
+Cette section décrit l'assistant du **terminal**, qui compose encore les noms
+par gabarit. L'interface web suit la nomenclature à cinq niveaux décrite plus
+bas, qui n'est pas réglable.
 
 Gabarit par défaut : `{assignment}-{username}`.
 
@@ -280,6 +299,304 @@ Le menu **Options avancées**, accessible **sans authentification**, affiche
 l'emplacement et l'état des trois fichiers gérés par l'outil — réglages, cache,
 bilans — et permet de vider le cache ou d'oublier les réglages mémorisés.
 
+## Interface web
+
+C'est le mode par défaut : un petit serveur sur la boucle locale, et le
+navigateur ouvert dessus. La même extension, les mêmes vérifications et les
+mêmes écritures — seule la façon de poser les questions change.
+
+```
+gh cohorte
+```
+
+```
+Interface web
+  Adresse : http://127.0.0.1:41287/?jeton=8f3c…
+  Le serveur n'écoute que sur cette machine et n'accepte que cette adresse :
+  le jeton en fait partie.
+  Ctrl-C pour fermer, ou « Quitter » dans le navigateur.
+```
+
+**Tout commence par le choix d'une organisation.** Au premier lancement, c'est
+la seule chose que l'interface propose : rien d'autre n'est accessible tant
+qu'elle n'est pas faite. Le choix est mémorisé, et se change ensuite depuis les
+réglages.
+
+Vient ensuite une hiérarchie, parcourue de haut en bas :
+
+```
+session  →  cours  →  groupe  →  travail
+a26         5N6        01        tp1
+```
+
+**Chaque niveau a son adresse.** `/s/a26`, `/s/a26/5n6`, `/g/<groupe>/etudiants`,
+`/g/<groupe>/travaux/tp1` : recharger la page, revenir en arrière ou garder un
+lien ramène au même endroit. Un même bandeau — fil d'Ariane, titre, ce qu'il
+faut signaler — suit du haut de la hiérarchie jusqu'au groupe.
+
+Le **nom long d'une session se déduit de son nom court** : `a26` se lit
+« Automne 2026 », et `h`, `e`, `p` font hiver, été et printemps. Rien n'oblige à
+suivre la convention — un nom court qui ne la suit pas s'affiche tel quel — et
+un nom écrit à la main l'emporte toujours.
+
+L'interface reprend le modèle de GitHub Classroom : un **groupe** rassemble des
+**étudiants**, à qui l'on **distribue des travaux**.
+
+| GitHub Classroom | Ici |
+| --- | --- |
+| Classroom | un **groupe** : une session, un cours, une section, des étudiants |
+| Roster | la liste des étudiants du groupe |
+| Assignment | un **travail** distribué au groupe |
+| « a accepté le devoir » | a un dépôt pour ce travail |
+| Starter code repository | dépôt modèle, ou dossier de fichiers de départ |
+
+Ce que Classroom faisait et que l'outil ne fait pas : pas de lien d'invitation à
+distribuer — les dépôts sont créés directement —, pas d'échéance, pas de
+correction automatique, pas de travail en équipe.
+
+### La nomenclature des dépôts
+
+Un dépôt porte **cinq niveaux, séparés par un point** :
+
+```
+session . cours . groupe . travail . étudiant
+a26.5n6.01.tp1.emilie-cote
+```
+
+Une session a un **nom court**, celui qui entre dans les dépôts (`a26`), et un
+**nom long** pour l'affichage (`Automne 2026`). Le nom long est partagé par tous
+les groupes de la session et vit dans le fichier local : le renommer ne touche
+aucun dépôt.
+
+Le point est **réservé** à cette découpe, et rien d'autre ne peut en produire :
+la slugification remplace tout caractère non alphanumérique par un tiret, si
+bien qu'un nom de cours, de travail ou d'étudiant venu d'un CSV en est nettoyé
+sans qu'on ait à s'en occuper — « J.-P. Tremblay » devient `j-p-tremblay`. Un
+compte GitHub, lui, n'en contient jamais.
+
+Un nom se relit donc **sans rien deviner** : cinq parties, pas une de plus.
+C'est ce qui distingue cette nomenclature de la précédente, tout en tirets :
+`a26-5n6-tp1-emilie-cote` ne disait pas où finissait le travail et où commençait
+la personne. Une forme intermédiaire a existé, à quatre niveaux — la session n'y
+était pas encore un niveau à part (`a26-5n6.1010.tp1.emilie-cote`) : elle se lit
+comme l'autre ancienne, et se migre de la même façon.
+
+Le dernier niveau est le **nom de l'étudiant**, pas son compte GitHub. Un dépôt
+se lit sans connaître le pseudonyme de personne — au prix d'une contrainte : le
+nom complet devient obligatoire, et deux homonymes font échouer la préparation
+avant toute écriture, en nommant les deux personnes en cause. Le lien entre un
+étudiant et son compte GitHub vit désormais dans la liste du groupe, et sur le
+dépôt lui-même sous forme d'invitation — plus dans son nom.
+
+Un cours peut avoir **plusieurs groupes** : `a26.5n6.01` et `a26.5n6.02` sont
+deux groupes du même cours, chacun avec sa liste et ses travaux. Et le même
+cours revient d'une session à l'autre : `a26.5n6.01` et `h27.5n6.01` ne se
+mélangent pas.
+
+### Ce qui vient de GitHub, et ce qui est retenu ici
+
+**GitHub est la seule source de vérité.** Tout ce que l'interface affiche s'y
+lit :
+
+| Affiché | Lu où |
+| --- | --- |
+| les sessions, les cours, les groupes | dans le nom de chaque dépôt |
+| le nom long d'une session — « Automne 2026 » | déduit du nom court, `a26` |
+| le nom d'un groupe — « Groupe 1010 » | déduit de sa place |
+| les travaux, et qui en a un | dans le nom de chaque dépôt |
+| le nom d'un étudiant | dans le nom de son dépôt, ou son profil GitHub |
+| les accès, les invitations | sur le dépôt lui-même |
+
+Un groupe n'a donc **rien à déclarer pour exister** : ses dépôts suffisent, et il
+apparaît dans la hiérarchie dès qu'ils existent. Il se désigne par sa place —
+`a26.5n6.1010` —, celle-là même qui est écrite dans le nom de chacun d'eux, si
+bien qu'un lien vers lui vaut d'une machine à l'autre.
+
+Le fichier local `groupes.json`, voisin des réglages, ne **retient que des choix
+déjà faits**, pour ne pas les redemander :
+
+- la liste « nom complet, compte GitHub » importée d'un CSV — GitHub ne la
+  connaîtra qu'une fois les dépôts créés, et un nom de dépôt ne dit pas quel
+  compte lui répond ;
+- les réglages que les prochains travaux du groupe reprendront ;
+- un groupe déclaré à l'avance, en attendant son premier travail.
+
+Rien de ce qui s'affiche n'y est inventé : oublier ce fichier ne fait perdre
+aucune information sur ce qui existe, seulement la commodité de ne pas le
+retaper. « Oublier la liste et les réglages », dans les réglages d'un groupe,
+fait exactement cela — le groupe continue de s'afficher tant qu'il a des dépôts.
+
+### Adopter ce qui existe déjà
+
+Une organisation en cours d'année n'a rien à renommer. Les groupes qui suivent
+la nomenclature sont déjà dans la hiérarchie, sans rien avoir eu à déclarer. En
+dessous s'affichent les **groupes repérés** — ceux dont les noms ne se lisent
+qu'en devinant, et qu'il faut donc confirmer.
+
+```
+Sessions                                       [Recharger] [Nouveau groupe]
+  Automne 2026        2 cours · 3 groupes                          a26  ›
+  Hiver 2027          1 cours · 2 groupes                          h27  ›
+
+Groupes repérés dans l'organisation           [Adopter par gabarit…]
+  a26-5n6      travailsession, tp1  dépassée   24 compte(s)  48 dépôts  Adopter
+  a26-4w6      tp1                  dépassée   22 compte(s)  22 dépôts  Adopter
+```
+
+Cliquer une session donne ses cours, un cours donne ses groupes, un groupe donne
+ses travaux. Un fil d'Ariane remonte à chaque niveau.
+
+Adopter un tel préfixe **ne renomme rien** : le groupe reste lisible — ses
+dépôts, ses travaux, ses accès s'affichent — mais on ne lui distribue plus tant
+que ses dépôts n'ont pas été renommés.
+
+### Adopter ce que rien n'organise
+
+La détection par préfixe ne devine rien de `kickmyb-equipe-3` ou de
+`tp1-h23-4204n6-alice` : beaucoup d'organisations n'ont jamais suivi de
+convention. « Adopter par gabarit… » ouvre alors un écran où l'on **écrit
+comment ces noms sont faits** :
+
+```
+Gabarit des noms de dépôts   projet-{assignment}-{student}          [Essayer]
+
+34 dépôt(s) sur 554 · 2 travaux · 22 personne(s)
+
+  Dépôt                       Travail   Personne
+  projet-tp1-jlpicard         tp1       jlpicard
+  projet-tp1-emilie-cote      tp1       emilie-cote
+```
+
+`{assignment}` est le travail, `{student}` la personne — son compte GitHub, ou
+son nom. Tout le reste est pris à la lettre. Sans `{assignment}`, tous les
+dépôts trouvés forment un seul travail.
+
+Un nom seul ne se découpe pas toujours : `projet-tp1-emilie-cote` peut se lire
+`tp1` + `emilie-cote` ou `tp1-emilie` + `cote`. **Les noms s'éclairent les uns
+les autres** — `tp1` reconnu chez un voisin non ambigu tranche pour tous. Une
+fois la liste des étudiants importée, la lecture devient exacte : chaque nom lui
+est confronté personne par personne.
+
+Le groupe garde ce gabarit jusqu'à son renommage. Rien n'est écrit sur GitHub à
+l'adoption.
+
+### Renommer, déplacer, migrer un groupe
+
+« Réglages du groupe » propose de **renommer ses dépôts**, qu'il vienne d'une
+nomenclature dépassée ou qu'il suive déjà la courante : c'est le même mécanisme,
+et il n'y en a qu'un. On y indique la session, le cours et le groupe — préremplis
+par sa place actuelle, ou par une découpe proposée de son préfixe hérité
+(`a26-5n6` → session `a26`, cours `5n6`) — et le renommage se montre avant que
+quoi que ce soit ne soit écrit :
+
+```
+Dépôt actuel                          Nouveau nom
+a26-5n6-travailsession-jlpicard       a26.5n6.01.travailsession.jean-luc-picard
+a26-5n6-travailsession-emilie-cote    a26.5n6.01.travailsession.emilie-cote
+a26-5n6-tp1-visiteur                  « visiteur » ne correspond à aucun étudiant du groupe
+```
+
+**GitHub garde une redirection depuis chaque ancien nom** : les clones déjà
+faits, les liens distribués et les scripts continuent de fonctionner.
+
+Un dépôt est bloqué quand son compte n'est pas dans la liste du groupe, quand
+son nom complet manque, ou quand le nom visé existe déjà. La migration refuse
+alors de démarrer, en les nommant — le temps de compléter la liste ou de
+retrouver les noms. On peut aussi accepter de **les laisser en place** : ils ne
+sont pas touchés, et le groupe ne bascule pas tant qu'il en reste, pour
+continuer de les voir.
+
+Pour les cas que la détection ne devine pas, **Nouveau groupe** déclare un
+groupe à la main : session, cours, groupe, liste d'étudiants. Le nom du dépôt
+s'affiche au fil de la frappe.
+
+### Travaux
+
+La page d'un groupe liste ses travaux, chacun avec le nombre d'étudiants servis
+— `18 étudiant(s) du groupe sur 24`. En ouvrir un donne la page du travail : un
+tableau **étudiant par étudiant** — nom complet, dépôt, visibilité, dernier
+envoi, accès — et les actions qui vont avec : inspecter les accès de tout le
+travail, gérer les collaborateurs d'un dépôt, copier ou exporter les URL, cloner
+une sélection, mettre à jour des clones, supprimer un dépôt.
+
+Un dépôt dont le compte n'est pas dans la liste du groupe reste visible, signalé
+« hors liste » : rien n'est caché sous prétexte que la liste est incomplète.
+
+### Distribuer un travail, en trois étapes
+
+Le bouton vert **Nouveau travail** ouvre l'assistant, calqué sur celui de
+Classroom :
+
+1. **Bases du travail** — nom, gabarit (le nom d'un dépôt s'affiche au fil de la
+   frappe), description, visibilité, invitation des étudiants et droit accordé.
+2. **Code de départ** — dépôt modèle, ou dossier de fichiers de départ de cette
+   machine, et le message du commit.
+3. **Distribution** — les étudiants du groupe, tous cochés par défaut, et
+   **l'aperçu des dépôts qui se recalcule à chaque frappe** : chaque nom est
+   visible avant la moindre écriture. Puis la simulation, ou la distribution.
+
+Les étudiants qui ont déjà un dépôt pour ce travail sont écartés et signalés :
+redistribuer après avoir ajouté trois personnes ne crée que trois dépôts.
+**Distribuer aux manquants**, depuis la page d'un travail, reprend l'assistant
+directement à l'étape 3.
+
+Le groupe retient les réglages du dernier travail distribué : le suivant n'a pas
+à les retaper.
+
+### Étudiants
+
+La liste du groupe et, pour chaque personne, les travaux où elle a déjà un dépôt
+— l'équivalent de la colonne « accepté » de Classroom, déduit des dépôts plutôt
+que d'une invitation. De là : retrouver les noms complets manquants (une fois
+retrouvés, ils sont retenus), et remplacer la liste.
+
+### Réglages du groupe
+
+Deux blocs, qui ne font pas la même chose :
+
+- **Renommer ou déplacer le groupe** — changer la session, le cours ou le numéro
+  du groupe **renomme tous ses dépôts**, avec un aperçu avant d'écrire. C'est le
+  même écran qui migre un groupe venu d'une nomenclature dépassée. Il n'y a pas
+  d'autre façon de le renommer : son nom est sa place, et sa place est dans le
+  nom de ses dépôts.
+- **Réglages par défaut des travaux** — ce que les prochains travaux
+  reprendront : gabarit de description, dépôt modèle, visibilité, droit accordé.
+  Avec, en dessous, de quoi **oublier** la liste et les réglages retenus pour ce
+  groupe, sans toucher à un seul dépôt.
+
+### Déplacer un étudiant
+
+Une personne change de groupe en cours de session : « Déplacer… », dans la liste
+des étudiants, la fait passer d'un groupe à l'autre à l'intérieur d'une même
+organisation. Sa fiche suit toujours ; **ses dépôts, seulement si on le
+demande** — les renommer est une écriture sur GitHub, et le groupe d'arrivée
+doit suivre la nomenclature courante pour savoir les nommer. Sans renommage, ses
+dépôts restent au nom du groupe de départ, qui continue de les montrer.
+
+---
+
+Les opérations longues — distribution, clonage, vérification des comptes,
+inspection des accès — tournent en arrière-plan et se suivent dans un panneau de
+progression, ligne par ligne, avec un bouton d'annulation.
+
+L'assistant du terminal ignore les groupes : il continue de travailler par
+préfixe (`--manage tp1`), ce qui revient au même puisque le préfixe d'un travail
+est son identifiant. Les deux interfaces lisent les mêmes dépôts.
+
+Le clonage, les fichiers de départ et les listes CSV désignent des chemins **de
+la machine**, pas du navigateur. Chaque champ de chemin a donc un bouton
+« Parcourir… » qui ouvre **la fenêtre de sélection du système** — zenity ou
+kdialog sous Linux, `osascript` sous macOS, une fenêtre .NET sous Windows. Une
+page web ne voit jamais le chemin d'un fichier déposé ; c'est le serveur local,
+qui tourne sur la même machine, qui la demande. Là où aucune n'est disponible —
+une machine sans session graphique —, l'interface montre son propre explorateur,
+qui marche partout. Les champs se complètent aussi au fil de la frappe, le
+serveur local répondant à la place du shell.
+
+`--no-browser` se contente d'afficher l'adresse sans ouvrir de navigateur —
+utile à travers une session SSH avec redirection de port. `--cli` reste au
+terminal.
+
 ## Interface
 
 - Toutes les listes se parcourent aux flèches et défilent quand elles sont
@@ -344,6 +661,9 @@ bilans — et permet de vider le cache ou d'oublier les réglages mémorisés.
 --dry-run                simuler sans rien créer
 -y, --yes                passer la confirmation finale
 --non-interactive        échouer plutôt que poser une question
+--web                    ouvrir l'interface graphique sur la boucle locale (défaut)
+--cli                    rester au terminal : assistant interactif
+--no-browser             ne pas ouvrir le navigateur, afficher l'adresse
 --host HOTE              hôte GitHub (github.com ou instance Enterprise)
 --config FICHIER         fichier de réglages
 --report-dir DOSSIER     dossier des bilans (défaut : rapports)
@@ -371,6 +691,19 @@ Codes de retour : `0` succès, `1` au moins un échec, `2` erreur de validation,
   court-circuite cette confirmation.
 - Les données d'étudiants (bilans, listes, clones) sont exclues du dépôt par le
   `.gitignore`.
+- **L'interface web n'écoute que sur `127.0.0.1`**, sur un port tiré au hasard à
+  chaque lancement. Un jeton de session, lui aussi tiré au hasard, figure une
+  seule fois dans l'adresse affichée puis vit dans un témoin `HttpOnly`,
+  `SameSite=Strict` : sans lui, toute requête est refusée. L'en-tête `Host` doit
+  désigner la boucle locale — une entrée DNS pointant sur `127.0.0.1` ne suffit
+  pas —, l'origine de toute requête est vérifiée, et une écriture doit porter un
+  en-tête que seule la page sait ajouter : un autre site ouvert dans le même
+  navigateur ne peut donc rien déclencher. Le jeton GitHub, lui, ne quitte jamais
+  le processus : la page ne parle qu'à cette API locale.
+- Le serveur local lit et liste des dossiers de la machine, et peut ouvrir la
+  fenêtre de sélection du système : c'est ce qui permet de choisir un fichier
+  sans le taper. Ces routes ne sont joignables que depuis la page, sous les mêmes
+  contrôles que tout le reste.
 
 ## Développement
 
@@ -379,6 +712,11 @@ go build .          # produit ./gh-cohorte
 go test ./...       # toute la suite, sans aucun accès réseau
 gh extension install .   # installer la version locale
 ```
+
+`CLAUDE.md` énonce les deux règles à ne pas perdre de vue : rien ne doit
+dépendre d'un système d'exploitation, et chaque fonctionnalité doit exister dans
+les trois interfaces — web, assistant du terminal, drapeaux — ce que rend
+tenable le fait que la logique vive dans les paquets du domaine.
 
 Les tests montent un **faux serveur GitHub** local (`internal/fakegh`) qui imite
 les points d'API utilisés, et de **vrais dépôts git locaux** (`file://`) pour le
@@ -392,7 +730,11 @@ sortie propre hors terminal.
 | `internal/valid` | validation et normalisation des saisies |
 | `internal/roster` | lecture et écriture des listes CSV |
 | `internal/plan` | gabarits et plan de génération |
-| `internal/groups` | détection des groupes, sélections |
+| `internal/groups` | détection des groupes de dépôts, sélections |
+| `internal/naming` | la nomenclature des dépôts : composition et relecture |
+| `internal/picker` | la fenêtre de sélection du système, et l'explorateur de repli |
+| `internal/classroom` | groupes : étudiants, place dans la nomenclature, travaux |
+| `internal/orgs` | inventaire des organisations : rôle et droit de créer |
 | `internal/starter` | lecture d'un dossier de fichiers de départ |
 | `internal/config`, `internal/cache` | réglages et cache disque |
 | `internal/ghapi` | client de l'API GitHub, bâti sur go-gh |
@@ -401,6 +743,7 @@ sortie propre hors terminal.
 | `internal/clone` | clonage et mise à jour |
 | `internal/complete` | complétion des chemins, déléguée au shell |
 | `internal/ui` | console, questions, barres de progression |
+| `internal/web` | serveur local, API JSON et page embarquée |
 | `internal/app` | assemblage : drapeaux, assistant, gestion, options avancées |
 
 Publication : pousser une étiquette `vX.Y.Z` déclenche le workflow
@@ -429,6 +772,61 @@ tranché, et pourquoi.
 - **Le mode gestion suppose un terminal.** En mode non interactif, il exige au
   moins un préfixe (`--manage tp1`) et refuse de choisir un groupe à votre
   place.
+- **Un groupe est une convention de nommage, pas une base de données.** Le nom
+  d'un dépôt porte l'appartenance ; GitHub reste la seule source de vérité, et
+  la nomenclature déjà en place d'une organisation (`a26-5n6-travailsession-…`)
+  est reconnue sans rien renommer. Déclarer ou oublier un groupe n'écrit ni
+  n'efface rien sur GitHub.
+- **Un groupe se désigne par sa place, jamais par un identifiant local.** Un
+  numéro tiré au hasard, ou un nom d'affichage saisi à la main, n'auraient de
+  sens que sur la machine qui les a écrits : deux enseignants regardant la même
+  organisation n'y verraient pas la même chose, et un lien ne vaudrait pas d'un
+  poste à l'autre. La place — `a26.5n6.1010` — est dans le nom de chaque dépôt,
+  donc partout la même. Elle sert d'adresse dans l'interface comme dans l'API, et
+  le fichier local s'y greffe au lieu de s'y substituer. C'est aussi pourquoi le
+  nom long d'une session se **déduit** de son nom court plutôt que de s'écrire
+  quelque part : « a26 » se lit « Automne 2026 » sur n'importe quelle machine.
+  Conséquence assumée : renommer un groupe, c'est renommer ses dépôts.
+- **Le fichier local ne retient que des choix déjà faits.** La liste importée
+  d'un CSV, les réglages des prochains travaux, un groupe déclaré à l'avance :
+  rien qui s'affiche n'y est inventé, et le perdre ne fait perdre aucune
+  information sur ce qui existe. L'alternative — un dépôt de service dans
+  l'organisation pour y stocker la liste — rendrait le groupe partageable entre
+  plusieurs enseignants, au prix d'écritures que personne n'a demandées ; elle
+  reste ouverte.
+- **Un séparateur réservé rend les noms de dépôts relisibles.** GitHub
+  n'autorise que `.`, `-` et `_` en plus des lettres et des chiffres ; le tiret
+  servant déjà à l'intérieur des noms, le **point** sépare les cinq niveaux.
+  Il est impossible à saisir sans effort particulier : la slugification remplace
+  déjà tout caractère non alphanumérique par un tiret, si bien qu'un CSV ponctué
+  est nettoyé et qu'un compte GitHub n'en contient jamais. Un nom se découpe donc
+  sans rien deviner, là où `a26-5n6-tp1-emilie-cote` demandait de connaître
+  d'avance la liste des comptes.
+- **Le nom de l'étudiant, plutôt que son compte.** Un dépôt se lit sans
+  connaître le pseudonyme de personne. En contrepartie, le nom complet devient
+  obligatoire, les homonymes font échouer la préparation avant toute écriture, et
+  **le compte GitHub n'est plus déductible du nom du dépôt** : il vit dans la
+  liste du groupe, et sur le dépôt sous forme d'invitation.
+- **Les anciennes nomenclatures restent lisibles, isolées dans un fichier.**
+  `internal/classroom/legacy.go` rassemble tout ce qui ne sert qu'aux dépôts
+  nommés avant la forme courante : la forme tout en tirets, relue par gabarit
+  inversé (`plan.Matcher`) et par détection de préfixe, et la forme à quatre
+  niveaux, qui se découpe déjà mais sans porter la session. Un groupe déclaré
+  sous cette dernière est ramené au rang de préfixe hérité à la lecture du
+  fichier, plutôt que de viser une session vide. Rien n'y est créé : ces groupes
+  s'affichent et se migrent, mais on ne leur distribue plus. Le jour où plus
+  aucune organisation n'en contient, le fichier disparaît d'un bloc.
+- **L'interface web est une API au-dessus des paquets du domaine, pas un
+  terminal déguisé.** `internal/web` appelle `plan`, `groups`, `runner`, `clone`
+  et `ghapi` directement : la validation, les gabarits, le refus des collisions
+  de noms et la confirmation par nom exact restent au même endroit, et les deux
+  interfaces ne peuvent pas diverger sur ce qui compte. Ce qui est propre au
+  terminal — questions, barres, couleurs — n'y entre pas ; les opérations longues
+  deviennent des travaux en arrière-plan suivis par un flux d'événements.
+- **La page est embarquée dans le binaire** (`go:embed`), sans dépendance
+  externe ni étape de construction : du HTML, du CSS et du JavaScript écrits à la
+  main. La promesse « aucune installation nécessaire » vaut aussi pour
+  l'interface graphique, et le graphe de dépendances du module ne bouge pas.
 - **Les questions passent par une interface `ui.Prompter`.** Quatre
   implémentations : `huh` sur un vrai terminal ; un questionneur en mode ligne
   (listes numérotées, sélections par expression) quand la sortie est redirigée

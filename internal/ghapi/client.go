@@ -394,6 +394,17 @@ func (c *Client) CancelInvitation(owner, repo string, invitationID int64) error 
 	return err
 }
 
+// RenameRepo renomme un dépôt. GitHub garde une redirection depuis l'ancien
+// nom : les clones et les liens déjà distribués continuent de fonctionner.
+func (c *Client) RenameRepo(owner, repo, name string) (*Repo, error) {
+	response, err := c.do(http.MethodPatch, repoPath(owner, repo), map[string]any{"name": name})
+	if err != nil {
+		return nil, err
+	}
+	renamed := &Repo{}
+	return renamed, response.JSON(renamed)
+}
+
 // DeleteRepo supprime définitivement un dépôt. Irréversible : à n'appeler
 // qu'après confirmation explicite de la personne qui enseigne.
 func (c *Client) DeleteRepo(owner, repo string) error {

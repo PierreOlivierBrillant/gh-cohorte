@@ -12,7 +12,14 @@ import (
 )
 
 // Placeholders énumère les champs autorisés dans les gabarits.
-var Placeholders = []string{"assignment", "username", "name", "fullname", "first", "last", "index"}
+//
+// {assignment} est l'identifiant complet du travail — « a26.5n6.01.tp1 » sous la
+// nomenclature courante. {title} n'en garde que le dernier niveau, « tp1 » :
+// c'est ce qu'on veut lire dans la description d'un dépôt, où le chemin complet
+// n'apprend rien de plus que son nom.
+var Placeholders = []string{
+	"assignment", "title", "username", "name", "fullname", "first", "last", "index",
+}
 
 var placeholderRe = regexp.MustCompile(`\{([a-z_]+)\}`)
 
@@ -73,6 +80,7 @@ func fields(person roster.Person, assignment string, index int) map[string]strin
 	}
 	return map[string]string{
 		"assignment": assignment,
+		"title":      title(assignment),
 		"username":   person.Username,
 		"name":       valid.Slugify(person.FullName),
 		"fullname":   person.FullName,
@@ -82,12 +90,75 @@ func fields(person roster.Person, assignment string, index int) map[string]strin
 	}
 }
 
+// title ne garde du travail que son dernier niveau.
+func title(assignment string) string {
+	if position := strings.LastIndex(assignment, "."); position >= 0 {
+		return assignment[position+1:]
+	}
+	return assignment
+}
+
 // Render remplit un gabarit pour une personne.
 func Render(pattern string, person roster.Person, assignment string, index int) string {
 	values := fields(person, assignment, index)
 	return placeholderRe.ReplaceAllStringFunc(pattern, func(match string) string {
 		return values[strings.Trim(match, "{}")]
 	})
+}
+
+// Matcher construit l'expression qui reconnaît les dépôts d'une personne et en
+// extrait l'identifiant du travail : c'est l'inverse de Render. Elle permet de
+// rattacher un dépôt existant à un travail sans deviner où finit le nom du
+// travail et où commence le compte — « a26-5n6-tp1-emilie-cote » ne se découpe
+// pas autrement que si l'on connaît déjà « emilie-cote ».
+//
+// Le champ {index} n'est pas connu à la relecture : n'importe quel nombre y est
+// accepté. Un gabarit sans {assignment} ne se relit pas et renvoie nil.
+func Matcher(pattern string, person roster.Person) *regexp.Regexp {
+	// {title} ne se relit pas : deux champs libres dans un même nom ne se
+	// découpent pas sans deviner.
+	if !strings.Contains(pattern, "{assignment}") || strings.Contains(pattern, "{title}") {
+		return nil
+	}
+	values := fields(person, "", 1)
+
+	var motif strings.Builder
+	// Les noms de dépôts GitHub ne se distinguent pas par la casse.
+	motif.WriteString(`(?i)\A`)
+	position := 0
+	for _, bornes := range placeholderRe.FindAllStringSubmatchIndex(pattern, -1) {
+		motif.WriteString(regexp.QuoteMeta(pattern[position:bornes[0]]))
+		switch champ := pattern[bornes[2]:bornes[3]]; champ {
+		case "assignment":
+			motif.WriteString(`(.+)`)
+		case "index":
+			motif.WriteString(`\d+`)
+		default:
+			motif.WriteString(regexp.QuoteMeta(values[champ]))
+		}
+		position = bornes[1]
+	}
+	motif.WriteString(regexp.QuoteMeta(pattern[position:]))
+	motif.WriteString(`\z`)
+
+	expression, err := regexp.Compile(motif.String())
+	if err != nil {
+		return nil
+	}
+	return expression
+}
+
+// Assignment retrouve l'identifiant du travail auquel un dépôt appartient, pour
+// une personne donnée.
+func Assignment(expression *regexp.Regexp, repoName string) (string, bool) {
+	if expression == nil {
+		return "", false
+	}
+	parts := expression.FindStringSubmatch(repoName)
+	if parts == nil || len(parts) < 2 || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
 }
 
 // Build construit le plan complet et refuse toute collision de noms de dépôts.

@@ -78,8 +78,8 @@ func (g Group) Suffixes() map[string]bool {
 
 // Detected est un groupe deviné à partir des noms de dépôts.
 type Detected struct {
-	Prefix string
-	Count  int
+	Prefix string `json:"prefix"`
+	Count  int    `json:"count"`
 }
 
 // segmented découpe les noms en segments, en minuscules. Un nom sans séparateur
