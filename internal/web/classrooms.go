@@ -14,6 +14,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -209,21 +210,55 @@ type studentRow struct {
 	FullName    string              `json:"full_name"`
 	Username    string              `json:"username"`
 	Assignments []studentAssignment `json:"assignments"`
+	// PushedAt est le dernier envoi de la personne, tous travaux confondus.
+	PushedAt string `json:"pushed_at,omitempty"`
 }
 
 // studentAssignment dit où un étudiant a déjà un dépôt.
 type studentAssignment struct {
-	Name string `json:"name"`
-	ID   string `json:"id"`
-	Repo string `json:"repo"`
-	URL  string `json:"url"`
+	Name     string `json:"name"`
+	ID       string `json:"id"`
+	Repo     string `json:"repo"`
+	URL      string `json:"url"`
+	PushedAt string `json:"pushed_at,omitempty"`
+}
+
+// studentQuery lit les critères de tri et de filtre passés dans l'adresse. Ce
+// qu'ils veulent dire est décidé dans « students » : l'interface ne fait ici
+// que transmettre ce qu'on lui a demandé.
+func studentQuery(request *http.Request) (students.Filter, students.Key, bool, error) {
+	valeurs := request.URL.Query()
+	filtre, err := students.Filter{
+		Text:         valeurs.Get("q"),
+		Name:         valeurs.Get("name"),
+		Username:     valeurs.Get("username"),
+		Assignment:   valeurs.Get("assignment"),
+		PushedAfter:  valeurs.Get("after"),
+		PushedBefore: valeurs.Get("before"),
+		Activity:     students.Activity(valeurs.Get("activity")),
+	}.Validate()
+	if err != nil {
+		return filtre, students.ByName, false, err
+	}
+	tri, err := students.ParseKey(valeurs.Get("sort"))
+	if err != nil {
+		return filtre, tri, false, err
+	}
+	return filtre, tri, valeurs.Get("desc") == "1", nil
 }
 
 // handleClassroomStudents croise les étudiants du groupe avec ses travaux :
 // c'est l'équivalent du « a accepté le devoir » de GitHub Classroom, déduit des
-// dépôts existants plutôt que d'une invitation.
+// dépôts existants plutôt que d'une invitation. La liste se filtre et se trie
+// ici plutôt qu'au navigateur, pour que « avant le 1er octobre » veuille dire
+// la même chose partout.
 func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *http.Request) {
 	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	filtre, tri, decroissant, err := studentQuery(request)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -234,37 +269,39 @@ func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	travaux := cours.Assignments(repos)
-	// Les dépôts de chaque travail sont rattachés à leur étudiant une fois pour
-	// toutes : la relecture d'un nom ne dépend plus du compte GitHub.
-	parEtudiant := map[string][]studentAssignment{}
-	for _, travail := range travaux {
-		for _, repo := range cours.Repos(travail.ID, repos) {
-			student, inscrit := cours.StudentOf(repo.Name)
-			if !inscrit {
-				continue
-			}
-			cle := strings.ToLower(student.Username)
-			parEtudiant[cle] = append(parEtudiant[cle], studentAssignment{
-				Name: travail.Name, ID: travail.ID, Repo: repo.Name,
-				URL: s.urlOf(cours.Org, repo),
-			})
+	toutes := students.Build(cours, repos)
+	retenues := students.Apply(toutes, filtre, tri, decroissant)
+
+	// Les noms complets manquants se comptent sur le groupe entier : le
+	// bouton qui les retrouve n'a pas à dépendre de ce qui est affiché.
+	manquants := 0
+	for _, ligne := range toutes {
+		if ligne.FullName == "" {
+			manquants++
 		}
 	}
 
-	lignes := make([]studentRow, 0, len(cours.Students))
-	for _, student := range cours.Students {
-		travauxDeLEtudiant := parEtudiant[strings.ToLower(student.Username)]
-		if travauxDeLEtudiant == nil {
-			travauxDeLEtudiant = []studentAssignment{}
+	lignes := make([]studentRow, 0, len(retenues))
+	for _, ligne := range retenues {
+		travaux := make([]studentAssignment, 0, len(ligne.Repos))
+		for _, depot := range ligne.Repos {
+			travaux = append(travaux, studentAssignment{
+				Name: depot.Assignment, ID: depot.ID, Repo: depot.Name,
+				URL:      s.urlOf(cours.Org, groups.Repo{Name: depot.Name, URL: depot.URL}),
+				PushedAt: depot.PushedAt,
+			})
 		}
 		lignes = append(lignes, studentRow{
-			FullName: student.FullName, Username: student.Username,
-			Assignments: travauxDeLEtudiant,
+			FullName: ligne.FullName, Username: ligne.Username,
+			Assignments: travaux, PushedAt: ligne.PushedAt,
 		})
 	}
+
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"students": lignes, "assignments": travaux,
+		"students": lignes, "assignments": cours.Assignments(repos),
+		// Le total dit combien le filtre a écarté : sans lui, une liste vide ne
+		// distinguerait pas un groupe vide d'un critère trop étroit.
+		"total": len(toutes), "shown": len(lignes), "missing_names": manquants,
 	})
 }
 
@@ -279,8 +316,6 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 	var body struct {
 		Path   string          `json:"path"`
 		People []roster.Person `json:"people"`
-		// Append ajoute à la liste au lieu de la remplacer.
-		Append bool `json:"append"`
 	}
 	if err := decode(request, &body); err != nil {
 		fail(writer, err)
@@ -300,15 +335,11 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 			cours.RosterPath = chemin
 		}
 	}
-	if len(people) == 0 && !body.Append {
+	if len(people) == 0 {
 		fail(writer, valid.Errorf("Aucun étudiant dans la liste fournie."))
 		return
 	}
-	if body.Append {
-		cours.Students = append(cours.Students, people...)
-	} else {
-		cours.Students = people
-	}
+	cours.Students = people
 
 	modifie, err := s.classrooms.Save(cours)
 	if err != nil {
@@ -318,6 +349,168 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"classroom": s.fiche(modifie), "issues": issues,
 	})
+}
+
+// handleAddStudent ajoute une personne à la liste du groupe, sans toucher au
+// reste. Remplacer la liste entière pour une inscription tardive obligeait à
+// avoir le fichier sous la main ; ici, deux champs suffisent.
+//
+// Les travaux qu'on lui désigne lui sont remis dans la foulée, aux réglages que
+// le groupe retient — ceux-là mêmes qui ont servi à ses camarades. Sans eux,
+// une arrivée en cours de session demandait de revenir distribuer travail par
+// travail.
+func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Request) {
+	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body struct {
+		FullName string `json:"full_name"`
+		Username string `json:"username"`
+		// Assignments désigne les travaux dont le dépôt doit lui être créé.
+		Assignments []string `json:"assignments"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	augmente, err := cours.Add(roster.Person{FullName: body.FullName, Username: body.Username})
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	// Un compte qui n'existe pas sur GitHub ne sert à rien dans une liste :
+	// aucun dépôt ne pourra lui être remis.
+	personne := augmente.Students[len(augmente.Students)-1]
+	if existe, err := s.deps.Client.UserExists(personne.Username); err == nil && !existe {
+		fail(writer, valid.Errorf("Le compte « %s » n'existe pas sur GitHub.", personne.Username))
+		return
+	}
+
+	// Tout est préparé avant d'écrire quoi que ce soit : un travail qu'on ne
+	// saurait pas nommer refuse l'ajout entier plutôt que de laisser la
+	// personne inscrite à moitié servie.
+	remises, err := s.remises(augmente, personne, body.Assignments)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+
+	modifie, err := s.classrooms.Save(augmente)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if len(remises) == 0 {
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"classroom": s.fiche(modifie), "student": personne, "created": 0,
+		})
+		return
+	}
+
+	noms := make([]string, 0, len(remises))
+	for _, remise := range remises {
+		noms = append(noms, remise.Name)
+	}
+	label := "Dépôts de @" + personne.Username + " — " + strings.Join(noms, ", ")
+	job := s.jobs.Start("distribution", label, func(job *Job) (any, error) {
+		crees, existants, echecs := 0, 0, 0
+		for index, remise := range remises {
+			if job.Canceled() {
+				break
+			}
+			executor := runner.New(s.deps.Client, remise.Settings, remise.Bundle)
+			report, err := executor.Run(remise.Items, runner.Options{
+				OnProgress: func(_, _ int, result runner.Result) {
+					job.Line(result.Repo+" : "+result.Status, result)
+				},
+			})
+			if err != nil {
+				return nil, err
+			}
+			crees += report.Count(runner.Created)
+			existants += report.Count(runner.Existing)
+			echecs += len(report.Failures())
+			job.Progress(index+1, len(remises), remise.Name)
+		}
+		if crees > 0 {
+			s.forget(cours.Org)
+		}
+		return map[string]any{
+			"student": personne, "created": crees,
+			"existing": existants, "failed": echecs,
+		}, nil
+	})
+	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
+// remise est un travail à remettre à une personne : ses réglages, le dépôt à
+// créer, et les fichiers de départ qui l'accompagnent.
+type remise struct {
+	Name     string
+	Settings config.Settings
+	Items    []plan.PlannedRepo
+	Bundle   *starter.Bundle
+}
+
+// remises compose ce qu'il faut créer pour donner à une personne les dépôts des
+// travaux désignés. Rien n'est écrit ici : un réglage devenu faux — un dossier
+// de fichiers de départ disparu depuis la dernière distribution — refuse la
+// remise entière au lieu de l'interrompre à mi-chemin.
+func (s *Server) remises(cours classroom.Classroom, personne roster.Person,
+	noms []string) ([]remise, error) {
+	if len(noms) == 0 {
+		return nil, nil
+	}
+	if cours.Legacy() {
+		return nil, valid.Errorf(
+			"« %s » suit une nomenclature dépassée : ses dépôts ne peuvent pas être nommés. "+
+				"Renommez-les d'abord, ou ajoutez la personne sans ses dépôts.", cours.Label())
+	}
+
+	// Le nom du dépôt vient du nom complet : sans lui, il n'y a rien à nommer.
+	// Le dire ici évite de laisser l'échec surgir du fond du plan.
+	if _, err := naming.Student(personne.FullName); err != nil {
+		return nil, valid.Errorf(
+			"Le nom complet de @%s manque : sans lui, ses dépôts ne peuvent pas être nommés.",
+			personne.Username)
+	}
+
+	vus := map[string]bool{}
+	preparees := make([]remise, 0, len(noms))
+	for _, brut := range noms {
+		nom, err := naming.Fragment(brut, "Nom du travail")
+		if err != nil {
+			return nil, err
+		}
+		if vus[strings.ToLower(nom)] {
+			continue
+		}
+		vus[strings.ToLower(nom)] = true
+
+		settings, err := normalize(cours.Settings(nom))
+		if err != nil {
+			return nil, err
+		}
+		items, err := plan.Build([]roster.Person{personne}, settings)
+		if err != nil {
+			return nil, err
+		}
+		var bundle *starter.Bundle
+		if strings.TrimSpace(settings.StarterDir) != "" {
+			if bundle, err = starter.Load(settings.StarterDir); err != nil {
+				return nil, valid.Errorf(
+					"Fichiers de départ de « %s » : %v Corrigez le dossier dans les réglages "+
+						"du groupe, ou ajoutez la personne sans ce travail.", nom, err)
+			}
+			settings.StarterDir = bundle.Root
+		}
+		preparees = append(preparees, remise{
+			Name: nom, Settings: settings, Items: items, Bundle: bundle,
+		})
+	}
+	return preparees, nil
 }
 
 // handleResolveStudentNames retrouve les noms complets manquants et les retient.

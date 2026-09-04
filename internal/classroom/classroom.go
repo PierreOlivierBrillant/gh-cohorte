@@ -321,6 +321,21 @@ func (c Classroom) Has(username string) bool {
 	return trouve
 }
 
+// Add ajoute une personne à la liste du groupe. Un compte déjà présent est
+// refusé plutôt que fondu dans la liste : ajouter quelqu'un qui y est déjà ne
+// change rien, et le taire laisserait croire le contraire.
+func (c Classroom) Add(person roster.Person) (Classroom, error) {
+	person, err := person.Validate()
+	if err != nil {
+		return c, err
+	}
+	if _, deja := c.Find(person.Username); deja {
+		return c, valid.Errorf("@%s est déjà dans « %s ».", person.Username, c.Label())
+	}
+	c.Students = append(append([]roster.Person(nil), c.Students...), person)
+	return c, nil
+}
+
 // Find retrouve un étudiant du groupe par son compte GitHub.
 func (c Classroom) Find(username string) (roster.Person, bool) {
 	for _, student := range c.Students {

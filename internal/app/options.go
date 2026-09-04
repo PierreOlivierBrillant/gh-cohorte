@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -20,10 +21,16 @@ const unset = "\x00absent"
 
 // Options rassemble les drapeaux de la ligne de commande.
 type Options struct {
-	Org              string
-	Manage           string // vide = choisir le groupe dans la liste
-	ManageRequested  bool
-	Roster           string
+	Org             string
+	Manage          string // vide = choisir le groupe dans la liste
+	ManageRequested bool
+	Roster          string
+	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
+	// dans quel ordre. Ce que ces critères signifient est décidé dans
+	// « students » : les trois interfaces s'y tiennent.
+	Filter           students.Filter
+	Sort             students.Key
+	SortDesc         bool
 	Assignment       string
 	Template         string
 	TemplateSet      bool
@@ -77,6 +84,12 @@ Utilisation :
 Drapeaux :
   --org ORG                organisation GitHub cible
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
+  --filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
+  --pushed-after DATE      ne lister que les envois postérieurs à DATE (AAAA-MM-JJ)
+  --pushed-before DATE     ne lister que les envois antérieurs à DATE
+  --never-pushed           ne lister que les dépôts sans aucun envoi
+  --sort nom|compte|envoi  colonne de tri de la liste (défaut : nom)
+  --sort-desc              trier du plus grand au plus petit
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
   --template ORG/DEPOT     dépôt modèle (vide = dépôt neuf initialisé)
@@ -134,6 +147,13 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	delay := set.Float64("delay", -1, "marge entre deux créations")
 
 	set.StringVar(&options.Org, "org", "", "organisation GitHub cible")
+	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")
+	apres := set.String("pushed-after", "", "envois postérieurs à cette date")
+	avant := set.String("pushed-before", "", "envois antérieurs à cette date")
+	muets := set.Bool("never-pushed", false, "dépôts sans aucun envoi")
+	tri := set.String("sort", "", "colonne de tri de la liste")
+	set.BoolVar(&options.SortDesc, "sort-desc", false, "trier du plus grand au plus petit")
+
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
 	set.StringVar(&options.Pattern, "pattern", "", "gabarit de nom des dépôts")
@@ -167,6 +187,23 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		return nil, valid.Errorf(
 			"Argument inattendu : « %s ». Lancez « gh cohorte --help » pour la liste des drapeaux.",
 			rest[0])
+	}
+
+	// Les critères de liste sont validés ici : une date mal écrite doit
+	// arrêter la ligne de commande, pas se perdre en cours de route.
+	options.Filter = students.Filter{
+		Text: *filtre, PushedAfter: *apres, PushedBefore: *avant,
+	}
+	if *muets {
+		options.Filter.Activity = students.Silent
+	}
+	filtreValide, err := options.Filter.Validate()
+	if err != nil {
+		return nil, err
+	}
+	options.Filter = filtreValide
+	if options.Sort, err = students.ParseKey(*tri); err != nil {
+		return nil, err
 	}
 
 	if *manage != unset {

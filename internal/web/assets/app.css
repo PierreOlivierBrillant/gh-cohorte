@@ -90,10 +90,16 @@ a:hover { text-decoration: underline; }
    session à un cours puis à un groupe ne doit pas donner l'impression de
    changer d'application. */
 .entete-page {
-  padding: 1.25rem 1.5rem 0;
+  padding: 1.25rem 1.5rem;
   background: var(--fond-doux);
   border-bottom: 1px solid var(--bord);
 }
+
+/* Les onglets viennent mourir sur le trait du bandeau : leur soulignement en
+   fait partie, et rien ne doit s'intercaler. Là où il n'y en a pas — l'accueil,
+   une session, un cours —, le sous-titre a besoin du même air en dessous qu'au
+   dessus. */
+.entete-page.avec-onglets { padding-bottom: 0; }
 
 .entete-page h1 { font-size: 1.5rem; margin: 0; }
 .titre-bloc { min-width: 0; }
@@ -347,8 +353,64 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 
 .ligne-champ { display: flex; gap: .4rem; align-items: center; }
 .ligne-champ .champ { flex: 1 1 12rem; }
+/* Un seul bandeau porte la sélection, la recherche et le reste des critères :
+   ceux qui servent à chaque fois restent sous la main, les autres tiennent dans
+   un menu qu'on n'ouvre qu'au besoin. */
+.champ.recherche { width: auto; flex: 0 1 16rem; min-width: 9rem; }
+
+.menu-ancre { position: relative; }
+
+/* Le menu est posé au-dessus de la page plutôt que dans la boîte : celle-ci
+   rogne ce qui dépasse d'elle, et le menu dépasse toujours. Sa place est donc
+   calculée à l'ouverture, sous le bouton qui l'appelle. */
+.menu-flottant {
+  position: fixed;
+  z-index: 20;
+  min-width: 15rem;
+  padding: .8rem;
+  background: var(--fond);
+  border: 1px solid var(--bord-net);
+  border-radius: var(--rayon);
+  box-shadow: 0 8px 24px rgba(31, 35, 40, .16);
+}
+
+.menu-flottant > * + * { margin-top: .7rem; }
+.menu-flottant .champ { width: 100%; }
+.menu-pied { display: flex; justify-content: flex-end; border-top: 1px solid var(--bord);
+  padding-top: .7rem; }
+
+/* Le tri est là où il se lit : dans l'en-tête de la colonne qu'il ordonne. */
+.tableau.triable th[data-tri] { padding: 0; }
+
+.tableau.triable th[data-tri] button {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  width: 100%;
+  padding: .5rem .9rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tableau.triable th[data-tri] button:hover { color: var(--texte); background: var(--fond-creux); }
+.tableau.triable th[aria-sort] button { color: var(--texte); }
+.fleche { font-size: .7em; }
+
 .rangee { display: flex; gap: 1.25rem; flex-wrap: wrap; }
 .rangee > .champ-bloc { flex: 1 1 20rem; }
+/* Trois champs courts — une place de groupe — tiennent sur une seule ligne,
+   même dans l'étroitesse d'un dialogue. */
+/* Une liste de travaux à cocher : assez serrée pour se lire d'un coup d'œil,
+   assez aérée pour qu'une case reste facile à viser. */
+.cases-travaux { display: flex; flex-direction: column; gap: .4rem; margin-top: .35rem; }
+
+.rangee.serree { gap: .6rem; }
+.rangee.serree > .champ-bloc { flex: 1 1 5rem; }
 
 .groupe-radio { border: 1px solid var(--bord); border-radius: var(--rayon); padding: .8rem .9rem; margin: 0; }
 .groupe-radio legend { padding: 0 .35rem; }

@@ -2,10 +2,12 @@ package app_test
 
 import (
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 )
 
 func analyser(t *testing.T, args ...string) *app.Options {
@@ -149,5 +151,33 @@ func TestParseAide(t *testing.T) {
 		if !strings.Contains(sortie.String(), "assistant interactif au terminal") {
 			t.Errorf("%s : aide absente :\n%s", drapeau, sortie.String())
 		}
+	}
+}
+
+// Les critères de liste sont validés dès la ligne de commande : une date mal
+// écrite doit arrêter l'outil, pas se perdre en cours de route.
+func TestOptionsFiltreEtTriDeLaListe(t *testing.T) {
+	options, err := app.Parse([]string{
+		"--filter", "cote", "--pushed-after", "2026-10-01",
+		"--never-pushed", "--sort", "envoi", "--sort-desc",
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("analyse : %v", err)
+	}
+	if options.Filter.Text != "cote" || options.Filter.PushedAfter != "2026-10-01" {
+		t.Fatalf("filtre : %+v", options.Filter)
+	}
+	if options.Filter.Activity != students.Silent {
+		t.Fatalf("activité : %q", options.Filter.Activity)
+	}
+	if options.Sort != students.ByPushed || !options.SortDesc {
+		t.Fatalf("tri : %q (décroissant : %v)", options.Sort, options.SortDesc)
+	}
+
+	if _, err := app.Parse([]string{"--pushed-before", "hier"}, io.Discard); err == nil {
+		t.Fatal("une date qui n'en est pas une doit être refusée")
+	}
+	if _, err := app.Parse([]string{"--sort", "popularite"}, io.Discard); err == nil {
+		t.Fatal("un tri inconnu doit être refusé")
 	}
 }

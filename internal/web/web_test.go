@@ -764,6 +764,181 @@ func TestEtudiantsDuGroupeCroisesAvecLesTravaux(t *testing.T) {
 	}
 }
 
+// La liste s'ordonne et se réduit côté serveur : c'est là que « dernier envoi
+// avant le 1er octobre » a un sens, et il doit être le même partout.
+func TestListeDesEtudiantsSeFiltreEtSeTrie(t *testing.T) {
+	state := fakegh.NewState()
+	envois := map[string]string{
+		"a26.5n6.01.tp1.jean-luc-picard": "2026-10-15T10:00:00Z",
+		"a26.5n6.01.tp1.emilie-cote":     "2026-09-20T10:00:00Z",
+	}
+	for nom, envoi := range envois {
+		state.AddRepo("acme", nom, true).PushedAt = envoi
+	}
+	h := nouveau(t, state)
+	id := h.groupe("a26", "5n6", "01",
+		"Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote",
+		"Aminata Diallo", "aminata-d")
+
+	comptes := func(requete string) string {
+		var reponse struct {
+			Students []struct {
+				Username string `json:"username"`
+				PushedAt string `json:"pushed_at"`
+			} `json:"students"`
+			Total        int `json:"total"`
+			Shown        int `json:"shown"`
+			MissingNames int `json:"missing_names"`
+		}
+		h.json(http.MethodGet, "/api/classrooms/"+id+"/students"+requete, nil, &reponse)
+		noms := make([]string, 0, len(reponse.Students))
+		for _, etudiant := range reponse.Students {
+			noms = append(noms, etudiant.Username)
+		}
+		if reponse.Shown != len(noms) || reponse.Total != 3 {
+			t.Fatalf("%s : %d affiché(s) sur %d", requete, reponse.Shown, reponse.Total)
+		}
+		return strings.Join(noms, ",")
+	}
+
+	if ordre := comptes("?sort=envoi&desc=1"); ordre != "jlpicard,emilie-cote,aminata-d" {
+		t.Fatalf("par envoi : %s", ordre)
+	}
+	if ordre := comptes("?sort=compte"); ordre != "aminata-d,emilie-cote,jlpicard" {
+		t.Fatalf("par compte : %s", ordre)
+	}
+	// L'accent ne se met pas en travers d'une recherche tapée sans lui.
+	if ordre := comptes("?q=cote"); ordre != "emilie-cote" {
+		t.Fatalf("recherche : %s", ordre)
+	}
+	if ordre := comptes("?after=2026-10-01"); ordre != "jlpicard" {
+		t.Fatalf("après le 1er octobre : %s", ordre)
+	}
+	if ordre := comptes("?activity=sans"); ordre != "aminata-d" {
+		t.Fatalf("sans dépôt : %s", ordre)
+	}
+
+	// Un critère que le serveur ne peut pas appliquer est refusé, plutôt que
+	// silencieusement ignoré.
+	reponse, contenu := h.requete(http.MethodGet,
+		"/api/classrooms/"+id+"/students?after=hier", nil)
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+}
+
+// Une inscription tardive n'a pas à passer par le fichier : la liste s'augmente
+// d'une personne sans que le reste bouge.
+func TestEtudiantAjouteALaListe(t *testing.T) {
+	h := nouveau(t, nil)
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
+
+	var ajout struct {
+		Student struct {
+			FullName string `json:"full_name"`
+			Username string `json:"username"`
+		} `json:"student"`
+		Classroom struct {
+			Students []struct {
+				Username string `json:"username"`
+			} `json:"students"`
+		} `json:"classroom"`
+	}
+	h.json(http.MethodPost, "/api/classrooms/"+id+"/students/add",
+		map[string]string{"full_name": " Émilie  Côté ", "username": "@emilie-cote"}, &ajout)
+	// Le nom est mis en forme et le « @ » collé du profil est accepté.
+	if ajout.Student.FullName != "Émilie Côté" || ajout.Student.Username != "emilie-cote" {
+		t.Fatalf("personne : %+v", ajout.Student)
+	}
+	if len(ajout.Classroom.Students) != 2 {
+		t.Fatalf("liste : %+v", ajout.Classroom.Students)
+	}
+
+	// Ajouter deux fois le même compte ne fait rien : le taire laisserait
+	// croire le contraire.
+	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/students/add",
+		map[string]string{"full_name": "Émilie Côté", "username": "EMILIE-COTE"})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+	if !strings.Contains(string(contenu), "est déjà dans") {
+		t.Fatalf("message : %s", contenu)
+	}
+
+	// Un compte qui n'existe pas sur GitHub ne sert à rien dans une liste :
+	// aucun dépôt ne pourra jamais lui être remis.
+	reponse, contenu = h.requete(http.MethodPost, "/api/classrooms/"+id+"/students/add",
+		map[string]string{"full_name": "Personne", "username": "fantome-introuvable"})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+	if !strings.Contains(string(contenu), "n'existe pas sur GitHub") {
+		t.Fatalf("message : %s", contenu)
+	}
+
+	// Et un compte vide non plus.
+	reponse, _ = h.requete(http.MethodPost, "/api/classrooms/"+id+"/students/add",
+		map[string]string{"full_name": "Sans compte", "username": ""})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d, attendu 400", reponse.StatusCode)
+	}
+}
+
+// Une arrivée en cours de session ne devrait pas obliger à revenir distribuer
+// travail par travail : les travaux cochés lui sont remis dans la foulée, aux
+// réglages que le groupe retient.
+func TestEtudiantAjouteRecoitLesTravauxCoches(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.01.tp1.jean-luc-picard", "a26.5n6.01.tp2.jean-luc-picard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/students/add",
+		map[string]any{
+			"full_name": "Émilie Côté", "username": "emilie-cote",
+			"assignments": []string{"tp1", "tp2"},
+		})
+	if bilan["status"] != "terminé" {
+		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
+	}
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["created"] != float64(2) || resultat["failed"] != float64(0) {
+		t.Fatalf("bilan : %+v", resultat)
+	}
+
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	attendu := "a26.5n6.01.tp1.emilie-cote,a26.5n6.01.tp1.jean-luc-picard," +
+		"a26.5n6.01.tp2.emilie-cote,a26.5n6.01.tp2.jean-luc-picard"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts : %v", noms)
+	}
+
+	// Sans nom complet, aucun dépôt ne peut être nommé : l'ajout est refusé
+	// avant d'inscrire qui que ce soit.
+	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/students/add",
+		map[string]any{"username": "aminata-d", "assignments": []string{"tp1"}})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+	if !strings.Contains(string(contenu), "nom complet") {
+		t.Fatalf("message : %s", contenu)
+	}
+	var liste struct {
+		Students []struct {
+			Username string `json:"username"`
+		} `json:"students"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id, nil, &liste)
+	if len(liste.Students) != 2 {
+		t.Fatalf("personne ne devait être inscrit à moitié : %+v", liste.Students)
+	}
+}
+
 func TestSuppressionExigeLeNomExact(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddRepo("acme", "tp1-jlpicard", true)

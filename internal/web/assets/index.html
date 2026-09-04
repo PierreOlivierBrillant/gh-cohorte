@@ -396,17 +396,62 @@
         <button type="button" id="etudiants-noms" class="bouton">Retrouver les noms complets</button>
         <button type="button" id="etudiants-importer" class="bouton">Remplacer la liste…</button>
         <button type="button" id="etudiants-recharger" class="bouton">Recharger</button>
+        <button type="button" id="etudiants-ajouter" class="bouton vert">Ajouter un étudiant…</button>
       </div>
     </div>
 
     <div class="boite">
-      <table class="tableau" id="etudiants-table">
-        <thead><tr><th>Étudiant</th><th>Compte GitHub</th><th>Travaux</th><th class="etroit"></th></tr></thead>
+      <div class="boite-entete">
+        <label class="case"><input type="checkbox" id="etudiants-tout">
+          <span id="etudiants-selection"></span></label>
+        <span class="espace"></span>
+        <input type="search" id="filtre-texte" class="champ recherche"
+          placeholder="Chercher un nom ou un compte">
+        <div class="menu-ancre">
+          <button type="button" id="filtre-ouvrir" class="bouton petit"
+            aria-expanded="false" aria-controls="filtre-menu">Filtrer</button>
+          <div class="menu-flottant" id="filtre-menu" hidden>
+            <label class="champ-bloc">
+              <span class="etiquette">Travail</span>
+              <select id="filtre-travail" class="champ"><option value="">tous</option></select>
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">Dépôts</span>
+              <select id="filtre-activite" class="champ">
+                <option value="">tous</option>
+                <option value="avec">avec dépôt</option>
+                <option value="sans">sans dépôt</option>
+                <option value="muet">jamais d’envoi</option>
+              </select>
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">Dernier envoi après</span>
+              <input type="date" id="filtre-apres" class="champ">
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">… et avant</span>
+              <input type="date" id="filtre-avant" class="champ">
+            </label>
+            <div class="menu-pied">
+              <button type="button" id="filtre-vider" class="bouton petit">Tout effacer</button>
+            </div>
+          </div>
+        </div>
+        <button type="button" id="etudiants-deplacer" class="bouton petit">Déplacer la sélection…</button>
+      </div>
+
+      <table class="tableau triable" id="etudiants-table">
+        <thead><tr>
+          <th class="etroit"></th>
+          <th data-tri="nom"><button type="button">Étudiant<span class="fleche"></span></button></th>
+          <th data-tri="compte"><button type="button">Compte GitHub<span class="fleche"></span></button></th>
+          <th>Travaux</th>
+          <th data-tri="envoi"><button type="button">Dernier envoi<span class="fleche"></span></button></th>
+          <th class="etroit"></th>
+        </tr></thead>
         <tbody></tbody>
       </table>
-      <div class="boite-vide" id="etudiants-vide" hidden>
-        Aucun étudiant dans ce groupe. Importez une liste « nom complet, compte GitHub ».
-      </div>
+      <div class="boite-vide" id="etudiants-vide" hidden></div>
     </div>
   </section>
 
