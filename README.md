@@ -602,6 +602,18 @@ distribution, refuse l'ajout entier plutôt que de laisser quelqu'un inscrit à
 moitié servi. Le nom complet peut manquer si aucun travail n'est coché : il se
 retrouve ensuite depuis le profil, mais aucun dépôt ne peut être nommé d'ici là.
 
+**Renommer…**, sur une ligne, corrige une fiche seule — le nom complet, le
+compte GitHub, ou les deux. Une faute de frappe obligeait jusqu'ici à remplacer
+la liste entière, donc celle de tout le monde, et à retrouver le fichier.
+
+Le nom complet est le dernier niveau du nom des dépôts : le corriger laisse ceux
+qui existent déjà sous l'ancien. Une case propose donc de **les renommer aussi**
+— c'est une écriture sur GitHub, qui garde une redirection depuis chaque ancien
+nom. Le compte, lui, n'entre pas dans le nom d'un dépôt : le changer ne touche
+qu'à la liste, et le nouveau est vérifié sur GitHub comme à l'inscription. Le
+plan est composé en entier avant la première écriture : un nom déjà pris refuse
+le renommage au lieu de l'interrompre à mi-chemin.
+
 **Le tri est dans l'en-tête des colonnes** : cliquer sur *Étudiant*, *Compte
 GitHub* ou *Dernier envoi* trie dessus, recliquer retourne l'ordre. Une flèche
 marque la colonne active, et chaque colonne part de son sens naturel — un nom de
@@ -672,7 +684,8 @@ et le tri de la liste y sont les mêmes, drapeaux compris — `--filter`,
 
 **Ce qui n'existe que dans l'interface web**, faute d'une notion de groupe au
 terminal : déclarer un groupe, le renommer, l'adopter par gabarit, tenir sa
-liste d'étudiants, et en déplacer d'un groupe à l'autre. Un préfixe ne dit pas
+liste d'étudiants — y inscrire quelqu'un, corriger une fiche, remplacer la
+liste —, et en déplacer d'un groupe à l'autre. Un préfixe ne dit pas
 où commence le groupe et où finit le travail ; l'assistant ne peut donc pas les
 distinguer, et il n'a pas de liste à tenir — la sienne est le fichier CSV que
 `--roster` désigne.
@@ -833,7 +846,7 @@ sortie propre hors terminal.
 | `internal/groups` | détection des groupes de dépôts, sélections |
 | `internal/naming` | la nomenclature des dépôts : composition et relecture |
 | `internal/picker` | la fenêtre de sélection du système, et l'explorateur de repli |
-| `internal/classroom` | groupes : étudiants, place dans la nomenclature, travaux, déplacements |
+| `internal/classroom` | groupes : étudiants, place dans la nomenclature, travaux, déplacements et renommages |
 | `internal/students` | liste des étudiants d'un groupe : construction, filtre, tri |
 | `internal/orgs` | inventaire des organisations : rôle et droit de créer |
 | `internal/starter` | lecture d'un dossier de fichiers de départ |

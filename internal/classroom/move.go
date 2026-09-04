@@ -9,14 +9,16 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
-// Une personne change de groupe en cours de session : c'est fréquent. Sa fiche
-// suit toujours ; ses dépôts, eux, ne bougent que si on le demande — les
-// renommer est une écriture sur GitHub, pas un rangement local.
+// Une personne change de groupe en cours de session, ou son nom était mal
+// orthographié : c'est fréquent. Sa fiche suit toujours ; ses dépôts, eux, ne
+// bougent que si on le demande — les renommer est une écriture sur GitHub, pas
+// un rangement local.
 //
 // Le plan se compose entièrement avant que le premier renommage ne parte : une
-// collision refuse ainsi le déplacement au lieu de l'interrompre à mi-chemin.
+// collision refuse ainsi l'opération au lieu de l'interrompre à mi-chemin.
 
-// Move est un dépôt à renommer parce que son étudiant change de groupe.
+// Move est un dépôt à renommer parce que son étudiant a changé de groupe ou de
+// nom.
 type Move struct {
 	Repo     string `json:"repo"`
 	Target   string `json:"target"`
@@ -38,15 +40,53 @@ func PlanMove(depart, arrivee Classroom, personnes []roster.Person,
 
 	fragments := map[string]string{}
 	for _, personne := range personnes {
-		fragment, err := naming.Student(personne.FullName)
+		fragment, err := fragmentDe(personne)
 		if err != nil {
-			return nil, valid.Errorf(
-				"Le nom complet de @%s manque : sans lui, ses dépôts ne peuvent pas être "+
-					"renommés.", personne.Username)
+			return nil, err
 		}
 		fragments[strings.ToLower(personne.Username)] = fragment
 	}
+	return planRenames(depart, arrivee, fragments, repos)
+}
 
+// PlanRenameStudent compose le renommage des dépôts d'une personne dont le nom
+// complet change. Le nom de l'étudiant est le dernier niveau du nom d'un dépôt :
+// corriger sa fiche ne suffit pas, les dépôts déjà créés portent l'ancien.
+//
+// La personne est désignée par le compte qu'elle avait : c'est lui qui la
+// retrouve dans le groupe tel qu'il est encore.
+func PlanRenameStudent(cours Classroom, avant, apres roster.Person,
+	repos []groups.RepoInfo) ([]Move, error) {
+	if cours.Legacy() {
+		return nil, valid.Errorf(
+			"« %s » suit une nomenclature dépassée : ses dépôts ne peuvent pas être "+
+				"nommés. Renommez-les d'abord, ou renommez sans les dépôts.", cours.Label())
+	}
+	fragment, err := fragmentDe(apres)
+	if err != nil {
+		return nil, err
+	}
+	return planRenames(cours, cours,
+		map[string]string{strings.ToLower(avant.Username): fragment}, repos)
+}
+
+// fragmentDe rend le fragment qui nomme une personne dans un dépôt.
+func fragmentDe(personne roster.Person) (string, error) {
+	fragment, err := naming.Student(personne.FullName)
+	if err != nil {
+		return "", valid.Errorf(
+			"Le nom complet de @%s manque : sans lui, ses dépôts ne peuvent pas être "+
+				"renommés.", personne.Username)
+	}
+	return fragment, nil
+}
+
+// planRenames compose les nouveaux noms : chaque dépôt du groupe de départ dont
+// l'étudiant figure dans « fragments » rejoint la place d'arrivée sous le
+// fragment qui lui est associé. Départ et arrivée peuvent être le même groupe —
+// c'est le cas quand seul le nom de la personne change.
+func planRenames(depart, arrivee Classroom, fragments map[string]string,
+	repos []groups.RepoInfo) ([]Move, error) {
 	existants := map[string]bool{}
 	for _, repo := range repos {
 		existants[strings.ToLower(repo.Name)] = true
@@ -69,6 +109,11 @@ func PlanMove(depart, arrivee Classroom, personnes []roster.Person,
 			}
 			cible := naming.Compose(arrivee.Session, arrivee.Course, arrivee.Group,
 				nom, fragment)
+			// Un dépôt qui porte déjà le nom visé n'a rien à faire dans le
+			// plan : il se heurterait à lui-même.
+			if strings.EqualFold(cible, repo.Name) {
+				continue
+			}
 			if existants[strings.ToLower(cible)] {
 				return nil, valid.Errorf("« %s » existe déjà.", cible)
 			}

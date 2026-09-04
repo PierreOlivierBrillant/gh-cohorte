@@ -355,7 +355,9 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .ligne-champ .champ { flex: 1 1 12rem; }
 /* Un seul bandeau porte la sélection, la recherche et le reste des critères :
    ceux qui servent à chaque fois restent sous la main, les autres tiennent dans
-   un menu qu'on n'ouvre qu'au besoin. */
+   un menu qu'on n'ouvre qu'au besoin. Ses boutons gardent donc la taille pleine
+   plutôt que « petit » : à hauteur inégale, le bandeau se lirait comme un
+   assemblage au lieu d'une seule ligne de commandes. */
 .champ.recherche { width: auto; flex: 0 1 16rem; min-width: 9rem; }
 
 .menu-ancre { position: relative; }
@@ -436,6 +438,9 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .tableau tbody tr:hover { background: var(--fond-doux); }
 .tableau .etroit { width: 1%; white-space: nowrap; }
 .tableau .vide { color: var(--texte-doux); font-style: italic; }
+/* Les actions d'une ligne restent côte à côte : la colonne s'élargit d'autant,
+   plutôt que chaque ligne du tableau de doubler de hauteur. */
+.tableau td .actions { flex-wrap: nowrap; }
 .tableau td .lien + .lien { margin-left: .6rem; }
 
 /* ------------------------------------------------------------------- avis */

@@ -432,6 +432,119 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 	writeJSON(writer, http.StatusAccepted, job.State())
 }
 
+// handleRenameStudent corrige la fiche d'une personne — son nom complet, son
+// compte GitHub, ou les deux — sans toucher au reste de la liste. Un prénom mal
+// orthographié obligeait jusqu'ici à remplacer la liste entière, donc celle de
+// tout le monde, et à avoir le fichier sous la main.
+//
+// Le nom complet est le dernier niveau du nom des dépôts : le corriger laisse
+// ceux déjà créés sous l'ancien. Les renommer est une écriture sur GitHub, elle
+// ne part donc que si on la demande.
+func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.Request) {
+	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body struct {
+		// Username désigne la personne telle qu'elle est encore inscrite.
+		Username string `json:"username"`
+		// FullName et NewUsername sont ce qu'elle devient ; un compte laissé
+		// vide reste celui qu'elle avait.
+		FullName    string `json:"full_name"`
+		NewUsername string `json:"new_username"`
+		// Repos demande de renommer aussi ses dépôts pour qu'ils portent son
+		// nouveau nom.
+		Repos bool `json:"repos"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+
+	avant, inscrit := cours.Find(body.Username)
+	if !inscrit {
+		fail(writer, valid.Errorf("@%s n'est pas dans « %s ».",
+			strings.TrimSpace(body.Username), cours.Label()))
+		return
+	}
+	compte := strings.TrimSpace(body.NewUsername)
+	if compte == "" {
+		compte = avant.Username
+	}
+	modifie, err := cours.Rename(avant.Username,
+		roster.Person{FullName: body.FullName, Username: compte})
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	apres, _ := modifie.Find(compte)
+
+	// Un compte qui n'existe pas sur GitHub ne sert à rien dans une liste :
+	// aucun dépôt ne pourra lui être remis. Celui qui ne change pas a déjà été
+	// vérifié à l'inscription.
+	if !strings.EqualFold(apres.Username, avant.Username) {
+		if existe, err := s.deps.Client.UserExists(apres.Username); err == nil && !existe {
+			fail(writer, valid.Errorf("Le compte « %s » n'existe pas sur GitHub.", apres.Username))
+			return
+		}
+	}
+
+	// Le plan se compose en entier avant la première écriture, et sur le groupe
+	// tel qu'il est encore : c'est l'ancien nom qui retrouve ses dépôts.
+	var renommages []classroom.Move
+	if body.Repos {
+		repos, _, err := s.repos(cours.Org, false)
+		if err != nil {
+			fail(writer, err)
+			return
+		}
+		if renommages, err = classroom.PlanRenameStudent(cours, avant, apres, repos); err != nil {
+			fail(writer, err)
+			return
+		}
+	}
+
+	enregistre, err := s.classrooms.Save(modifie)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+
+	bilan := map[string]any{
+		"classroom": s.fiche(enregistre), "student": apres, "previous": avant,
+		"renamed": 0,
+	}
+	if len(renommages) == 0 {
+		writeJSON(writer, http.StatusOK, bilan)
+		return
+	}
+
+	label := "Dépôts de @" + apres.Username + " au nom de " + apres.FullName
+	job := s.jobs.Start("renommage", label, func(job *Job) (any, error) {
+		renommes, echecs := 0, 0
+		for index, ligne := range renommages {
+			if job.Canceled() {
+				break
+			}
+			if _, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target); err != nil {
+				echecs++
+				job.Line(ligne.Repo+" : échec — "+err.Error(),
+					map[string]string{"status": "échec"})
+			} else {
+				renommes++
+				job.Line(ligne.Repo+" → "+ligne.Target,
+					map[string]string{"status": "mis à jour"})
+			}
+			job.Progress(index+1, len(renommages), ligne.Repo)
+		}
+		s.forget(cours.Org)
+		bilan["renamed"], bilan["failed"] = renommes, echecs
+		return bilan, nil
+	})
+	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
 // remise est un travail à remettre à une personne : ses réglages, le dépôt à
 // créer, et les fichiers de départ qui l'accompagnent.
 type remise struct {
