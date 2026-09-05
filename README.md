@@ -605,6 +605,17 @@ gh cohorte --manage travail-de-tp1 --move-to a26.5n6.01 --rename-to tp1 --yes
 d'étudiants : il conserve **tous** les derniers niveaux tels quels, là où
 l'interface web y met le nom complet quand elle le connaît.
 
+Ce tableau **se trie et se cherche comme celui des étudiants**, et pour cause :
+ce sont les mêmes lignes — un dépôt par personne — passées au même paquet. Le
+tri est dans l'en-tête des colonnes *Étudiant*, *Dépôt* et *Dernier envoi* ;
+la recherche ignore la casse et les accents ; le bouton *Filtrer* replie ce qui
+sert plus rarement — les dépôts sans le moindre envoi, et les bornes du dernier
+envoi. « Avec » et « sans dépôt » n'y figurent pas : un travail n'a qu'un dépôt
+par personne. Le résumé dit toujours combien de dépôts sont affichés sur
+combien, et la sélection ne survit pas à ce que le filtre écarte — on agit sur
+ce qu'on voit. Les critères tiennent tant qu'on reste sur le travail, une
+suppression ou une redistribution comprises ; en ouvrir un autre les efface.
+
 ### Distribuer un travail, en trois étapes
 
 Le bouton vert **Nouveau travail** ouvre l'assistant, calqué sur celui de
@@ -734,9 +745,11 @@ progression, ligne par ligne, avec un bouton d'annulation.
 
 L'assistant du terminal ignore les groupes : il continue de travailler par
 préfixe (`--manage tp1`), ce qui revient au même puisque le préfixe d'un travail
-est son identifiant. Les deux interfaces lisent les mêmes dépôts, et le filtre
-et le tri de la liste y sont les mêmes, drapeaux compris — `--filter`,
-`--pushed-after`, `--pushed-before`, `--never-pushed`, `--sort`, `--sort-desc`.
+est son identifiant : ce qu'il liste est ce que la page d'un travail montre.
+Les deux interfaces lisent les mêmes dépôts, et le filtre et le tri de la liste
+y sont les mêmes — celle du groupe comme celle d'un travail —, drapeaux compris
+— `--filter`, `--pushed-after`, `--pushed-before`, `--never-pushed`, `--sort`,
+`--sort-desc`.
 
 **Ce qui n'existe que dans l'interface web**, faute d'une notion de groupe au
 terminal : déclarer un groupe, le renommer, l'adopter par gabarit, tenir sa

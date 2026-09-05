@@ -246,25 +246,57 @@
       <div class="boite-entete">
         <label class="case"><input type="checkbox" id="detail-tout"> <span id="detail-selection"></span></label>
         <span class="espace"></span>
-        <button type="button" id="detail-copier" class="bouton petit">Copier les URL</button>
-        <button type="button" id="detail-csv" class="bouton petit">Exporter en CSV</button>
-        <button type="button" id="detail-cloner" class="bouton petit">Cloner</button>
-        <button type="button" id="detail-pull" class="bouton petit">Mettre à jour des clones</button>
+        <!-- Le bandeau porte déjà quatre commandes : l'invite dit ce qu'on
+             cherche en trois mots plutôt qu'en une phrase tronquée. -->
+        <input type="search" id="detail-texte" class="champ recherche souple"
+          placeholder="Nom ou dépôt">
+        <div class="menu-ancre">
+          <button type="button" id="detail-filtre-ouvrir" class="bouton"
+            aria-expanded="false" aria-controls="detail-filtre-menu">Filtrer</button>
+          <div class="menu-flottant" id="detail-filtre-menu" hidden>
+            <label class="champ-bloc">
+              <span class="etiquette">Dépôts</span>
+              <select id="detail-filtre-activite" class="champ">
+                <option value="">tous</option>
+                <option value="muet">jamais d’envoi</option>
+              </select>
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">Dernier envoi après</span>
+              <input type="date" id="detail-filtre-apres" class="champ">
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">… et avant</span>
+              <input type="date" id="detail-filtre-avant" class="champ">
+            </label>
+            <div class="menu-pied">
+              <button type="button" id="detail-filtre-vider" class="bouton petit">Tout effacer</button>
+            </div>
+          </div>
+        </div>
+        <button type="button" id="detail-copier" class="bouton">Copier les URL</button>
+        <button type="button" id="detail-csv" class="bouton">Exporter en CSV</button>
+        <button type="button" id="detail-cloner" class="bouton">Cloner</button>
+        <button type="button" id="detail-pull" class="bouton">Mettre à jour des clones</button>
       </div>
-      <table class="tableau" id="detail-table">
+      <table class="tableau triable" id="detail-table">
         <thead>
           <tr>
             <th class="etroit"></th>
-            <th>Étudiant</th>
-            <th>Dépôt</th>
+            <th data-tri="nom"><button type="button">Étudiant<span class="fleche"></span></button></th>
+            <!-- Les dépôts d'un travail ne diffèrent que par ce qui suit le
+                 préfixe commun : les ordonner par compte, c'est les ordonner
+                 par nom. -->
+            <th data-tri="compte"><button type="button">Dépôt<span class="fleche"></span></button></th>
             <th>Visibilité</th>
-            <th>Dernier envoi</th>
+            <th data-tri="envoi"><button type="button">Dernier envoi<span class="fleche"></span></button></th>
             <th>Accès</th>
             <th class="etroit"></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
+      <div class="boite-vide" id="detail-vide" hidden></div>
     </div>
   </section>
 

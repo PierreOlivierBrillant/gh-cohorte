@@ -756,6 +756,72 @@ func TestDetailDUnTravail(t *testing.T) {
 	}
 }
 
+// La liste d'un travail se filtre et se trie comme celle des étudiants, et par
+// le même paquet : ce sont les mêmes lignes, un dépôt par personne.
+func TestListeDUnTravailSeFiltreEtSeTrie(t *testing.T) {
+	state := fakegh.NewState()
+	envois := map[string]string{
+		"a26.5n6.01.tp1.jean-luc-picard":  "2026-10-15T10:00:00Z",
+		"a26.5n6.01.tp1.emilie-cote":      "2026-09-20T10:00:00Z",
+		"a26.5n6.01.tp1.visiteur-inconnu": "",
+	}
+	for nom, envoi := range envois {
+		state.AddRepo("acme", nom, true).PushedAt = envoi
+	}
+	h := nouveau(t, state)
+	id := h.groupe("a26", "5n6", "01",
+		"Jean-Luc Picard", "jlpicard", "Émilie Côté", "emilie-cote")
+
+	depots := func(requete string) string {
+		var reponse struct {
+			Repos []struct {
+				Student string `json:"student"`
+			} `json:"repos"`
+			Names []string `json:"names"`
+			Total int      `json:"total"`
+			Shown int      `json:"shown"`
+		}
+		h.json(http.MethodGet, "/api/classrooms/"+id+"/assignments/tp1"+requete, nil, &reponse)
+		noms := make([]string, 0, len(reponse.Repos))
+		for _, repo := range reponse.Repos {
+			noms = append(noms, repo.Student)
+		}
+		// « names » nomme tous les dépôts du travail : ce que le filtre écarte
+		// de l'écran n'en sort pas pour autant.
+		if reponse.Shown != len(noms) || reponse.Total != 3 || len(reponse.Names) != 3 {
+			t.Fatalf("%s : %d affiché(s) sur %d, %d nommé(s)",
+				requete, reponse.Shown, reponse.Total, len(reponse.Names))
+		}
+		return strings.Join(noms, ",")
+	}
+
+	// Un dépôt hors liste n'a pas de nom complet : il se range avant le reste.
+	if ordre := depots(""); ordre != "visiteur-inconnu,emilie-cote,jean-luc-picard" {
+		t.Fatalf("par nom : %s", ordre)
+	}
+	if ordre := depots("?sort=envoi&desc=1"); ordre != "jean-luc-picard,emilie-cote,visiteur-inconnu" {
+		t.Fatalf("par envoi : %s", ordre)
+	}
+	// L'accent ne se met pas en travers d'une recherche tapée sans lui.
+	if ordre := depots("?q=cote"); ordre != "emilie-cote" {
+		t.Fatalf("recherche : %s", ordre)
+	}
+	if ordre := depots("?after=2026-10-01"); ordre != "jean-luc-picard" {
+		t.Fatalf("après le 1er octobre : %s", ordre)
+	}
+	if ordre := depots("?activity=muet"); ordre != "visiteur-inconnu" {
+		t.Fatalf("jamais d'envoi : %s", ordre)
+	}
+
+	// Un critère que le serveur ne peut pas appliquer est refusé, plutôt que
+	// silencieusement ignoré.
+	reponse, contenu := h.requete(http.MethodGet,
+		"/api/classrooms/"+id+"/assignments/tp1?after=hier", nil)
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+}
+
 func TestEtudiantsDuGroupeCroisesAvecLesTravaux(t *testing.T) {
 	state := fakegh.NewState()
 	for _, nom := range []string{
