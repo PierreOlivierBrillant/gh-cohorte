@@ -653,3 +653,89 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 .explorateur-liste .fichier { color: var(--texte-doux); }
 
 #explorateur { width: min(38rem, 92vw); }
+
+/* ------------------------------------------------------------- attente */
+
+/* Une requête part vers le serveur : un trait file en haut de la fenêtre le
+   temps qu'elle revienne. Il n'apparaît qu'au bout d'un moment — une réponse
+   déjà en cache arrive en quelques millisecondes, et un clignotement se
+   remarque plus qu'une attente courte. */
+.attente-reseau {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  overflow: hidden;
+  /* La piste reste visible le temps de l'attente : le trait qui la parcourt
+     sort du cadre à chaque tour, et une barre qui clignote se lit mal. */
+  background: var(--fond-creux);
+  z-index: 30;
+}
+
+.attente-reseau::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  background: var(--lien);
+  animation: file 1.1s ease-in-out infinite;
+}
+
+@keyframes file {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
+/* La roue des attentes locales : une zone qui se remplit, un écran qui se
+   prépare. */
+.roue {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--bord-net);
+  border-top-color: var(--lien);
+  border-radius: 50%;
+  animation: tourne .8s linear infinite;
+  vertical-align: -.2rem;
+}
+
+@keyframes tourne { to { transform: rotate(360deg); } }
+
+.attente {
+  display: flex;
+  gap: .6rem;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Une liste déjà remplie ne disparaît pas pendant qu'elle se recharge : trier
+   ou filtrer ferait clignoter la page. Elle s'estompe, et ce qu'on lisait
+   reste lisible. */
+.occupe { opacity: .55; transition: opacity .15s ease-in; }
+
+/* L'écran du lancement : la page ne peut rien montrer tant que le serveur n'a
+   pas répondu, et une fenêtre vide ne dit pas qu'on attend. */
+.demarrage {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+  text-align: center;
+  color: var(--texte-doux);
+}
+
+.demarrage .roue { width: 1.75rem; height: 1.75rem; border-width: 3px; }
+.demarrage p { margin: 0; }
+
+/* Ce qui tourne doit pouvoir s'arrêter : certaines personnes règlent leur
+   système pour bannir les animations. L'indication reste, seul le mouvement
+   s'en va. */
+@media (prefers-reduced-motion: reduce) {
+  .attente-reseau::before { animation: none; width: 100%; opacity: .5; }
+  .roue { animation: none; border-top-color: var(--bord-net); }
+  .occupe { transition: none; }
+}

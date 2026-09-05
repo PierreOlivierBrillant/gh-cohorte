@@ -21,14 +21,20 @@ func (s *Session) organizations() []orgAccess {
 		return s.orgAccesses
 	}
 
+	// Le décompte n'existe qu'une fois les adhésions connues : jusque-là, une
+	// roue dit qu'on attend, puis la barre prend le relais.
+	spin := ui.NewSpinner(s.Console, "Lecture de vos organisations GitHub…")
+	spin.Start()
 	var progress *ui.Progress
 	accesses, err := orgs.List(s.Client, s.Cache, s.Viewer, s.Options.Jobs,
 		func(done, total int, login string) {
 			if progress == nil {
+				spin.Stop()
 				progress = ui.NewProgress(s.Console, "Organisations", total)
 			}
 			progress.Update(done, login)
 		})
+	spin.Stop()
 	if progress != nil {
 		progress.Finish("")
 	}

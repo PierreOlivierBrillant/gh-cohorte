@@ -97,11 +97,12 @@ func (m *manageSession) loadRepos(force bool) ([]groups.RepoInfo, error) {
 		}
 	}
 
-	progress := ui.NewProgress(console, "Dépôts", 0)
+	spin := ui.NewSpinner(console, "Chargement des dépôts de "+m.org+"…")
+	spin.Start()
 	repos, err := m.session.Client.ListOrgRepos(m.org, func(total int) {
-		progress.Line("Chargement des dépôts de " + m.org + "… " + itoa(total))
+		spin.Detail(itoa(total) + " lus")
 	})
-	progress.Clear()
+	spin.Stop()
 	if err != nil {
 		return nil, err
 	}
@@ -485,7 +486,11 @@ func (m *manageSession) detectTemplate(group *groups.Group) string {
 	if group.Len() == 0 {
 		return ""
 	}
-	data, err := m.session.Client.GetRepo(m.org, group.Repos[0].Name)
+	var data *ghapi.Repo
+	var err error
+	ui.Await(m.session.Console, "Lecture du dépôt modèle…", func() {
+		data, err = m.session.Client.GetRepo(m.org, group.Repos[0].Name)
+	})
 	if err != nil || data == nil || data.TemplateRepository == nil {
 		return ""
 	}
@@ -700,7 +705,12 @@ func (m *manageSession) manageCollaborators(group *groups.Group) error {
 
 	for {
 		console.Heading("Accès de « " + repo.Name + " »")
-		collaborators, invitations, err := m.accessOf(*repo)
+		var collaborators []string
+		var invitations []ghapi.Invitation
+		var err error
+		ui.Await(console, "Lecture des accès de "+repo.Name+"…", func() {
+			collaborators, invitations, err = m.accessOf(*repo)
+		})
 		if err != nil {
 			console.Failure("%v", err)
 			return nil
@@ -751,7 +761,11 @@ func (m *manageSession) addCollaborator(repo groups.Repo) error {
 	if err != nil || username == "" {
 		return err
 	}
-	if exists, err := m.session.Client.UserExists(username); err != nil {
+	var exists bool
+	ui.Await(console, "Vérification du compte @"+username+"…", func() {
+		exists, err = m.session.Client.UserExists(username)
+	})
+	if err != nil {
 		console.Warning("Vérification impossible : %v", err)
 	} else if !exists {
 		console.Failure("Le compte « %s » n'existe pas sur GitHub.", username)
@@ -766,7 +780,10 @@ func (m *manageSession) addCollaborator(repo groups.Repo) error {
 	if err != nil {
 		return err
 	}
-	state, err := m.session.Client.AddCollaborator(m.org, repo.Name, username, permission)
+	var state string
+	ui.Await(console, "Envoi de l'invitation à @"+username+"…", func() {
+		state, err = m.session.Client.AddCollaborator(m.org, repo.Name, username, permission)
+	})
 	if err != nil {
 		console.Failure("Invitation impossible : %v", err)
 		return nil
@@ -1109,8 +1126,12 @@ func (m *manageSession) deleteRepo(group *groups.Group) error {
 		console.Warning("Annulé : rien n'a été supprimé.")
 		return nil
 	}
-	if err := m.session.Client.DeleteRepo(m.org, repo.Name); err != nil {
-		console.Failure("Suppression impossible : %v", err)
+	var removal error
+	ui.Await(console, "Suppression de "+repo.Name+"…", func() {
+		removal = m.session.Client.DeleteRepo(m.org, repo.Name)
+	})
+	if removal != nil {
+		console.Failure("Suppression impossible : %v", removal)
 		return nil
 	}
 	console.Success("« %s » supprimé.", repo.Name)
