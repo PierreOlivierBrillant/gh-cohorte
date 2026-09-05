@@ -1537,17 +1537,30 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 	}
 
 	// En acceptant de les laisser en place, la migration passe — mais le
-	// groupe ne bascule pas tant qu'un dépôt reste en arrière.
+	// groupe ne bascule pas tant qu'un dépôt reste en arrière : basculer, ce
+	// serait cesser de le voir.
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
 		map[string]any{"session": "a26", "course": "5n6", "group": "01", "skip_blocked": true})
 	resultat, _ := bilan["result"].(map[string]any)
-	if resultat["renamed"] != float64(1) || resultat["skipped"] != float64(1) {
+	if resultat["renamed"] != float64(1) || resultat["skipped"] != float64(1) ||
+		resultat["switched"] != false {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 	noms := h.State.RepoNames("acme")
 	sort.Strings(noms)
 	if strings.Join(noms, ",") != "a26-5n6-tp1-visiteur,a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)
+	}
+
+	// Le groupe est resté à sa place, avec sa liste : c'est de là qu'on reprend
+	// la migration une fois « visiteur » identifié.
+	var reste struct {
+		Prefix string `json:"prefix"`
+		Known  bool   `json:"known"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id+"?refresh=1", nil, &reste)
+	if !reste.Known || reste.Prefix != "a26-5n6" {
+		t.Fatalf("groupe après migration partielle : %+v", reste)
 	}
 }
 
@@ -1559,8 +1572,9 @@ func TestMigrationRefuseSansNomComplet(t *testing.T) {
 	id := h.heritage("a26-5n6", "aminata-d")
 
 	var apercu struct {
-		Ready   int `json:"ready"`
-		Blocked int `json:"blocked"`
+		Ready   int  `json:"ready"`
+		Blocked int  `json:"blocked"`
+		Switch  bool `json:"switch"`
 		Rows    []struct {
 			Problem string `json:"problem"`
 		} `json:"rows"`
@@ -1569,6 +1583,11 @@ func TestMigrationRefuseSansNomComplet(t *testing.T) {
 		map[string]any{"session": "a26", "course": "5n6", "group": "01"}, &apercu)
 	if apercu.Blocked != 1 || apercu.Ready != 0 {
 		t.Fatalf("aperçu : %+v", apercu)
+	}
+	// L'aperçu annonce déjà que le groupe ne suivra pas : c'est ce que
+	// l'interface affiche quand on accepte de laisser ce dépôt en place.
+	if apercu.Switch {
+		t.Fatalf("le groupe basculerait malgré un dépôt bloqué : %+v", apercu)
 	}
 	if !strings.Contains(apercu.Rows[0].Problem, "aminata-d") {
 		t.Fatalf("raison : %q", apercu.Rows[0].Problem)

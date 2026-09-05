@@ -324,12 +324,13 @@ func TestGroupeDeclareSeRenomme(t *testing.T) {
 	id := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
 
 	var apercu struct {
-		Scope string `json:"scope"`
-		Ready int    `json:"ready"`
+		Scope  string `json:"scope"`
+		Ready  int    `json:"ready"`
+		Switch bool   `json:"switch"`
 	}
 	h.json(http.MethodPost, "/api/classrooms/"+id+"/migration/preview",
 		map[string]any{"session": "h27", "course": "5n6", "group": "02"}, &apercu)
-	if apercu.Scope != "h27.5n6.02" || apercu.Ready != 1 {
+	if apercu.Scope != "h27.5n6.02" || apercu.Ready != 1 || !apercu.Switch {
 		t.Fatalf("aperçu : %+v", apercu)
 	}
 
