@@ -608,3 +608,109 @@ func TestSessionsHorsConventionPassentApres(t *testing.T) {
 		t.Fatalf("ordre : %q, attendu %q", strings.Join(rendu, " "), attendu)
 	}
 }
+
+// ------------------------------------------------------- marques de doublon
+
+// GitHub refuse deux dépôts de même nom dans une organisation : quand celui
+// qu'on demandait est pris, il ajoute « -1 ». La marque se pose sur le compte
+// quand c'est lui qui termine le nom, et l'adoption la lisait comme un autre
+// compte — alors que « jlpicard-1 » n'est le compte de personne.
+func TestCompteMarqueRejointLeSien(t *testing.T) {
+	cours := groupe("a26", "5n6", "01", append(
+		append([]roster.Person(nil), cohorte...),
+		roster.Person{Username: "jlpicard-1"},
+	))
+	valide, err := cours.Validate()
+	if err != nil {
+		t.Fatalf("validation : %v", err)
+	}
+	if len(valide.Students) != len(cohorte) {
+		t.Fatalf("liste : %+v", valide.Students)
+	}
+	if _, marque := valide.Find("jlpicard-1"); marque {
+		t.Error("le compte marqué est resté dans la liste")
+	}
+}
+
+// Sans le compte de base pour l'attester, la marque ne prouve rien : « LT-9 »
+// est un vrai compte, et le lui retirer inventerait quelqu'un.
+func TestCompteQuiFinitParUnNombreEstLaisseIntact(t *testing.T) {
+	cours := groupe("a26", "5n6", "01", personnes("Lukas Therrien", "LT-9"))
+	valide, err := cours.Validate()
+	if err != nil {
+		t.Fatalf("validation : %v", err)
+	}
+	if len(valide.Students) != 1 || valide.Students[0].Username != "LT-9" {
+		t.Fatalf("liste : %+v", valide.Students)
+	}
+}
+
+// Deux noms complets qui se contredisent sont deux personnes : la marque reste,
+// et c'est à quelqu'un de trancher.
+func TestDeuxNomsDifferentsNeSeFondentPas(t *testing.T) {
+	cours := groupe("a26", "5n6", "01", personnes(
+		"Jean-Luc Picard", "jlpicard",
+		"Jeanne Picard", "jlpicard-1",
+	))
+	valide, err := cours.Validate()
+	if err != nil {
+		t.Fatalf("validation : %v", err)
+	}
+	if len(valide.Students) != 2 {
+		t.Fatalf("liste : %+v", valide.Students)
+	}
+}
+
+// Le dépôt que la marque a fait dévier reste celui de son étudiant : sans cela,
+// corriger la liste le rendrait orphelin. Les trois nomenclatures le disent.
+func TestDepotMarqueResteRattacheASonEtudiant(t *testing.T) {
+	cas := []struct {
+		nom    string
+		cours  classroom.Classroom
+		depot  string
+		compte string
+	}{
+		{"courante", groupe("a26", "5n6", "01", cohorte),
+			"a26.5n6.01.tp1.jean-luc-picard-1", "jlpicard"},
+		{"tout en tirets", heritage("tp1", "jlpicard"),
+			"tp1-jlpicard-1", "jlpicard"},
+		{"quatre niveaux", heritage("5n6.a26-01", "jlpicard"),
+			"5n6.a26-01.tp1.jlpicard-1", "jlpicard"},
+		{"adopté par gabarit", classroom.Classroom{
+			Org: "acme", LegacyPattern: "projet-{assignment}-{student}",
+			Students: classroom.StudentsOf([]string{"jlpicard"}),
+		}, "projet-tp1-jlpicard-1", "jlpicard"},
+	}
+	for _, essai := range cas {
+		t.Run(essai.nom, func(t *testing.T) {
+			student, inscrit := essai.cours.StudentOf(essai.depot)
+			if !inscrit || student.Username != essai.compte {
+				t.Fatalf("étudiant retrouvé : %+v (%v)", student, inscrit)
+			}
+		})
+	}
+}
+
+// La collision qui a produit la marque est à l'échelle de l'organisation : le
+// compte qui l'atteste est souvent dans un autre groupe — une session
+// précédente, un autre cours.
+func TestMagasinCorrigeUnCompteMarqueDUnAutreGroupe(t *testing.T) {
+	chemin := filepath.Join(t.TempDir(), "groupes.json")
+	magasin := classroom.Open(chemin)
+	if _, err := magasin.Save(groupe("h24", "4n6", "1020",
+		personnes("Alexis Lepage", "aleksilepaj"))); err != nil {
+		t.Fatalf("enregistrement : %v", err)
+	}
+	if _, err := magasin.Save(groupe("a24", "5n6", "1030",
+		personnes("Alexis Lepage", "aleksilepaj-1"))); err != nil {
+		t.Fatalf("enregistrement : %v", err)
+	}
+
+	relu, present := classroom.Open(chemin).Find("acme", "a24.5n6.1030")
+	if !present {
+		t.Fatal("groupe introuvable")
+	}
+	if len(relu.Students) != 1 || relu.Students[0].Username != "aleksilepaj" {
+		t.Fatalf("liste relue : %+v", relu.Students)
+	}
+}

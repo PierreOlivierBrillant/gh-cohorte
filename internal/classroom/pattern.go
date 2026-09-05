@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -245,10 +246,25 @@ func (p Pattern) Match(name string) (string, string, bool) {
 // MatchFor découpe un nom de dépôt en sachant qui l'on cherche. C'est la
 // lecture exacte : le fragment de la personne est posé tel quel, et ce qui
 // reste est le travail, quel que soit ce qu'il contient.
+//
+// La marque de doublon que GitHub ajoute au bout d'un nom déjà pris — « -1 » —
+// se retrouve collée au fragment quand c'est la personne qui termine le nom.
+// Elle est essayée en second : « projet-tp1-jlpicard-1 » est bien le dépôt de
+// jlpicard, et le lui refuser en ferait un orphelin.
 func (p Pattern) MatchFor(name, fragment string) (string, bool) {
 	if p.glouton == nil || fragment == "" {
 		return "", false
 	}
+	if travail, reconnu := p.matchFor(name, fragment); reconnu {
+		return travail, true
+	}
+	if base, marque := roster.WithoutDuplicateMarker(name); marque {
+		return p.matchFor(name, fragment+name[len(base):])
+	}
+	return "", false
+}
+
+func (p Pattern) matchFor(name, fragment string) (string, bool) {
 	if p.entre == "" && !strings.Contains(p.source, champTravail) {
 		if strings.EqualFold(name, p.avant+fragment+p.apres) {
 			return "", true
