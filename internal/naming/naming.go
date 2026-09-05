@@ -104,6 +104,24 @@ func Fragment(value, label string) (string, error) {
 	return slug, nil
 }
 
+// Path met en forme un préfixe saisi à la main — « a26.5N6.01 » —, niveau par
+// niveau. Le point sépare les niveaux et doit survivre à la mise en forme, qui
+// remplacerait sinon tout ce qui n'est pas alphanumérique par un tiret :
+// « a26.5n6.01 » deviendrait « a26-5n6-01 », un préfixe que plus rien ne
+// retrouve dans les dépôts.
+func Path(value, label string) (string, error) {
+	niveaux := strings.Split(strings.TrimSpace(value), Separator)
+	rendus := make([]string, 0, len(niveaux))
+	for _, niveau := range niveaux {
+		fragment, err := valid.SlugFragment(niveau, label)
+		if err != nil {
+			return "", err
+		}
+		rendus = append(rendus, fragment)
+	}
+	return strings.Join(rendus, Separator), nil
+}
+
 // Student compose le fragment d'une personne à partir de son nom complet. Un
 // nom complet vide ne donne rien : le dépôt ne peut pas être nommé.
 func Student(fullName string) (string, error) {
@@ -116,4 +134,21 @@ func Student(fullName string) (string, error) {
 		slug = strings.Trim(slug[:valid.MaxSlugLength], "-")
 	}
 	return slug, nil
+}
+
+// SplitAssignment sépare l'identifiant d'un travail — « a26.5n6.01.tp1 » — en
+// la place de son groupe et son nom. Un identifiant qui ne porte pas les quatre
+// niveaux de la nomenclature courante ne se coupe pas : le groupe qu'il
+// désignerait ne saurait pas nommer un dépôt.
+func SplitAssignment(id string) (scope, name string, ok bool) {
+	fragments := strings.Split(strings.TrimSpace(id), Separator)
+	if len(fragments) != Levels-1 {
+		return "", "", false
+	}
+	for _, fragment := range fragments {
+		if fragment == "" {
+			return "", "", false
+		}
+	}
+	return Prefix(fragments[0], fragments[1], fragments[2]), fragments[3], true
 }

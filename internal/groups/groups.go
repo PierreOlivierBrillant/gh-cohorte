@@ -189,15 +189,20 @@ func Detect(names []string, minimum int) []Detected {
 	return detected
 }
 
+// Separators sont les caractères qui peuvent suivre un préfixe : le tiret des
+// noms qu'aucune convention n'organise, et le point de la nomenclature à cinq
+// niveaux. Un préfixe se saisit sans dire lequel des deux le termine.
+const Separators = Separator + "."
+
 // Build retient les dépôts du préfixe donné, à partir des données de l'API.
 func Build(prefix string, repos []RepoInfo) Group {
-	wanted := strings.TrimRight(strings.ToLower(strings.TrimSpace(prefix)), Separator)
+	wanted := strings.TrimRight(strings.ToLower(strings.TrimSpace(prefix)), Separators)
 	group := Group{Prefix: wanted}
 	if wanted == "" {
 		return group
 	}
 	for _, raw := range repos {
-		if !strings.HasPrefix(strings.ToLower(raw.Name), wanted+Separator) {
+		if !suit(strings.ToLower(raw.Name), wanted) {
 			continue
 		}
 		pushed := raw.PushedAt
@@ -216,6 +221,17 @@ func Build(prefix string, repos []RepoInfo) Group {
 		return strings.ToLower(group.Repos[i].Name) < strings.ToLower(group.Repos[j].Name)
 	})
 	return group
+}
+
+// suit dit si un nom commence par le préfixe donné suivi d'un séparateur. Les
+// deux nomenclatures se lisent ainsi sans que l'appelant ait à choisir : « tp1 »
+// retrouve « tp1-emilie-cote », et « a26.5n6.01.tp1 » retrouve
+// « a26.5n6.01.tp1.emilie-cote ».
+func suit(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) || len(name) <= len(prefix) {
+		return false
+	}
+	return strings.ContainsRune(Separators, rune(name[len(prefix)]))
 }
 
 // Resolver traduit un jeton non numérique en indice, ou renvoie -1.
