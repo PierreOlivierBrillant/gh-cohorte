@@ -37,17 +37,17 @@ type pathInfo struct {
 
 // contextPayload donne à la page tout ce qu'elle doit savoir au chargement.
 type contextPayload struct {
-	Viewer       string            `json:"viewer"`
-	Host         string            `json:"host"`
-	Version      string            `json:"version"`
-	Settings     config.Settings   `json:"settings"`
-	Scopes       map[string]string `json:"scopes"`
-	Paths        []pathInfo        `json:"paths"`
-	Permissions  []choice          `json:"permissions"`
-	Placeholders []string          `json:"placeholders"`
-	SaveConfig   bool              `json:"save_config"`
-	Jobs         int               `json:"jobs"`
-	Depth        int               `json:"depth"`
+	Viewer       string          `json:"viewer"`
+	Host         string          `json:"host"`
+	Version      string          `json:"version"`
+	Settings     config.Settings `json:"settings"`
+	Token        tokenPayload    `json:"token"`
+	Paths        []pathInfo      `json:"paths"`
+	Permissions  []choice        `json:"permissions"`
+	Placeholders []string        `json:"placeholders"`
+	SaveConfig   bool            `json:"save_config"`
+	Jobs         int             `json:"jobs"`
+	Depth        int             `json:"depth"`
 	// NativePicker nomme la fenêtre de sélection du système quand il y en a
 	// une ; vide, l'interface montre son propre explorateur.
 	NativePicker string `json:"native_picker"`
@@ -59,17 +59,12 @@ func (s *Server) handleContext(writer http.ResponseWriter, _ *http.Request) {
 	for _, value := range config.Permissions {
 		permissions = append(permissions, choice{Value: value, Label: config.PermissionLabels[value]})
 	}
-	scopes := map[string]string{}
-	for _, scope := range []string{"repo", "read:org", "workflow", "delete_repo"} {
-		scopes[scope] = describeScope(s.deps.Client.HasScope(scope))
-	}
-
 	writeJSON(writer, http.StatusOK, contextPayload{
 		Viewer:       s.deps.Viewer,
 		Host:         s.deps.Host,
 		Version:      s.deps.Version,
 		Settings:     s.Settings(),
-		Scopes:       scopes,
+		Token:        s.tokenState(nil),
 		Paths:        s.paths(),
 		Permissions:  permissions,
 		Placeholders: plan.Placeholders,
@@ -78,19 +73,6 @@ func (s *Server) handleContext(writer http.ResponseWriter, _ *http.Request) {
 		Depth:        s.deps.Depth,
 		NativePicker: picker.Name(),
 	})
-}
-
-// describeScope met en mots ce que le jeton annonce. Un jeton « fine-grained »
-// n'annonce aucune portée : la réponse est alors « inconnue ».
-func describeScope(present, known bool) string {
-	switch {
-	case !known:
-		return "inconnue"
-	case present:
-		return "présente"
-	default:
-		return "absente"
-	}
 }
 
 // paths renvoie l'emplacement et l'état des fichiers gérés par l'outil.

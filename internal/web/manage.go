@@ -181,8 +181,8 @@ func (s *Server) handleDeleteRepo(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 	if present, known := s.deps.Client.HasScope("delete_repo"); known && !present {
-		fail(writer, valid.Errorf("Le jeton n'a pas la portée « delete_repo » : corrigez avec "+
-			"« gh auth refresh -s delete_repo »."))
+		failScope(writer, "delete_repo",
+			"Le jeton n'a pas la portée « delete_repo » : la suppression serait refusée.")
 		return
 	}
 	if err := s.deps.Client.DeleteRepo(org, repo); err != nil {

@@ -1106,10 +1106,11 @@ func (m *manageSession) deleteRepo(group *groups.Group) error {
 		return err
 	}
 
-	// L'absence de la portée « delete_repo » est signalée avant la tentative.
-	if present, known := m.session.Client.HasScope("delete_repo"); known && !present {
-		console.Warning("Le jeton n'a pas la portée « delete_repo » : la suppression échouera. " +
-			"Corrigez avec « gh auth refresh -s delete_repo ».")
+	// Une portée absente se répare avant la tentative plutôt qu'après : rien
+	// n'est encore engagé, et la suppression échouerait de toute façon.
+	if !m.session.ensureScope("delete_repo", "la suppression serait refusée") {
+		console.Warning("Annulé : rien n'a été supprimé.")
+		return nil
 	}
 
 	console.Print("  " + console.Err("⚠ Suppression définitive de "+m.org+"/"+repo.Name))
@@ -1132,9 +1133,18 @@ func (m *manageSession) deleteRepo(group *groups.Group) error {
 		return nil
 	}
 	var removal error
-	ui.Await(console, "Suppression de "+repo.Name+"…", func() {
-		removal = m.session.Client.DeleteRepo(m.org, repo.Name)
-	})
+	attempt := func() {
+		ui.Await(console, "Suppression de "+repo.Name+"…", func() {
+			removal = m.session.Client.DeleteRepo(m.org, repo.Name)
+		})
+	}
+	attempt()
+	// GitHub peut refuser sur une portée qu'aucune vérification préalable ne
+	// pouvait connaître — un jeton « fine-grained » n'annonce rien. Le jeton se
+	// refait alors sur place, et la suppression se reprend : elle n'a pas eu lieu.
+	if scope := ghapi.MissingScope(removal); scope != "" && m.session.offerScope(scope) {
+		attempt()
+	}
 	if removal != nil {
 		console.Failure("Suppression impossible : %v", removal)
 		return nil

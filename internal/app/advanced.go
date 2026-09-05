@@ -52,6 +52,7 @@ func (s *Session) advancedMenu() error {
 		action, err := s.Prompt.Choose("Que faire ?", ui.Options(
 			"vider", "Vider le cache local",
 			"emplacements", "Afficher les emplacements des fichiers",
+			"portees", "Portées du jeton GitHub",
 			"reglages", "Oublier les réglages mémorisés",
 			"revenir", "Revenir au menu principal",
 		), "revenir")
@@ -67,6 +68,10 @@ func (s *Session) advancedMenu() error {
 			}
 		case "emplacements":
 			s.showLocations()
+		case "portees":
+			if err := s.manageScopes(); err != nil {
+				return err
+			}
 		case "reglages":
 			if err := s.forgetSettings(); err != nil {
 				return err

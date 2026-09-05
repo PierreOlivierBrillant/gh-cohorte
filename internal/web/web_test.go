@@ -20,6 +20,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/web"
 )
 
@@ -28,12 +29,20 @@ import (
 type harnais struct {
 	t       *testing.T
 	State   *fakegh.State
+	Github  *ghapi.Client
 	Serveur *web.Server
 	Client  *http.Client
 	Base    string
 }
 
 func nouveau(t *testing.T, state *fakegh.State) *harnais {
+	t.Helper()
+	return nouveauAvec(t, state, nil)
+}
+
+// nouveauAvec laisse le test retoucher les dépendances de l'interface : c'est
+// par là qu'un faux « gh auth refresh » remplace le vrai.
+func nouveauAvec(t *testing.T, state *fakegh.State, ajuster func(*web.Deps)) *harnais {
 	t.Helper()
 	if state == nil {
 		state = fakegh.NewState()
@@ -59,18 +68,23 @@ func nouveau(t *testing.T, state *fakegh.State) *harnais {
 	// fait à l'arrivée, et l'API s'y tient.
 	reglages := config.Default()
 	reglages.Org = "acme"
-	serveur, err := web.New(web.Deps{
-		Client:     client,
-		Cache:      cache.NewIn(filepath.Join(dossier, "cache"), true),
-		Settings:   reglages,
-		ConfigFile: filepath.Join(dossier, "config.json"),
-		Viewer:     state.Viewer,
-		Host:       "github.com",
-		Version:    "test",
-		ReportDir:  filepath.Join(dossier, "rapports"),
-		Jobs:       2,
-		SaveConfig: true,
-	})
+	deps := web.Deps{
+		Client:      client,
+		Cache:       cache.NewIn(filepath.Join(dossier, "cache"), true),
+		Settings:    reglages,
+		ConfigFile:  filepath.Join(dossier, "config.json"),
+		Viewer:      state.Viewer,
+		Host:        "github.com",
+		TokenOrigin: "oauth_token",
+		Version:     "test",
+		ReportDir:   filepath.Join(dossier, "rapports"),
+		Jobs:        2,
+		SaveConfig:  true,
+	}
+	if ajuster != nil {
+		ajuster(&deps)
+	}
+	serveur, err := web.New(deps)
 	if err != nil {
 		t.Fatalf("interface web : %v", err)
 	}
@@ -93,7 +107,7 @@ func nouveau(t *testing.T, state *fakegh.State) *harnais {
 		t.Fatalf("bocal à témoins : %v", err)
 	}
 	h := &harnais{
-		t: t, State: state, Serveur: serveur, Base: serveur.Address(),
+		t: t, State: state, Github: client, Serveur: serveur, Base: serveur.Address(),
 		Client: &http.Client{Jar: jar, Timeout: 20 * time.Second},
 	}
 	// L'adresse remise dans le terminal ouvre la session et pose le témoin.
@@ -147,6 +161,14 @@ func (h *harnais) json(methode, chemin string, corps any, cible any) {
 	if cible == nil {
 		return
 	}
+	if err := json.Unmarshal(contenu, cible); err != nil {
+		h.t.Fatalf("réponse illisible (%s) : %v", contenu, err)
+	}
+}
+
+// decoder lit un corps de réponse déjà lu, refus compris.
+func (h *harnais) decoder(contenu []byte, cible any) {
+	h.t.Helper()
 	if err := json.Unmarshal(contenu, cible); err != nil {
 		h.t.Fatalf("réponse illisible (%s) : %v", contenu, err)
 	}
@@ -293,18 +315,18 @@ func TestEcritureSansEnteteRefusee(t *testing.T) {
 func TestContexteDecritLaSession(t *testing.T) {
 	h := nouveau(t, nil)
 	var contexte struct {
-		Viewer   string            `json:"viewer"`
-		Version  string            `json:"version"`
-		Scopes   map[string]string `json:"scopes"`
-		Settings config.Settings   `json:"settings"`
+		Viewer   string          `json:"viewer"`
+		Version  string          `json:"version"`
+		Token    jeton           `json:"token"`
+		Settings config.Settings `json:"settings"`
 	}
 	h.json(http.MethodGet, "/api/context", nil, &contexte)
 
 	if contexte.Viewer != "prof" {
 		t.Fatalf("compte %q, attendu « prof »", contexte.Viewer)
 	}
-	if contexte.Scopes["repo"] != "présente" {
-		t.Fatalf("portée repo : %q", contexte.Scopes["repo"])
+	if etat := contexte.Token.etat("repo"); etat != scopes.Present {
+		t.Fatalf("portée repo : %q", etat)
 	}
 	if contexte.Settings.NamePattern != config.DefaultNamePattern {
 		t.Fatalf("gabarit %q", contexte.Settings.NamePattern)

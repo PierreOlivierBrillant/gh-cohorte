@@ -628,9 +628,19 @@
       </div>
     </div>
 
+    <!-- Ce que le jeton permet. L'outil ne fabrique aucun jeton : cocher une
+         portée le fait redemander à gh, qui mène l'échange avec GitHub. -->
     <div class="boite">
       <div class="boite-entete"><strong>Portées du jeton</strong></div>
-      <div class="boite-corps"><div id="portees" class="etiquettes"></div></div>
+      <div class="boite-corps">
+        <p class="note" id="jeton-provenance"></p>
+        <div id="portees" class="cases-travaux"></div>
+        <div id="jeton-avis" class="avis-pile"></div>
+      </div>
+      <div class="boite-pied">
+        <button type="button" id="jeton-renouveler" class="bouton">Générer un nouveau jeton</button>
+        <span class="note" id="jeton-etat"></span>
+      </div>
     </div>
 
     <div class="boite">
