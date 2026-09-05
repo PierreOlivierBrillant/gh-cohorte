@@ -258,14 +258,14 @@ func nouvellesCibles(repos []groups.RepoInfo) *cibles {
 // restent retenus d'un appel à l'autre : deux travaux déplacés ensemble ne
 // doivent pas se heurter.
 func (c *cibles) travail(arrivee Classroom, nom string, depots []groups.Repo,
-	connus map[string]roster.Person) ([]Move, error) {
+	connus known) ([]Move, error) {
 	fragment, err := naming.Fragment(nom, "Travail")
 	if err != nil {
 		return nil, err
 	}
 	lignes := make([]Move, 0, len(depots))
 	for _, depot := range depots {
-		personne := connus[strings.ToLower(depot.Suffix)]
+		personne, _ := connus.personne(depot.Suffix)
 		ligne, err := c.viser(arrivee, fragment, depot,
 			fragmentDe(personne), personne.Username)
 		if err != nil {

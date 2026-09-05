@@ -135,6 +135,13 @@ func Matcher(pattern string, person roster.Person) *regexp.Regexp {
 			motif.WriteString(`\d+`)
 		default:
 			motif.WriteString(regexp.QuoteMeta(values[champ]))
+			// GitHub ajoute « -1 » au bout d'un nom de dépôt déjà pris. Quand
+			// c'est la personne qui termine le nom, la marque se colle à elle :
+			// « tp1-jlpicard-1 » reste le dépôt de jlpicard, et le lui refuser
+			// en ferait un orphelin.
+			if distinctive[champ] && bornes[1] == len(pattern) {
+				motif.WriteString(`(?:-\d+)?`)
+			}
 		}
 		position = bornes[1]
 	}
