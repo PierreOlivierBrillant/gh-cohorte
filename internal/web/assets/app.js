@@ -34,6 +34,48 @@ function vider(noeud) {
   while (noeud.firstChild) noeud.firstChild.remove();
 }
 
+// plageDeCases donne aux listes de cases ce que le terminal accepte déjà sous
+// la forme « 2-5 » : on coche une case, puis maj + clic sur une autre, et tout
+// ce qui les sépare prend l'état de la seconde. Sans cela, trente dépôts se
+// cochent en trente clics.
+//
+// L'écoute est posée sur le conteneur, jamais sur les cases : les listes se
+// redessinent à chaque chargement, et celles d'hier ont disparu. Le conteneur
+// est rendu, pour se poser dans un arbre en cours de construction.
+function plageDeCases(conteneur) {
+  let ancre = null;
+
+  // Maj + clic étend aussi la sélection de texte du navigateur, qui surlignerait
+  // la liste au passage. Ce n'est pas l'appui qui coche, c'est le clic : le
+  // refuser ne coûte que le surlignage.
+  conteneur.addEventListener('mousedown', (evenement) => {
+    if (evenement.shiftKey) evenement.preventDefault();
+  });
+
+  conteneur.addEventListener('click', (evenement) => {
+    const cible = evenement.target;
+    if (!cible.matches('input[type="checkbox"]')) return;
+    const cases = [...conteneur.querySelectorAll('input[type="checkbox"]')];
+    const arrivee = cases.indexOf(cible);
+    const depart = cases.indexOf(ancre);
+    ancre = cible;
+    if (!evenement.shiftKey || depart < 0 || depart === arrivee) return;
+
+    // Le clic vient de basculer la case visée ; les autres prennent son état,
+    // retenu avant la boucle. Certaines listes remettent en effet leurs cases
+    // d'aplomb à chaque « change » : relire la case visée en cours de route
+    // rendrait ce qu'elle valait avant le clic. Pour la même raison elle est
+    // réannoncée avec les autres plutôt que laissée au navigateur, qui la
+    // déclarerait trop tard ; son « change » suivra, sans rien dire de neuf.
+    const coche = cible.checked;
+    for (const case_ of cases.slice(Math.min(depart, arrivee), Math.max(depart, arrivee) + 1)) {
+      case_.checked = coche;
+      case_.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  return conteneur;
+}
+
 function message(texte, ton = 'succes', duree = 6000) {
   const avis = el('div', { classe: 'avis ' + ton, texte });
   $('messages').append(avis);
@@ -1170,6 +1212,8 @@ function majSelectionTravaux() {
   $('travaux-deplacer').disabled = choisis === 0;
 }
 
+plageDeCases($('travaux-liste'));
+
 $('travaux-tout').addEventListener('change', (evenement) => {
   etat.travauxChoisis = evenement.target.checked
     ? new Set((etat.groupe.assignments || []).map((travail) => travail.id))
@@ -1345,6 +1389,8 @@ function majSelection() {
     : `${choisis} sur ${total} sélectionné(s)`;
   $('detail-tout').checked = total > 0 && choisis === total;
 }
+
+plageDeCases($('detail-table').querySelector('tbody'));
 
 $('detail-tout').addEventListener('change', (evenement) => {
   etat.selection = evenement.target.checked
@@ -1570,7 +1616,7 @@ $('detail-pull').addEventListener('click', async () => {
       el('span', { texte: item.name + (horsTravail ? '   (hors travail)' : '') }));
   });
   const confirme = await demander(`${liste.clones.length} clone(s) trouvé(s)`,
-    el('div', {}, cases), 'Mettre à jour');
+    plageDeCases(el('div', {}, cases)), 'Mettre à jour');
   if (!confirme) return;
 
   const noms = cases
@@ -1712,6 +1758,8 @@ function majDestinataires() {
     coche.checked = etat.destinataires.has(coche.value);
   }
 }
+
+plageDeCases($('dest-liste'));
 
 $('dest-tout').addEventListener('change', (evenement) => {
   etat.destinataires = evenement.target.checked
@@ -1980,6 +2028,8 @@ function majSelectionEtudiants() {
   $('etudiants-deplacer').disabled = choisis === 0;
 }
 
+plageDeCases($('etudiants-table').querySelector('tbody'));
+
 $('etudiants-tout').addEventListener('change', (evenement) => {
   etat.deplaces = evenement.target.checked
     ? new Set(etat.etudiants.map((ligne) => ligne.username))
@@ -2176,12 +2226,12 @@ $('etudiants-ajouter').addEventListener('click', async () => {
     ? el('p', { classe: 'note', texte: "Le groupe n'a encore aucun travail distribué." })
     : el('div', {},
         el('span', { classe: 'etiquette', texte: 'Lui créer les dépôts de' }),
-        el('div', { classe: 'cases-travaux' }, existants.map((travail) =>
+        plageDeCases(el('div', { classe: 'cases-travaux' }, existants.map((travail) =>
           el('label', { classe: 'case' }, cases.get(travail.name),
             el('span', {},
               el('strong', { texte: travail.name }),
               el('span', { classe: 'aide',
-                texte: `déjà remis à ${travail.students} étudiant(s) du groupe` }))))),
+                texte: `déjà remis à ${travail.students} étudiant(s) du groupe` })))))),
         el('p', { classe: 'aide',
           texte: `Aux réglages du groupe : ${reglages.visibility === 'public' ? 'public' : 'privé'}, ` +
             (reglages.add_collaborator
