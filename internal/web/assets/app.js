@@ -84,12 +84,18 @@ const etat = {
   parcours: { session: '', cours: '' },
   groupe: null,
   travail: null,
+  // Le travail dont les critères sont posés. Repasser par le groupe oublie le
+  // travail ouvert ; y revenir ne doit pas pour autant effacer son filtre.
+  travailRegle: '',
   selection: new Set(),
   acces: new Map(),
   etudiants: [],
   // Ce que la liste des étudiants montre, et de qui elle est cochée. Le tri et
   // le filtre partent au serveur : c'est lui qui sait ce qu'ils veulent dire.
   filtre: { texte: '', travail: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false },
+  // Ce que la liste d'un travail montre : les mêmes critères, appliqués aux
+  // mêmes lignes — un dépôt par personne — par le même paquet du serveur.
+  filtreTravail: { texte: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false },
   deplaces: new Set(),
   destinataires: new Set(),
   reglagesTravail: {},
@@ -708,7 +714,7 @@ async function ouvrirGroupe(id, force, sansHistorique) {
   // Le filtre et la sélection appartiennent au groupe qu'on regarde : passer à
   // un autre les remet à zéro, plutôt que d'y cacher des étudiants sans qu'on
   // s'y attende.
-  if (!etat.groupe || etat.groupe.scope !== groupe.scope) reinitialiserFiltre();
+  if (!etat.groupe || etat.groupe.scope !== groupe.scope) barreEtudiants.reinitialiser();
   etat.groupe = groupe;
   etat.travail = null;
   etat.etudiants = [];
@@ -1031,21 +1037,87 @@ $('travaux-recharger').addEventListener('click', () => ouvrirGroupe(etat.groupe.
 
 // ------------------------------------------------------- détail d'un travail
 
+// Le tri et le filtre ne sont pas appliqués ici : l'adresse les transmet, et le
+// serveur répond la liste déjà réduite et ordonnée — celui-là même qui répond
+// la liste des étudiants, avec les mêmes critères.
+function adresseTravail(nom, force) {
+  const critere = etat.filtreTravail;
+  const parametres = new URLSearchParams();
+  if (critere.texte) parametres.set('q', critere.texte);
+  if (critere.activite) parametres.set('activity', critere.activite);
+  if (critere.apres) parametres.set('after', critere.apres);
+  if (critere.avant) parametres.set('before', critere.avant);
+  if (critere.tri !== 'nom') parametres.set('sort', critere.tri);
+  if (critere.desc) parametres.set('desc', '1');
+  if (force) parametres.set('refresh', '1');
+  const suite = parametres.toString();
+  return `/api/classrooms/${encode(etat.groupe.scope)}/assignments/${encode(nom)}` +
+    (suite ? '?' + suite : '');
+}
+
 async function ouvrirTravail(travail, force, sansHistorique) {
-  const chemin = `/api/classrooms/${encode(etat.groupe.scope)}/assignments/${encode(travail.name)}` +
-    (force ? '?refresh=1' : '');
-  const detail = await tenter(() => api('GET', chemin), 'Travail');
-  if (!detail) return;
+  // Les critères appartiennent au travail qu'on regarde : en ouvrir un autre
+  // repart de zéro, mais revenir au même — après une suppression, après une
+  // distribution — garde ce qui était posé.
+  const meme = etat.travailRegle === travail.id;
+  if (!meme) {
+    barreTravail.reinitialiser();
+    etat.acces.clear();
+    etat.selection = new Set();
+    etat.travailRegle = travail.id;
+  }
+  if (!await chargerTravail(travail, force, !meme)) return;
+  afficherVue('travail', sansHistorique);
+}
+
+async function chargerTravail(travail, force, toutCocher) {
+  const detail = await tenter(() => api('GET', adresseTravail(travail.name, force)), 'Travail');
+  if (!detail) return false;
 
   // « repos » compte les dépôts dans la fiche du travail et les énumère dans le
   // détail : on ne garde que la liste, sous un nom qui ne prête pas à confusion.
-  etat.travail = { id: travail.id, name: travail.name, depots: detail.repos };
-  etat.selection = new Set(detail.repos.map((repo) => repo.name));
-  etat.acces.clear();
+  // « names » les nomme tous, filtrés compris : ce qu'on cache à l'écran ne sort
+  // pas du travail pour autant.
+  etat.travail = {
+    id: travail.id, name: travail.name, depots: detail.repos,
+    total: detail.total, noms: detail.names || [],
+  };
+  // Une sélection ne survit pas à ce que le filtre écarte : on agit sur ce
+  // qu'on voit, et rien d'autre.
+  const visibles = new Set(detail.repos.map((repo) => repo.name));
+  etat.selection = toutCocher
+    ? visibles
+    : new Set([...etat.selection].filter((nom) => visibles.has(nom)));
   $('detail-titre').textContent = travail.name;
   dessinerTravail();
-  afficherVue('travail', sansHistorique);
+  return true;
 }
+
+const rechargerTravail = () => {
+  if (etat.groupe && etat.travail) chargerTravail(etat.travail, false, false);
+};
+
+// Un travail n'a qu'un dépôt par personne : « avec » et « sans dépôt » n'y
+// diraient rien, et le menu ne garde que « jamais d'envoi » et les bornes du
+// dernier envoi.
+const barreTravail = barreDeFiltre({
+  table: 'detail-table',
+  texte: 'detail-texte',
+  ouvrir: 'detail-filtre-ouvrir',
+  menu: 'detail-filtre-menu',
+  vider: 'detail-filtre-vider',
+  champs: [
+    ['detail-filtre-activite', 'activite'],
+    ['detail-filtre-apres', 'apres'], ['detail-filtre-avant', 'avant'],
+  ],
+  criteres: () => etat.filtreTravail,
+  effacer: () => {
+    etat.filtreTravail = {
+      texte: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false,
+    };
+  },
+  recharger: () => rechargerTravail(),
+});
 
 function dessinerTravail() {
   const depots = etat.travail.depots;
@@ -1053,9 +1125,19 @@ function dessinerTravail() {
   // Le serveur a déjà rattaché chaque dépôt à son étudiant : la page n'a plus à
   // deviner qui se cache derrière un nom.
   const servis = depots.filter((repo) => repo.username).length;
-  $('detail-resume').textContent =
-    `${depots.length} dépôt(s) · ${servis} étudiant(s) du groupe sur ${total} en ont un` +
-    (depots.length - servis > 0 ? ` · ${depots.length - servis} hors liste` : '');
+  // Sous filtre, le résumé dit sur combien : sans cela, une liste courte ne
+  // distinguerait pas un travail peu distribué d'un critère trop étroit.
+  const parts = depots.length === etat.travail.total
+    ? [`${depots.length} dépôt(s)`,
+       `${servis} étudiant(s) du groupe sur ${total} en ont un`]
+    : [`${depots.length} dépôt(s) sur ${etat.travail.total}`,
+       `${servis} étudiant(s) du groupe`];
+  if (depots.length - servis > 0) parts.push(`${depots.length - servis} hors liste`);
+  $('detail-resume').textContent = parts.join(' · ');
+
+  $('detail-table').hidden = depots.length === 0;
+  $('detail-vide').hidden = depots.length > 0;
+  $('detail-vide').textContent = 'Aucun dépôt ne répond à ces critères.';
 
   const corps = $('detail-table').querySelector('tbody');
   vider(corps);
@@ -1085,6 +1167,7 @@ function dessinerTravail() {
         el('button', { type: 'button', classe: 'lien', texte: 'Supprimer', onclick: () => supprimerDepot(repo) })),
     ));
   }
+  barreTravail.maj();
   majSelection();
 }
 
@@ -1097,8 +1180,13 @@ function resumerAcces(acces) {
 
 function majSelection() {
   const total = etat.travail ? etat.travail.depots.length : 0;
-  $('detail-selection').textContent = `${etat.selection.size} dépôt(s) sur ${total} sélectionné(s)`;
-  $('detail-tout').checked = total > 0 && etat.selection.size === total;
+  const choisis = etat.selection.size;
+  // Même formulation que la liste des étudiants : les deux bandeaux disent la
+  // même chose, et celui-ci porte assez de commandes pour ne pas s'allonger.
+  $('detail-selection').textContent = choisis === 0
+    ? `${total} dépôt(s) affiché(s)`
+    : `${choisis} sur ${total} sélectionné(s)`;
+  $('detail-tout').checked = total > 0 && choisis === total;
 }
 
 $('detail-tout').addEventListener('change', (evenement) => {
@@ -1312,7 +1400,7 @@ $('detail-pull').addEventListener('click', async () => {
 
   const cases = liste.clones.map((item) => {
     const coche = el('input', { type: 'checkbox', checked: true, value: item.name });
-    const horsTravail = !etat.travail.depots.some((repo) => repo.name === item.name);
+    const horsTravail = !etat.travail.noms.includes(item.name);
     return el('label', { classe: 'case' }, coche,
       el('span', { texte: item.name + (horsTravail ? '   (hors travail)' : '') }));
   });
@@ -1693,8 +1781,7 @@ async function chargerEtudiants(force) {
   $('etudiants-resume').textContent =
     (filtre ? `${donnees.shown} étudiant(s) sur ${donnees.total}` : `${donnees.total} étudiant(s)`) +
     ` · ${travaux((donnees.assignments || []).length)}`;
-  majEntetesDuTri();
-  majBoutonFiltre();
+  barreEtudiants.maj();
   $('etudiants-noms').disabled = donnees.missing_names === 0;
   $('etudiants-noms').textContent = donnees.missing_names === 0
     ? 'Noms complets connus'
@@ -1747,69 +1834,15 @@ $('etudiants-deplacer').addEventListener('click', () => {
 // sous la main. Le reste des critères — travail, dépôts, dates — tient dans un
 // menu qu'on n'ouvre qu'au besoin : ils servent rarement, et l'écran leur était
 // entièrement donné.
+//
+// Deux listes s'en servent — les étudiants d'un groupe, les dépôts d'un travail
+// — parce que ce sont les mêmes critères, appliqués aux mêmes lignes par le
+// même paquet du serveur. Seuls changent la table, les identifiants de la
+// barre, et les critères que le menu propose.
 
 // Le sens par défaut suit ce qu'on cherche : un nom se lit de A à Z, une date
 // du plus récent au plus ancien.
 const sensParDefaut = { nom: false, compte: false, envoi: true };
-
-for (const entete of $('etudiants-table').querySelectorAll('th[data-tri]')) {
-  entete.querySelector('button').addEventListener('click', () => {
-    const colonne = entete.dataset.tri;
-    // Recliquer la colonne déjà triée retourne l'ordre ; en choisir une autre
-    // repart de son sens naturel.
-    etat.filtre.desc = etat.filtre.tri === colonne
-      ? !etat.filtre.desc
-      : sensParDefaut[colonne];
-    etat.filtre.tri = colonne;
-    rechargerEtudiants();
-  });
-}
-
-function majEntetesDuTri() {
-  for (const entete of $('etudiants-table').querySelectorAll('th[data-tri]')) {
-    const actif = entete.dataset.tri === etat.filtre.tri;
-    if (actif) entete.setAttribute('aria-sort', etat.filtre.desc ? 'descending' : 'ascending');
-    else entete.removeAttribute('aria-sort');
-    entete.querySelector('.fleche').textContent = actif ? (etat.filtre.desc ? '▼' : '▲') : '';
-  }
-}
-
-// Le bouton dit combien de critères sont posés : un filtre replié dans un menu
-// ne doit pas pouvoir se faire oublier.
-function majBoutonFiltre() {
-  const poses = ['travail', 'activite', 'apres', 'avant']
-    .filter((critere) => etat.filtre[critere]).length;
-  $('filtre-ouvrir').textContent = poses ? `Filtrer · ${poses}` : 'Filtrer';
-  $('filtre-ouvrir').classList.toggle('vert', poses > 0);
-}
-
-function ouvrirFiltre(ouvert) {
-  const menu = $('filtre-menu');
-  menu.hidden = !ouvert;
-  $('filtre-ouvrir').setAttribute('aria-expanded', String(ouvert));
-  if (!ouvert) return;
-  // Sa largeur ne se connaît qu'une fois affiché : la place se calcule après.
-  const bouton = $('filtre-ouvrir').getBoundingClientRect();
-  menu.style.top = `${bouton.bottom + 6}px`;
-  menu.style.left = `${Math.max(8, bouton.right - menu.offsetWidth)}px`;
-}
-
-$('filtre-ouvrir').addEventListener('click', () => ouvrirFiltre($('filtre-menu').hidden));
-
-// Le menu se referme comme tout menu : ailleurs, à l'échappement, ou dès que la
-// page bouge sous lui — sa place a été calculée pour l'endroit qu'elle occupait.
-document.addEventListener('click', (evenement) => {
-  if (!$('filtre-menu').hidden && !evenement.target.closest('.menu-ancre')) ouvrirFiltre(false);
-});
-document.addEventListener('keydown', (evenement) => {
-  if (evenement.key === 'Escape' && !$('filtre-menu').hidden) {
-    ouvrirFiltre(false);
-    $('filtre-ouvrir').focus();
-  }
-});
-window.addEventListener('scroll', () => {
-  if (!$('filtre-menu').hidden) ouvrirFiltre(false);
-}, true);
 
 // Une frappe ne part pas au serveur avant que la main se soit arrêtée.
 function differer(action, delai = 250) {
@@ -1820,42 +1853,129 @@ function differer(action, delai = 250) {
   };
 }
 
-const rechargerEtudiants = () => { if (etat.groupe) chargerEtudiants(); };
-const rechargerPlusTard = differer(rechargerEtudiants);
+// barreDeFiltre relie une barre — recherche, menu de critères, en-têtes
+// triables — aux critères que la liste retient. « criteres » les désigne
+// plutôt que de les porter : « vider » les remplace par un objet neuf, et la
+// barre doit suivre. Elle rend de quoi la remettre au diapason après un
+// chargement, et de quoi tout effacer.
+function barreDeFiltre({ table, texte, ouvrir, menu, vider, champs, criteres, effacer, recharger }) {
+  const tableau = $(table);
 
-$('filtre-texte').addEventListener('input', (evenement) => {
-  etat.filtre.texte = evenement.target.value.trim();
-  rechargerPlusTard();
-});
+  for (const entete of tableau.querySelectorAll('th[data-tri]')) {
+    entete.querySelector('button').addEventListener('click', () => {
+      const critere = criteres();
+      const colonne = entete.dataset.tri;
+      // Recliquer la colonne déjà triée retourne l'ordre ; en choisir une autre
+      // repart de son sens naturel.
+      critere.desc = critere.tri === colonne ? !critere.desc : sensParDefaut[colonne];
+      critere.tri = colonne;
+      recharger();
+    });
+  }
 
-for (const [identifiant, champ] of [
-  ['filtre-travail', 'travail'], ['filtre-activite', 'activite'],
-  ['filtre-apres', 'apres'], ['filtre-avant', 'avant'],
-]) {
-  $(identifiant).addEventListener('change', (evenement) => {
-    etat.filtre[champ] = evenement.target.value;
-    rechargerEtudiants();
+  function majEntetes() {
+    const critere = criteres();
+    for (const entete of tableau.querySelectorAll('th[data-tri]')) {
+      const actif = entete.dataset.tri === critere.tri;
+      if (actif) entete.setAttribute('aria-sort', critere.desc ? 'descending' : 'ascending');
+      else entete.removeAttribute('aria-sort');
+      entete.querySelector('.fleche').textContent = actif ? (critere.desc ? '▼' : '▲') : '';
+    }
+  }
+
+  // Le bouton dit combien de critères sont posés : un filtre replié dans un
+  // menu ne doit pas pouvoir se faire oublier.
+  function majBouton() {
+    const critere = criteres();
+    const poses = champs.filter(([, nom]) => critere[nom]).length;
+    $(ouvrir).textContent = poses ? `Filtrer · ${poses}` : 'Filtrer';
+    $(ouvrir).classList.toggle('vert', poses > 0);
+  }
+
+  function deplier(ouvert) {
+    const flottant = $(menu);
+    flottant.hidden = !ouvert;
+    $(ouvrir).setAttribute('aria-expanded', String(ouvert));
+    if (!ouvert) return;
+    // Sa largeur ne se connaît qu'une fois affiché : la place se calcule après.
+    const bouton = $(ouvrir).getBoundingClientRect();
+    flottant.style.top = `${bouton.bottom + 6}px`;
+    flottant.style.left = `${Math.max(8, bouton.right - flottant.offsetWidth)}px`;
+  }
+
+  $(ouvrir).addEventListener('click', () => deplier($(menu).hidden));
+
+  // Le menu se referme comme tout menu : ailleurs, à l'échappement, ou dès que
+  // la page bouge sous lui — sa place a été calculée pour l'endroit qu'elle
+  // occupait.
+  document.addEventListener('click', (evenement) => {
+    if (!$(menu).hidden && !evenement.target.closest('.menu-ancre')) deplier(false);
   });
+  document.addEventListener('keydown', (evenement) => {
+    if (evenement.key === 'Escape' && !$(menu).hidden) {
+      deplier(false);
+      $(ouvrir).focus();
+    }
+  });
+  window.addEventListener('scroll', () => {
+    if (!$(menu).hidden) deplier(false);
+  }, true);
+
+  const plusTard = differer(recharger);
+  $(texte).addEventListener('input', (evenement) => {
+    criteres().texte = evenement.target.value.trim();
+    plusTard();
+  });
+  for (const [identifiant, nom] of champs) {
+    $(identifiant).addEventListener('change', (evenement) => {
+      criteres()[nom] = evenement.target.value;
+      recharger();
+    });
+  }
+
+  // reinitialiser remet la barre et les critères dans le même état : c'est la
+  // même remise à zéro qu'on change de liste ou qu'on efface tout.
+  function reinitialiser() {
+    effacer();
+    $(texte).value = '';
+    for (const [identifiant] of champs) $(identifiant).value = '';
+    maj();
+  }
+
+  function maj() {
+    majEntetes();
+    majBouton();
+  }
+
+  $(vider).addEventListener('click', () => {
+    reinitialiser();
+    deplier(false);
+    recharger();
+  });
+
+  return { maj, reinitialiser };
 }
 
-// reinitialiserFiltre remet la barre et l'état dans le même état : c'est la
-// même remise à zéro qu'on change de groupe ou qu'on efface les critères.
-function reinitialiserFiltre() {
-  etat.filtre = { texte: '', travail: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false };
-  etat.deplaces = new Set();
-  $('filtre-texte').value = '';
-  $('filtre-travail').value = '';
-  $('filtre-activite').value = '';
-  $('filtre-apres').value = '';
-  $('filtre-avant').value = '';
-  majEntetesDuTri();
-  majBoutonFiltre();
-}
+const rechargerEtudiants = () => { if (etat.groupe) chargerEtudiants(); };
 
-$('filtre-vider').addEventListener('click', () => {
-  reinitialiserFiltre();
-  ouvrirFiltre(false);
-  rechargerEtudiants();
+const barreEtudiants = barreDeFiltre({
+  table: 'etudiants-table',
+  texte: 'filtre-texte',
+  ouvrir: 'filtre-ouvrir',
+  menu: 'filtre-menu',
+  vider: 'filtre-vider',
+  champs: [
+    ['filtre-travail', 'travail'], ['filtre-activite', 'activite'],
+    ['filtre-apres', 'apres'], ['filtre-avant', 'avant'],
+  ],
+  criteres: () => etat.filtre,
+  effacer: () => {
+    etat.filtre = {
+      texte: '', travail: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false,
+    };
+    etat.deplaces = new Set();
+  },
+  recharger: () => rechargerEtudiants(),
 });
 
 $('etudiants-recharger').addEventListener('click', () => chargerEtudiants(true));

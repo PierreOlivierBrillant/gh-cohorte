@@ -686,8 +686,18 @@ func (s *Server) assignmentOf(request *http.Request) (
 }
 
 // handleAssignment renvoie les dépôts d'un travail, étudiant par étudiant.
+//
+// La liste se filtre et se trie comme celle des étudiants, et par le même
+// paquet : un travail, c'est un dépôt par personne — exactement ce que
+// l'assistant du terminal montre d'un préfixe. « Avant le 1er octobre » y veut
+// donc dire la même chose qu'ailleurs.
 func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Request) {
 	cours, id, repos, err := s.assignmentOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	filtre, tri, decroissant, err := studentQuery(request)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -698,8 +708,25 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	lignes := make([]assignmentRepo, 0, len(trouves))
+	// Le nom complet ne se lit pas dans le dépôt : il vient de la liste du
+	// groupe, dépôt par dépôt, comme le résolveur le fournit au terminal.
+	noms := make(map[string]string, len(trouves))
+	parNom := make(map[string]groups.Repo, len(trouves))
+	tous := make([]string, 0, len(trouves))
 	for _, repo := range trouves {
+		parNom[repo.Name] = repo
+		tous = append(tous, repo.Name)
+		if student, inscrit := cours.StudentOf(repo.Name); inscrit {
+			noms[repo.Name] = student.FullName
+		}
+	}
+	retenues := students.Apply(
+		students.FromGroup(groups.Group{Prefix: cours.ShortName(id), Repos: trouves}, noms),
+		filtre, tri, decroissant)
+
+	lignes := make([]assignmentRepo, 0, len(retenues))
+	for _, retenue := range retenues {
+		repo := parNom[retenue.Repos[0].Name]
 		ligne := assignmentRepo{
 			Name: repo.Name, Student: repo.Suffix, Private: repo.Private,
 			Visibility: repo.Visibility(), URL: s.urlOf(cours.Org, repo),
@@ -712,6 +739,10 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"id": id, "name": cours.ShortName(id), "repos": lignes,
+		// Le total dit combien le filtre a écarté ; « names » nomme tous les
+		// dépôts du travail, filtrés compris — ce qu'on cache à l'écran ne sort
+		// pas du travail pour autant.
+		"shown": len(lignes), "total": len(trouves), "names": tous,
 	})
 }
 
