@@ -18,8 +18,8 @@ import (
 //
 // Rien n'oblige à connaître les personnes pour cela : un dépôt dont l'étudiant
 // reste inconnu garde le dernier niveau de son nom. Il arrive à la bonne place,
-// le groupe le reconnaît, et le nom complet se corrige ensuite — « Renommer… »
-// dans la liste des étudiants.
+// le groupe le reconnaît, et le nom complet se corrige ensuite — le crayon
+// « Renommer… » de la liste des étudiants.
 
 // relocateInput est ce que l'interface envoie pour déplacer des travaux.
 type relocateInput struct {
