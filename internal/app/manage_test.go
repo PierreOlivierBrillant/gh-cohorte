@@ -131,7 +131,7 @@ func TestGestionPrefixeInexistant(t *testing.T) {
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	h.contient("Aucun dépôt ne commence par « tp9- »")
+	h.contient("Aucun dépôt dans « tp9 »")
 }
 
 func TestGestionChangerDeGroupe(t *testing.T) {
@@ -700,6 +700,98 @@ func TestTravailDeplaceEnSimulation(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("a26.5n6.01.tp1.jlpicard", "Simulation")
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// ---------------------------------------------------- renommer un travail
+
+// cohorteNommee prépare une organisation dont les dépôts suivent la
+// nomenclature courante : c'est là qu'un travail se renomme sans se déplacer.
+func cohorteNommee(t *testing.T) *fakegh.State {
+	t.Helper()
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp1.jlpicard",
+		"a26.5n6.01.tp2.jlpicard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	return state
+}
+
+// L'assistant ouvre un travail de la nomenclature courante et le renomme sur
+// place : le préfixe suit, on reste dans le même travail.
+func TestTravailRenommeDansLAssistant(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	code, _ := h.script("renommer", "projet-final", "oui", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	attendu := "a26.5n6.01.projet-final.emilie-cote," +
+		"a26.5n6.01.projet-final.jlpicard,a26.5n6.01.tp2.jlpicard"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts : %v", noms)
+	}
+	h.contient("Groupe « a26.5n6.01.projet-final »")
+}
+
+// Refuser en fin de course ne laisse rien derrière.
+func TestTravailNonRenommeQuandOnRefuse(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	code, _ := h.script("renommer", "projet-final", "non", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Annulé : rien n'a été renommé.")
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "a26.5n6.01.tp1.jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// « --rename-to » seul renomme sur place : c'est la même opération, scriptable.
+func TestTravailRenommeEnLigneDeCommande(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	h.Options.RenameTo = "Projet final"
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms,
+		"a26.5n6.01.projet-final.jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// La simulation montre le renommage et n'écrit rien.
+func TestTravailRenommeEnSimulation(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	h.Options.RenameTo = "projet-final"
+	h.Options.DryRun = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("a26.5n6.01.projet-final.jlpicard", "Simulation")
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "a26.5n6.01.tp1.jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// Un préfixe qui ne dit pas à quel groupe il appartient ne peut pas être
+// renommé sur place : le refus renvoie vers le déplacement, qui donne un nom au
+// passage.
+func TestTravailSansPlaceRefuseLeRenommage(t *testing.T) {
+	h := gestion(t, groupe(t), "tp1")
+	h.Options.RenameTo = "projet-final"
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitValidation {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Déplacez-le d'abord")
 	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}

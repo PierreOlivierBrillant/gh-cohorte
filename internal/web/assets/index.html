@@ -261,9 +261,20 @@
         <h2 id="detail-titre"></h2>
         <p class="note" id="detail-resume"></p>
       </div>
+      <!-- Ce qu'on fait au travail entier tient dans un menu : distribuer aux
+           manquants est ce qu'on vient y faire presque toujours, le reste ne
+           mérite pas d'occuper la barre à demeure. -->
       <div class="actions">
-        <button type="button" id="detail-acces" class="bouton">Inspecter les accès</button>
-        <button type="button" id="detail-deplacer" class="bouton">Déplacer ce travail…</button>
+        <div class="menu-ancre">
+          <button type="button" id="detail-menu-ouvrir" class="bouton"
+            aria-expanded="false" aria-haspopup="true"
+            aria-controls="detail-menu">Ce travail</button>
+          <div class="menu-flottant menu-liste" id="detail-menu" hidden role="menu">
+            <button type="button" id="detail-acces" role="menuitem">Inspecter les accès</button>
+            <button type="button" id="detail-renommer" role="menuitem">Renommer ce travail…</button>
+            <button type="button" id="detail-deplacer" role="menuitem">Déplacer ce travail…</button>
+          </div>
+        </div>
         <button type="button" id="detail-distribuer" class="bouton vert">Distribuer aux manquants</button>
       </div>
     </div>

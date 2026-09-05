@@ -1403,17 +1403,35 @@ function selectionnes() {
   return etat.travail.depots.filter((repo) => etat.selection.has(repo.name));
 }
 
-// --- accès de tout le travail
+// --- ce qu'on fait au travail entier
 
-// Depuis la page d'un travail, c'est celui qu'on regarde qu'on déplace : il n'y
-// a pas à retourner à la liste pour le cocher.
-$('detail-deplacer').addEventListener('click', () => {
-  const travail = (etat.groupe.assignments || [])
-    .find((item) => item.id === etat.travail.id);
-  if (travail) deplacerTravaux([travail]);
-});
+// Les commandes du travail entier vivent dans un menu : elles sont rares, et la
+// barre garde ainsi la seule qu'on vient y chercher — distribuer aux manquants.
+const menuTravail = menuDeroulant('detail-menu-ouvrir', 'detail-menu');
+
+// Le travail que la page montre, tel que le groupe le connaît : c'est la fiche
+// que les commandes attendent, pas le détail chargé pour l'affichage.
+function travailOuvert() {
+  return (etat.groupe.assignments || []).find((item) => item.id === etat.travail.id);
+}
+
+// Chaque commande referme le menu avant d'agir : le dialogue qui suit se
+// passerait mal d'un menu resté ouvert derrière lui.
+function commandeDuTravail(bouton, action) {
+  $(bouton).addEventListener('click', () => {
+    menuTravail.deplier(false);
+    const travail = travailOuvert();
+    if (travail) action(travail);
+  });
+}
+
+// Depuis la page d'un travail, c'est celui qu'on regarde qu'on déplace ou qu'on
+// renomme : il n'y a pas à retourner à la liste pour le cocher.
+commandeDuTravail('detail-deplacer', (travail) => deplacerTravaux([travail]));
+commandeDuTravail('detail-renommer', (travail) => renommerTravail(travail));
 
 $('detail-acces').addEventListener('click', async () => {
+  menuTravail.deplier(false);
   const fiche = await tenter(() => api('POST',
     `/api/classrooms/${encode(etat.groupe.scope)}/assignments/${encode(etat.travail.name)}/access`),
     'Accès');
@@ -2070,6 +2088,46 @@ function differer(action, delai = 250) {
   };
 }
 
+// menuDeroulant relie un bouton au panneau qu'il déplie. Le panneau est posé
+// au-dessus de la page plutôt que dans la boîte qui le contient — celle-ci
+// rognerait ce qui dépasse d'elle, et un menu dépasse toujours —, si bien que
+// sa place se calcule à l'ouverture, une fois sa largeur connue.
+//
+// Les critères d'une liste et les commandes d'un travail se déplient de la même
+// façon : ce qui suit ne sait pas ce que le panneau contient.
+function menuDeroulant(ouvrir, menu) {
+  function deplier(ouvert) {
+    const flottant = $(menu);
+    flottant.hidden = !ouvert;
+    $(ouvrir).setAttribute('aria-expanded', String(ouvert));
+    if (!ouvert) return;
+    // Sa largeur ne se connaît qu'une fois affiché : la place se calcule après.
+    const bouton = $(ouvrir).getBoundingClientRect();
+    flottant.style.top = `${bouton.bottom + 6}px`;
+    flottant.style.left = `${Math.max(8, bouton.right - flottant.offsetWidth)}px`;
+  }
+
+  $(ouvrir).addEventListener('click', () => deplier($(menu).hidden));
+
+  // Le menu se referme comme tout menu : ailleurs, à l'échappement, ou dès que
+  // la page bouge sous lui — sa place a été calculée pour l'endroit qu'elle
+  // occupait.
+  document.addEventListener('click', (evenement) => {
+    if (!$(menu).hidden && !evenement.target.closest('.menu-ancre')) deplier(false);
+  });
+  document.addEventListener('keydown', (evenement) => {
+    if (evenement.key === 'Escape' && !$(menu).hidden) {
+      deplier(false);
+      $(ouvrir).focus();
+    }
+  });
+  window.addEventListener('scroll', () => {
+    if (!$(menu).hidden) deplier(false);
+  }, true);
+
+  return { deplier };
+}
+
 // barreDeFiltre relie une barre — recherche, menu de critères, en-têtes
 // triables — aux critères que la liste retient. « criteres » les désigne
 // plutôt que de les porter : « vider » les remplace par un objet neuf, et la
@@ -2109,34 +2167,7 @@ function barreDeFiltre({ table, texte, ouvrir, menu, vider, champs, criteres, ef
     $(ouvrir).classList.toggle('vert', poses > 0);
   }
 
-  function deplier(ouvert) {
-    const flottant = $(menu);
-    flottant.hidden = !ouvert;
-    $(ouvrir).setAttribute('aria-expanded', String(ouvert));
-    if (!ouvert) return;
-    // Sa largeur ne se connaît qu'une fois affiché : la place se calcule après.
-    const bouton = $(ouvrir).getBoundingClientRect();
-    flottant.style.top = `${bouton.bottom + 6}px`;
-    flottant.style.left = `${Math.max(8, bouton.right - flottant.offsetWidth)}px`;
-  }
-
-  $(ouvrir).addEventListener('click', () => deplier($(menu).hidden));
-
-  // Le menu se referme comme tout menu : ailleurs, à l'échappement, ou dès que
-  // la page bouge sous lui — sa place a été calculée pour l'endroit qu'elle
-  // occupait.
-  document.addEventListener('click', (evenement) => {
-    if (!$(menu).hidden && !evenement.target.closest('.menu-ancre')) deplier(false);
-  });
-  document.addEventListener('keydown', (evenement) => {
-    if (evenement.key === 'Escape' && !$(menu).hidden) {
-      deplier(false);
-      $(ouvrir).focus();
-    }
-  });
-  window.addEventListener('scroll', () => {
-    if (!$(menu).hidden) deplier(false);
-  }, true);
+  const { deplier } = menuDeroulant(ouvrir, menu);
 
   const plusTard = differer(recharger);
   $(texte).addEventListener('input', (evenement) => {
@@ -2994,6 +3025,70 @@ async function deplacerTravaux(travauxChoisis) {
   etat.travauxChoisis = new Set();
   await chargerGroupes(true);
   await ouvrirGroupe(etat.groupe.scope, true, true);
+}
+
+// ------------------------------------------------------ renommer un travail
+
+// Un travail mal nommé — « tp1 » pour ce qui est devenu le projet final, une
+// faute de frappe distribuée à trente personnes — n'avait qu'une issue : le
+// déplacer vers un autre groupe pour profiter du nom qu'on y choisit au
+// passage. C'est beaucoup demander pour corriger un mot.
+//
+// Le nom du travail est un niveau du nom de chaque dépôt : il n'y a pas de
+// fiche où le corriger, les dépôts sont tout ce qu'un travail est. Le renommer,
+// c'est donc les renommer tous — et c'est pourquoi le renommage se montre en
+// entier avant la première écriture.
+async function renommerTravail(travail) {
+  const nom = el('input', { type: 'text', classe: 'champ', value: travail.name });
+
+  const confirme = await demander(`Renommer « ${travail.name} »`, el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nouveau nom du travail' }), nom,
+      el('span', { classe: 'aide',
+        texte: 'Il entre dans le nom de chaque dépôt : le corriger renomme les ' +
+          `${travail.repos} dépôt(s) du travail.` })),
+    el('p', { classe: 'note',
+      texte: 'Le groupe et le nom des étudiants ne bougent pas : seul le niveau du ' +
+        'travail change.' })), 'Voir le renommage');
+  if (!confirme) return;
+
+  const corps = { id: travail.id, name: nom.value.trim() };
+  const apercu = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/rename/preview`, corps),
+  'Renommage');
+  if (!apercu) return;
+
+  const lignes = apercu.rows.map((ligne) => el('tr', {},
+    el('td', {}, el('code', { texte: ligne.repo })),
+    el('td', {}, el('code', { texte: ligne.target }))));
+
+  const parti = await demander(`Renommer ${apercu.ready} dépôt(s)`, el('div', {},
+    el('div', { classe: 'apercu-renommage' },
+      el('table', { classe: 'tableau' },
+        el('thead', {}, el('tr', {},
+          el('th', { texte: 'Dépôt actuel' }), el('th', { texte: 'Nouveau nom' }))),
+        el('tbody', {}, lignes))),
+    el('p', { classe: 'note',
+      texte: 'GitHub garde une redirection depuis chaque ancien nom : les clones et les ' +
+        'liens déjà distribués continuent de fonctionner.' })), 'Renommer');
+  if (!parti) return;
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/rename`, corps), 'Renommage');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (!bilan) return;
+  message(`${bilan.renamed} dépôt(s) renommé(s) · « ${bilan.previous} » devient ` +
+    `« ${bilan.name} »` + (bilan.failed ? ` · ${bilan.failed} en échec` : ''),
+  bilan.failed ? 'alerte' : 'succes');
+
+  // La page revient sur le travail sous son nouveau nom : l'ancien ne désigne
+  // plus rien, et rester dessus montrerait une liste vide. L'adresse suit, elle
+  // aussi — recharger la page sur l'ancien nom ne trouverait plus de travail.
+  await chargerGroupes(true);
+  if (!await ouvrirGroupe(etat.groupe.scope, true, true)) return;
+  const renomme = (etat.groupe.assignments || []).find((item) => item.id === bilan.id);
+  if (renomme) await ouvrirTravail(renomme, false, false);
 }
 
 // ----------------------------------------------------- choix d'un chemin
