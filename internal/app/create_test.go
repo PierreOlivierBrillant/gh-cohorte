@@ -815,7 +815,7 @@ func TestSelectionParExpressionEnModeLigne(t *testing.T) {
 		"3",   // Que faire ? → afficher les URL
 		"1,3", // sélection par expression
 		"n",   // ne pas enregistrer
-		"11",  // Quitter
+		"12",  // Quitter
 		"",
 	}, "\n")
 

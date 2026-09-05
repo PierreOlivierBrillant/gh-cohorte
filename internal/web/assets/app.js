@@ -97,6 +97,8 @@ const etat = {
   // mêmes lignes — un dépôt par personne — par le même paquet du serveur.
   filtreTravail: { texte: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false },
   deplaces: new Set(),
+  // Les travaux cochés dans la liste d'un groupe, pour les déplacer ensemble.
+  travauxChoisis: new Set(),
   destinataires: new Set(),
   reglagesTravail: {},
   nouveau: { org: '', etudiants: [], rejets: [] },
@@ -229,7 +231,14 @@ function demander(titre, contenu, libelle = 'Confirmer') {
     };
     const surOui = () => repondre(true);
     const surNon = () => repondre(false);
-    const surFermeture = () => repondre(dialogue.returnValue === 'ok');
+    // Le dialogue est unique, et « close » part en différé : celui de la
+    // question précédente peut arriver alors que la suivante est déjà ouverte,
+    // et y répondrait tout seul. Il se reconnaît à ce que le dialogue est
+    // encore ouvert — une fermeture vraie l'a forcément refermé d'abord.
+    const surFermeture = () => {
+      if (dialogue.open) return;
+      repondre(dialogue.returnValue === 'ok');
+    };
     valider.addEventListener('click', surOui);
     annuler.addEventListener('click', surNon);
     // Échap referme sans passer par les boutons.
@@ -1005,8 +1014,14 @@ function dessinerTravaux() {
     ? `Dépôts de ${groupe.org} — source : ${groupe.source}`
     : '';
 
+  // Une sélection ne survit pas à ce qui a disparu de la liste : on déplace ce
+  // qu'on voit.
+  const presents = new Set(sesTravaux.map((travail) => travail.id));
+  etat.travauxChoisis = new Set([...etat.travauxChoisis].filter((id) => presents.has(id)));
+
   const conteneur = $('travaux-liste');
   vider(conteneur);
+  $('travaux-bandeau').hidden = sesTravaux.length === 0;
   if (sesTravaux.length === 0) {
     conteneur.append(el('div', { classe: 'boite-vide' },
       el('p', { texte: 'Aucun travail dans ce groupe.' }),
@@ -1018,20 +1033,58 @@ function dessinerTravaux() {
   for (const travail of sesTravaux) {
     const detail = [`${travail.students} étudiant(s) du groupe sur ${total}`];
     if (travail.others > 0) detail.push(`${travail.others} dépôt(s) hors liste`);
-    conteneur.append(el('button', {
-      classe: 'travail-ligne', type: 'button', onclick: () => ouvrirTravail(travail),
-    },
-      el('span', { classe: 'travail-infos' },
-        el('span', { classe: 'titre', texte: travail.name }),
-        el('span', { classe: 'detail', texte: detail.join(' · ') })),
-      el('span', { classe: 'espace' }),
-      el('span', {
-        classe: 'jeton ' + (total > 0 && travail.students >= total ? 'oui' : ''),
-        texte: `${travail.repos} dépôt(s)`,
-      }),
-      el('span', { classe: 'chevron', texte: '›' })));
+    const case_ = el('input', {
+      type: 'checkbox', checked: etat.travauxChoisis.has(travail.id),
+      'aria-label': `Choisir « ${travail.name} »`,
+      onchange: (evenement) => {
+        if (evenement.target.checked) etat.travauxChoisis.add(travail.id);
+        else etat.travauxChoisis.delete(travail.id);
+        majSelectionTravaux();
+      },
+    });
+    conteneur.append(el('div', { classe: 'travail-rangee' },
+      el('label', { classe: 'case travail-case' }, case_),
+      el('button', {
+        classe: 'travail-ligne', type: 'button', onclick: () => ouvrirTravail(travail),
+      },
+        el('span', { classe: 'travail-infos' },
+          el('span', { classe: 'titre', texte: travail.name }),
+          el('span', { classe: 'detail', texte: detail.join(' · ') })),
+        el('span', { classe: 'espace' }),
+        el('span', {
+          classe: 'jeton ' + (total > 0 && travail.students >= total ? 'oui' : ''),
+          texte: `${travail.repos} dépôt(s)`,
+        }),
+        el('span', { classe: 'chevron', texte: '›' }))));
   }
+  majSelectionTravaux();
 }
+
+function majSelectionTravaux() {
+  const total = (etat.groupe.assignments || []).length;
+  const choisis = etat.travauxChoisis.size;
+  $('travaux-selection').textContent = choisis === 0
+    ? travaux(total)
+    : `${choisis} sur ${total} sélectionné(s)`;
+  $('travaux-tout').checked = total > 0 && choisis === total;
+  $('travaux-deplacer').disabled = choisis === 0;
+}
+
+$('travaux-tout').addEventListener('change', (evenement) => {
+  etat.travauxChoisis = evenement.target.checked
+    ? new Set((etat.groupe.assignments || []).map((travail) => travail.id))
+    : new Set();
+  for (const case_ of $('travaux-liste').querySelectorAll('input[type="checkbox"]')) {
+    case_.checked = evenement.target.checked;
+  }
+  majSelectionTravaux();
+});
+
+$('travaux-deplacer').addEventListener('click', () => {
+  const choisis = (etat.groupe.assignments || [])
+    .filter((travail) => etat.travauxChoisis.has(travail.id));
+  if (choisis.length) deplacerTravaux(choisis);
+});
 
 $('travaux-recharger').addEventListener('click', () => ouvrirGroupe(etat.groupe.scope, true));
 
@@ -1153,8 +1206,11 @@ function dessinerTravail() {
           majSelection();
         },
       })),
-      el('td', repo.full_name
-        ? { texte: repo.full_name }
+      // « hors liste » dit que le dépôt n'est rattaché à personne, pas que son
+      // nom complet manque : un dépôt nommé par le compte GitHub d'un inscrit
+      // lui appartient, et le dire autrement ferait croire à un intrus.
+      el('td', repo.username
+        ? { texte: repo.full_name || '@' + repo.username }
         : { classe: 'vide', texte: repo.student + ' (hors liste)' }),
       el('td', {}, el('a', {
         href: repo.url, target: '_blank', rel: 'noreferrer noopener', texte: repo.name,
@@ -1201,6 +1257,14 @@ function selectionnes() {
 }
 
 // --- accès de tout le travail
+
+// Depuis la page d'un travail, c'est celui qu'on regarde qu'on déplace : il n'y
+// a pas à retourner à la liste pour le cocher.
+$('detail-deplacer').addEventListener('click', () => {
+  const travail = (etat.groupe.assignments || [])
+    .find((item) => item.id === etat.travail.id);
+  if (travail) deplacerTravaux([travail]);
+});
 
 $('detail-acces').addEventListener('click', async () => {
   const fiche = await tenter(() => api('POST',
@@ -2550,7 +2614,11 @@ $('adoption-creer').addEventListener('click', async () => {
 
 const GROUPE_NEUF = '\u0000neuf';
 
-async function deplacerEtudiants(personnes) {
+// choixDeGroupe compose la destination d'un déplacement : un groupe de
+// l'organisation, ou « ＋ Nouveau groupe… », qui le déclare au passage plutôt que
+// d'obliger à sortir d'ici pour le créer. Déplacer des personnes et déplacer des
+// travaux visent la même chose : la destination ne se compose qu'une fois.
+async function choixDeGroupe() {
   // Arriver droit sur un groupe par son adresse ne charge pas les autres.
   if (etat.groupes.length === 0) await chargerGroupes();
   const ailleurs = etat.groupes.filter((groupe) =>
@@ -2598,6 +2666,24 @@ async function deplacerEtudiants(personnes) {
   choix.addEventListener('change', majNeuf);
   majNeuf();
 
+  const bloc = el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: "Groupe d'arrivée" }), choix),
+    neuf);
+
+  // destination rend ce que l'API attend : la place d'un groupe existant, ou
+  // celle d'un groupe à déclarer.
+  const destination = () => (choix.value === GROUPE_NEUF
+    ? { new_group: {
+        session: session.value.trim(), course: cours.value.trim(),
+        group: numero.value.trim() } }
+    : { target: choix.value });
+
+  return { bloc, destination };
+}
+
+async function deplacerEtudiants(personnes) {
+  const { bloc, destination } = await choixDeGroupe();
   const avecDepots = el('input', { type: 'checkbox', checked: true });
   const seule = personnes.length === 1;
   const titre = seule
@@ -2609,9 +2695,7 @@ async function deplacerEtudiants(personnes) {
     seule ? null : el('p', { classe: 'note',
       texte: personnes.map((personne) =>
         personne.full_name || '@' + personne.username).join(', ') }),
-    el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: "Groupe d'arrivée" }), choix),
-    neuf,
+    bloc,
     el('label', { classe: 'case' }, avecDepots,
       el('span', {}, el('strong', { texte: `Renommer aussi ${leurs} dépôts` }),
         el('span', { classe: 'aide',
@@ -2619,20 +2703,17 @@ async function deplacerEtudiants(personnes) {
             'depuis chaque ancien nom.' }))),
     el('p', { classe: 'note',
       texte: `Sans renommage, ${leurs} dépôts restent au nom du groupe actuel : celui-ci ` +
-        'continuera de les montrer.' })), 'Déplacer');
+        'continuera de les montrer.' }),
+    el('p', { classe: 'note',
+      texte: 'Un dépôt dont le nom complet manque encore garde le dernier niveau de son ' +
+        'nom — souvent le compte GitHub. Il arrive quand même à la bonne place, et se ' +
+        'renomme une fois le nom retrouvé.' })), 'Déplacer');
   if (!confirme) return;
 
-  const corps = {
+  const corps = Object.assign({
     usernames: personnes.map((personne) => personne.username),
     repos: avecDepots.checked,
-  };
-  if (choix.value === GROUPE_NEUF) {
-    corps.new_group = {
-      session: session.value.trim(), course: cours.value.trim(), group: numero.value.trim(),
-    };
-  } else {
-    corps.target = choix.value;
-  }
+  }, destination());
 
   const fiche = await tenter(() => api('POST',
     `/api/classrooms/${encode(etat.groupe.scope)}/students/move`, corps), 'Déplacement');
@@ -2652,6 +2733,95 @@ async function deplacerEtudiants(personnes) {
   await chargerGroupes(true);
   await ouvrirGroupe(etat.groupe.scope, true, true);
   afficherVue('etudiants');
+}
+
+// ------------------------------------------------ déplacer un travail entier
+
+// Un préfixe fourre-tout — « travail-de » — rassemble parfois les travaux de
+// plusieurs groupes et de plusieurs sessions. Les séparer ne se fait pas
+// étudiant par étudiant : c'est le travail qui appartient à un groupe, et c'est
+// lui qu'on en sort.
+//
+// Rien n'oblige à connaître les personnes pour cela. Un dépôt dont l'étudiant
+// reste inconnu garde le dernier niveau de son nom — souvent son compte
+// GitHub —, arrive quand même à la bonne place, et son nom complet se corrige
+// ensuite, depuis la liste des étudiants. Sans cette règle, déplacer réclamerait
+// un nom complet, et le retrouver réclamerait un groupe déplacé.
+async function deplacerTravaux(travauxChoisis) {
+  const { bloc, destination } = await choixDeGroupe();
+  const seul = travauxChoisis.length === 1;
+  const nom = el('input', { type: 'text', classe: 'champ',
+    value: seul ? travauxChoisis[0].name : '' });
+
+  const confirme = await demander(
+    seul ? `Déplacer « ${travauxChoisis[0].name} »` : `Déplacer ${travauxChoisis.length} travaux`,
+    el('div', {},
+      seul ? null : el('p', { classe: 'note',
+        texte: travauxChoisis.map((travail) => travail.name).join(', ') }),
+      bloc,
+      seul
+        ? el('label', { classe: 'champ-bloc' },
+            el('span', { classe: 'etiquette', texte: "Nom du travail à l'arrivée" }), nom,
+            el('span', { classe: 'aide',
+              texte: 'Il entre dans le nom de chaque dépôt : c’est le moment de le corriger.' }))
+        : el('p', { classe: 'note', texte: 'Chaque travail garde son nom.' }),
+      el('p', { classe: 'note',
+        texte: 'Les dépôts dont l’étudiant reste inconnu gardent le dernier niveau de leur ' +
+          'nom — souvent son compte GitHub. Les noms complets se corrigent ensuite, depuis ' +
+          'la liste des étudiants du groupe d’arrivée.' })),
+    'Voir le renommage');
+  if (!confirme) return;
+
+  const corps = Object.assign({
+    assignments: travauxChoisis.map((travail) => ({
+      id: travail.id, name: seul ? nom.value.trim() : '',
+    })),
+  }, destination());
+
+  // Rien n'est écrit tant que le renommage n'a pas été montré : c'est la seule
+  // façon de vérifier que ce sont bien ces dépôts-là qu'on sort du fourre-tout.
+  const apercu = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/move/preview`, corps),
+  'Déplacement');
+  if (!apercu) return;
+
+  const lignes = apercu.rows.map((ligne) => el('tr', {},
+    el('td', {}, el('code', { texte: ligne.repo })),
+    el('td', {}, el('code', { texte: ligne.target }))));
+  const suivies = (apercu.students || []).length;
+  const partantes = (apercu.leaving || []).length;
+
+  const parti = await demander(`Renommer ${apercu.ready} dépôt(s)`, el('div', {},
+    el('p', { texte: `Vers « ${apercu.target} » — ${apercu.target_scope}` +
+      (apercu.created ? ', déclaré au passage.' : '.') }),
+    el('div', { classe: 'apercu-renommage' },
+      el('table', { classe: 'tableau' },
+        el('thead', {}, el('tr', {},
+          el('th', { texte: 'Dépôt actuel' }), el('th', { texte: 'Nouveau nom' }))),
+        el('tbody', {}, lignes))),
+    el('p', { classe: 'note',
+      texte: suivies === 0
+        ? 'Aucune fiche à faire suivre : ces dépôts ne sont rattachés à personne.'
+        : `${suivies} fiche(s) suivront, dont ${partantes} qui quittent ` +
+          `« ${etat.groupe.label} » faute d’y garder un dépôt.` }),
+    el('p', { classe: 'note',
+      texte: 'GitHub garde une redirection depuis chaque ancien nom : les clones et les ' +
+        'liens déjà distribués continuent de fonctionner.' })), 'Déplacer');
+  if (!parti) return;
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/move`, corps), 'Déplacement');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (!bilan) return;
+  message(`${bilan.renamed} dépôt(s) déplacé(s) vers « ${bilan.target} »` +
+    (bilan.created ? ' · groupe déclaré' : '') +
+    (bilan.moved ? ` · ${bilan.moved} fiche(s) suivies` : '') +
+    (bilan.failed ? ` · ${bilan.failed} en échec` : ''),
+  bilan.failed ? 'alerte' : 'succes');
+  etat.travauxChoisis = new Set();
+  await chargerGroupes(true);
+  await ouvrirGroupe(etat.groupe.scope, true, true);
 }
 
 // ----------------------------------------------------- choix d'un chemin

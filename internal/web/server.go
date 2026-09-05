@@ -184,6 +184,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{scope}/students/rename", s.handleRenameStudent)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments", s.handleCreateAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/preview", s.handlePreviewAssignment)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move/preview", s.handleRelocatePreview)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move", s.handleRelocate)
 	mux.HandleFunc("GET /api/classrooms/{scope}/assignments/{name}", s.handleAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/access", s.handleAssignmentAccess)
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/preview", s.handleMigrationPreview)
