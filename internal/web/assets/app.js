@@ -2626,6 +2626,7 @@ function preparerAdoption(gabarit) {
   $('adoption-table').hidden = true;
   $('adoption-resume').textContent = '';
   vider($('adoption-avis'));
+  vider($('adoption-exemple'));
 
   const exemples = $('adoption-exemples');
   vider(exemples);
@@ -2681,7 +2682,25 @@ async function essayerGabarit() {
     $('adoption-avis').append(el('div', { classe: 'avis',
       texte: `Les 200 premiers dépôts sont montrés ; les ${essai.matched} seront adoptés.` }));
   }
+  montrerPersonnesLues(essai.students);
   $('adoption-suite').hidden = false;
+}
+
+// montrerPersonnesLues met sous les yeux ce que le gabarit a tiré des noms de
+// dépôts : la question qui suit — comptes GitHub ou non — ne se tranche qu'en
+// regardant ces textes-là.
+function montrerPersonnesLues(personnes) {
+  const exemple = $('adoption-exemple');
+  vider(exemple);
+  if (!personnes || personnes.length === 0) return;
+  exemple.append(document.createTextNode('Ici : '));
+  personnes.slice(0, 3).forEach((personne, rang) => {
+    if (rang) exemple.append(document.createTextNode(', '));
+    exemple.append(el('code', { texte: personne }));
+  });
+  exemple.append(document.createTextNode(personnes.length > 3
+    ? `… (${personnes.length} en tout, colonne « Personne » ci-dessus).`
+    : ' (colonne « Personne » ci-dessus).'));
 }
 
 $('adoption-creer').addEventListener('click', async () => {
