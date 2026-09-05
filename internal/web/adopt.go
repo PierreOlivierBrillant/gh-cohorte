@@ -135,7 +135,7 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		fail(writer, err)
 		return
 	}
-	arrivee, neuf, err := s.moveTarget(body, repos)
+	arrivee, neuf, err := s.moveTarget(body.Target, body.NewGroup, repos)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -210,21 +210,21 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 // moveTarget résout le groupe d'arrivée : une place déjà occupée, ou une place
 // libre que le déplacement déclare. Déclarer sur une place occupée serait une
 // fusion déguisée : elle est refusée, la place se choisit alors dans la liste.
-func (s *Server) moveTarget(body moveInput, repos []groups.RepoInfo) (
+func (s *Server) moveTarget(cible string, neuf *movePlace, repos []groups.RepoInfo) (
 	classroom.Classroom, bool, error) {
-	if body.NewGroup == nil {
-		arrivee, err := s.placeAt(body.Target)
+	if neuf == nil {
+		arrivee, err := s.placeAt(cible)
 		return arrivee, false, err
 	}
-	session, err := naming.Fragment(body.NewGroup.Session, "Session")
+	session, err := naming.Fragment(neuf.Session, "Session")
 	if err != nil {
 		return classroom.Classroom{}, false, err
 	}
-	course, err := naming.Fragment(body.NewGroup.Course, "Cours")
+	course, err := naming.Fragment(neuf.Course, "Cours")
 	if err != nil {
 		return classroom.Classroom{}, false, err
 	}
-	group, err := naming.Fragment(body.NewGroup.Group, "Groupe")
+	group, err := naming.Fragment(neuf.Group, "Groupe")
 	if err != nil {
 		return classroom.Classroom{}, false, err
 	}

@@ -554,6 +554,57 @@ une sélection, mettre à jour des clones, supprimer un dépôt.
 Un dépôt dont le compte n'est pas dans la liste du groupe reste visible, signalé
 « hors liste » : rien n'est caché sous prétexte que la liste est incomplète.
 
+### Déplacer un travail dans un autre groupe
+
+Une organisation reprise en cours de route range parfois **sous un même préfixe
+les travaux de plusieurs groupes et de plusieurs sessions** — `travail-de` en
+rassemble trois, et rien dans les noms ne dit lequel appartient à qui. Les
+séparer ne se fait pas étudiant par étudiant : c'est le travail qui appartient à
+un groupe, et c'est lui qu'on en sort.
+
+Chaque ligne de la liste des travaux porte une case, et le bandeau au-dessus
+**déplace la sélection**. Le groupe d'arrivée se choisit dans la liste, ou se
+déclare au passage — session, cours, numéro. Un travail déplacé seul peut
+**prendre un autre nom** à l'arrivée : il entre dans le nom de chaque dépôt,
+c'est le moment de le corriger.
+
+Le renommage se montre avant que quoi que ce soit ne soit écrit :
+
+```
+Dépôt actuel                  Nouveau nom
+travail-de-tp1-jlpicard       a26.5n6.01.tp1.jlpicard
+travail-de-tp1-aminata-d      a26.5n6.01.tp1.aminata-d
+```
+
+**Le dernier niveau du nom est conservé tel quel quand rien ne permet de faire
+mieux.** C'est ce qui rend l'opération possible : un fourre-tout ne connaît
+souvent que des comptes GitHub, et exiger le nom complet de chacun avant de
+déplacer enfermerait dans un cercle — déplacer réclamerait un nom complet, et le
+retrouver réclamerait un groupe déplacé, puisqu'un groupe hérité ne sait pas
+nommer un dépôt. Le dépôt arrive donc à la bonne place sous le fragment qu'il
+portait, **le groupe l'y reconnaît quand même** — un dernier niveau qui est le
+compte GitHub d'un inscrit le rattache à lui —, et le nom complet se corrige
+ensuite avec « Renommer… », qui renomme les dépôts au passage.
+
+Les fiches suivent leurs dépôts : les personnes qui en ont un parmi ceux qui
+partent rejoignent le groupe d'arrivée, et ne quittent celui de départ que s'il
+ne leur y reste rien. Un nom déjà pris arrête le déplacement au lieu de
+l'interrompre à mi-chemin, et les listes ne bougent qu'une fois tous les dépôts
+renommés.
+
+Au terminal, l'assistant fait la même chose sur le groupe ouvert —
+**« Déplacer ce travail vers un groupe »** —, puisqu'un travail y est exactement
+ce qu'il lui faut : un préfixe et ses dépôts. Il demande la place d'arrivée et le
+nom du travail, montre le renommage, puis confirme. En ligne de commande :
+
+```
+gh cohorte --manage travail-de-tp1 --move-to a26.5n6.01 --rename-to tp1 --yes
+```
+
+`--dry-run` s'arrête après l'aperçu. L'assistant ne tient pas de liste
+d'étudiants : il conserve **tous** les derniers niveaux tels quels, là où
+l'interface web y met le nom complet quand elle le connaît.
+
 ### Distribuer un travail, en trois étapes
 
 Le bouton vert **Nouveau travail** ouvre l'assistant, calqué sur celui de
@@ -660,6 +711,11 @@ demande** — les renommer est une écriture sur GitHub, et le groupe d'arrivée
 doit suivre la nomenclature courante pour savoir les nommer. Sans renommage,
 leurs dépôts restent au nom du groupe de départ, qui continue de les montrer.
 
+Un dépôt dont le nom complet manque encore n'arrête pas le déplacement : il
+garde le dernier niveau de son nom — souvent le compte GitHub —, arrive quand
+même à la bonne place, et se renomme le jour où le nom est retrouvé. C'est la
+même règle que pour [le déplacement d'un travail](#déplacer-un-travail-dans-un-autre-groupe).
+
 Le groupe d'arrivée n'a pas à exister d'avance. La liste des destinations se
 termine par **« ＋ Nouveau groupe… »**, qui demande la session, le cours et le
 numéro, et montre la place composée au fil de la frappe — `a26.5n6.03`. Le
@@ -685,10 +741,15 @@ et le tri de la liste y sont les mêmes, drapeaux compris — `--filter`,
 **Ce qui n'existe que dans l'interface web**, faute d'une notion de groupe au
 terminal : déclarer un groupe, le renommer, l'adopter par gabarit, tenir sa
 liste d'étudiants — y inscrire quelqu'un, corriger une fiche, remplacer la
-liste —, et en déplacer d'un groupe à l'autre. Un préfixe ne dit pas
-où commence le groupe et où finit le travail ; l'assistant ne peut donc pas les
-distinguer, et il n'a pas de liste à tenir — la sienne est le fichier CSV que
+liste —, et **déplacer une personne** d'un groupe à l'autre. Un préfixe ne dit
+pas où commence le groupe et où finit le travail ; l'assistant ne peut donc pas
+les distinguer, et il n'a pas de liste à tenir — la sienne est le fichier CSV que
 `--roster` désigne.
+
+**Déplacer un travail**, en revanche, existe partout : un travail est un préfixe
+et ses dépôts, ce dont l'assistant dispose déjà. Il le fait sans liste
+d'étudiants, en conservant tous les derniers niveaux — l'interface web y met le
+nom complet quand elle le connaît.
 
 Le clonage, les fichiers de départ et les listes CSV désignent des chemins **de
 la machine**, pas du navigateur. Chaque champ de chemin a donc un bouton
@@ -759,6 +820,8 @@ terminal.
 --sort-desc              trier du plus grand au plus petit
 --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
 --assignment NOM         identifiant du travail (préfixe des dépôts)
+--move-to PLACE          déplacer le travail géré vers « session.cours.groupe »
+--rename-to NOM          nom que le travail déplacé prend à l'arrivée
 --template ORG/DEPOT     dépôt modèle (vide = dépôt neuf initialisé)
 --pattern GABARIT        gabarit de nom des dépôts
 --starter DOSSIER        dossier local déposé dans chaque dépôt, en un commit

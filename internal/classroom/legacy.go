@@ -135,27 +135,12 @@ func (c Classroom) patternAssignments(gabarit Pattern, repos []groups.RepoInfo) 
 // lecture exacte, celle qui ne se trompe pas quand un compte contient le
 // séparateur. Le booléen dit qu'une personne inscrite a été reconnue.
 func (c Classroom) patternParts(gabarit Pattern, repoName string) (string, roster.Person, bool) {
-	for fragment, student := range c.patternFragments() {
+	for fragment, student := range c.fragments() {
 		if travail, reconnu := gabarit.MatchFor(repoName, fragment); reconnu {
 			return travail, student, true
 		}
 	}
 	return "", roster.Person{}, false
-}
-
-// patternFragments associe à chaque étudiant ce qui peut le nommer dans un
-// dépôt adopté : son compte GitHub, et son nom complet quand il est connu.
-func (c Classroom) patternFragments() map[string]roster.Person {
-	connus := map[string]roster.Person{}
-	for _, student := range c.Students {
-		if student.Username != "" {
-			connus[strings.ToLower(student.Username)] = student
-		}
-		if fragment, err := naming.Student(student.FullName); err == nil {
-			connus[strings.ToLower(fragment)] = student
-		}
-	}
-	return connus
 }
 
 // dottedAssignments lit les travaux d'un groupe de la nomenclature à quatre

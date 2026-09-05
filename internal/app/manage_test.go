@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -632,4 +634,86 @@ func TestCachePurgeNeRevientPas(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, dernier.texte())
 	}
 	dernier.absent("reprises du cache")
+}
+
+// ------------------------------------------------ déplacer un travail entier
+
+// L'assistant ne tient pas de liste d'étudiants : le dernier niveau du nom est
+// conservé tel quel. Le travail arrive quand même à sa place.
+func TestTravailDeplaceVersUneAutrePlace(t *testing.T) {
+	h := gestion(t, groupe(t), "tp1")
+	code, _ := h.script("deplacer", "a26.5n6.01", "tp1", "oui", "revenir")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	for _, attendu := range []string{
+		"a26.5n6.01.tp1.aminata-d", "a26.5n6.01.tp1.emilie-cote",
+		"a26.5n6.01.tp1.jlpicard",
+	} {
+		if !slices.Contains(noms, attendu) {
+			t.Fatalf("dépôts : %v", noms)
+		}
+	}
+	// Les dépôts qui n'étaient pas du voyage n'ont pas bougé.
+	if !slices.Contains(noms, "projet-final-jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// Refuser en fin de course ne laisse rien derrière.
+func TestTravailNonDeplaceQuandOnRefuse(t *testing.T) {
+	h := gestion(t, groupe(t), "tp1")
+	code, _ := h.script("deplacer", "a26.5n6.01", "tp1", "non", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Annulé : rien n'a été renommé.")
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// « --move-to » ne pose aucune question : c'est la même opération, scriptable.
+func TestTravailDeplaceEnLigneDeCommande(t *testing.T) {
+	h := gestion(t, groupe(t), "tp1")
+	h.Options.MoveTo = "a26.5n6.01"
+	h.Options.RenameTo = "travail-session"
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.State.RepoNames("acme")
+	if !slices.Contains(noms, "a26.5n6.01.travail-session.jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// La simulation montre le renommage et n'écrit rien.
+func TestTravailDeplaceEnSimulation(t *testing.T) {
+	h := gestion(t, groupe(t), "tp1")
+	h.Options.MoveTo = "a26.5n6.01"
+	h.Options.DryRun = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("a26.5n6.01.tp1.jlpicard", "Simulation")
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// Une place d'arrivée qui ne sait pas nommer est refusée avant toute écriture.
+func TestTravailRefuseUnePlaceHeritee(t *testing.T) {
+	h := gestion(t, groupe(t), "tp1")
+	h.Options.MoveTo = "vieux-prefixe"
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitValidation {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
 }

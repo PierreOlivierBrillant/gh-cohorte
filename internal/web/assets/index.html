@@ -217,7 +217,15 @@
         <button type="button" id="travaux-nouveau" class="bouton vert">Nouveau travail</button>
       </div>
     </div>
-    <div class="boite" id="travaux-liste"></div>
+    <div class="boite">
+      <div class="boite-entete" id="travaux-bandeau" hidden>
+        <label class="case"><input type="checkbox" id="travaux-tout">
+          <span id="travaux-selection"></span></label>
+        <span class="espace"></span>
+        <button type="button" id="travaux-deplacer" class="bouton petit">Déplacer la sélection…</button>
+      </div>
+      <div id="travaux-liste"></div>
+    </div>
   </section>
 
   <!-- ------------------------------------------------------ détail d'un travail -->
@@ -229,6 +237,7 @@
       </div>
       <div class="actions">
         <button type="button" id="detail-acces" class="bouton">Inspecter les accès</button>
+        <button type="button" id="detail-deplacer" class="bouton">Déplacer ce travail…</button>
         <button type="button" id="detail-distribuer" class="bouton vert">Distribuer aux manquants</button>
       </div>
     </div>

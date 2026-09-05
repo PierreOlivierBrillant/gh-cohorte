@@ -28,10 +28,14 @@ type Options struct {
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
-	Filter           students.Filter
-	Sort             students.Key
-	SortDesc         bool
-	Assignment       string
+	Filter     students.Filter
+	Sort       students.Key
+	SortDesc   bool
+	Assignment string
+	// MoveTo déplace le travail ouvert vers une place de la nomenclature
+	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra.
+	MoveTo           string
+	RenameTo         string
 	Template         string
 	TemplateSet      bool
 	Pattern          string
@@ -78,6 +82,7 @@ Utilisation :
   gh cohorte                                  interface graphique dans le navigateur
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
+  gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
   gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
   gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
 
@@ -92,6 +97,8 @@ Drapeaux :
   --sort-desc              trier du plus grand au plus petit
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
+  --move-to PLACE          déplacer le travail géré vers « session.cours.groupe »
+  --rename-to NOM          nom que le travail déplacé prend à l'arrivée
   --template ORG/DEPOT     dépôt modèle (vide = dépôt neuf initialisé)
   --pattern GABARIT        gabarit de nom des dépôts (défaut : {assignment}-{username})
   --starter DOSSIER        dossier local déposé dans chaque dépôt, en un commit
@@ -156,6 +163,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
+	set.StringVar(&options.MoveTo, "move-to", "", "place d'arrivée du travail géré")
+	set.StringVar(&options.RenameTo, "rename-to", "", "nom du travail à l'arrivée")
 	set.StringVar(&options.Pattern, "pattern", "", "gabarit de nom des dépôts")
 	set.StringVar(&options.CommitMessage, "commit-message", "", "message du commit")
 	set.BoolVar(&options.ForceStarter, "force-starter", false, "déposer même dans un dépôt garni")

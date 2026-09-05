@@ -324,12 +324,31 @@ func (c Classroom) MissingNames() []roster.Person {
 	return incomplets
 }
 
-// fragments associe à chaque étudiant le fragment qui le nomme dans un dépôt.
+// fragments associe à chaque étudiant ce qui peut le nommer dans un dépôt.
 func (c Classroom) fragments() map[string]roster.Person {
-	connus := map[string]roster.Person{}
-	for _, student := range c.Students {
-		if fragment, err := naming.Student(student.FullName); err == nil {
-			connus[strings.ToLower(fragment)] = student
+	return knownBy(c.Students)
+}
+
+// knownBy rassemble ce qui peut désigner une personne au dernier niveau d'un
+// nom de dépôt : le fragment tiré de son nom complet, et son compte GitHub.
+//
+// Le compte y figure parce qu'un dépôt ne porte pas toujours le nom complet.
+// Ceux qu'on adopte d'une organisation qui n'a jamais suivi de convention
+// portent souvent le compte, et les déplacer leur laisse ce qu'ils ont plutôt
+// que d'exiger un nom qu'on n'a pas encore. Les reconnaître ensuite est ce qui
+// permet de les rattacher à leur étudiant — et donc de les renommer le jour où
+// le nom complet est retrouvé. Le nom complet l'emporte quand les deux
+// désignent quelqu'un : c'est lui que la nomenclature écrit.
+func knownBy(people []roster.Person) map[string]roster.Person {
+	connus := make(map[string]roster.Person, 2*len(people))
+	for _, person := range people {
+		if strings.TrimSpace(person.Username) != "" {
+			connus[strings.ToLower(person.Username)] = person
+		}
+	}
+	for _, person := range people {
+		if fragment, err := naming.Student(person.FullName); err == nil {
+			connus[strings.ToLower(fragment)] = person
 		}
 	}
 	return connus
