@@ -3,6 +3,7 @@ package app_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
@@ -98,5 +99,68 @@ func TestMenuPrincipalQuitter(t *testing.T) {
 	}
 	if appels := h.State.AllCalls(); len(appels) != 0 {
 		t.Errorf("quitter ne doit rien demander à GitHub : %v", appels)
+	}
+}
+
+// L'écran des portées est le pendant, au terminal, de la boîte « Portées du
+// jeton » des réglages généraux de l'interface web.
+func TestOptionsAvanceesPorteesDuJeton(t *testing.T) {
+	h := nouveau(t, nil)
+	h.State.Scopes = "repo, read:org"
+	h.Refresher = accordeLesPortees(h.State, nil)
+
+	code, _ := h.script(
+		"avance",
+		"portees",
+		"1,2,4", // repo, read:org et delete_repo
+		"oui",   // générer un nouveau jeton
+		"revenir",
+		"quitter",
+	)
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Portées du jeton", "delete_repo", "Jeton renouvelé")
+	if !strings.Contains(h.State.Scopes, "delete_repo") {
+		t.Errorf("portées accordées = %q", h.State.Scopes)
+	}
+}
+
+func TestOptionsAvanceesPorteesDejaCompletes(t *testing.T) {
+	h := nouveau(t, nil)
+	code, _ := h.script("avance", "portees", "1,2,3,4", "revenir", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Le jeton porte déjà ces portées")
+}
+
+// Les mêmes portées se demandent sans question, en ligne de commande.
+func TestRenouvellementDuJetonEnLigneDeCommande(t *testing.T) {
+	h := nouveau(t, nil)
+	h.State.Scopes = "repo, read:org"
+	h.Refresher = accordeLesPortees(h.State, nil)
+	h.Options.RefreshToken = true
+	h.Options.Scopes = "delete_repo"
+
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Portées du jeton", "Jeton renouvelé")
+	if !strings.Contains(h.State.Scopes, "delete_repo") {
+		t.Errorf("portées accordées = %q", h.State.Scopes)
+	}
+	// Ce que le jeton portait déjà ne doit pas s'être perdu en chemin.
+	if !strings.Contains(h.State.Scopes, "read:org") {
+		t.Errorf("portées accordées = %q", h.State.Scopes)
+	}
+}
+
+func TestRenouvellementDuJetonRefusePorteeInvalide(t *testing.T) {
+	h := nouveau(t, nil)
+	h.Options.RefreshToken = true
+	h.Options.Scopes = "--reset-scopes"
+	if code := h.muet(); code != app.ExitValidation {
+		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 }

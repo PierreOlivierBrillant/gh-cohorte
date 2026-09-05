@@ -10,22 +10,26 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 )
 
 // harnais monte un faux GitHub, des dossiers jetables et une console captée,
 // pour dérouler des parcours complets sans réseau ni terminal.
 type harnais struct {
-	t         *testing.T
-	State     *fakegh.State
-	Serveur   *fakegh.Server
-	Options   *app.Options
-	Console   *ui.Console
-	Sortie    *bytes.Buffer
-	Rapports  string
-	Reglages  string
-	CacheDir  string
-	XDGCache  string
+	t        *testing.T
+	State    *fakegh.State
+	Serveur  *fakegh.Server
+	Options  *app.Options
+	Console  *ui.Console
+	Sortie   *bytes.Buffer
+	Rapports string
+	Reglages string
+	CacheDir string
+	XDGCache string
+	// Refresher remplace « gh auth refresh » : le flux d'appareil de GitHub ne
+	// peut pas être joué pour de vrai.
+	Refresher *scopes.Refresher
 	Pauses    []time.Duration
 	scripte   *ui.Scripted
 	dernierRC int
@@ -94,6 +98,7 @@ func (h *harnais) executer(prompter ui.Prompter) int {
 	h.t.Helper()
 	session := app.New(h.Options, h.Console, prompter)
 	session.Sleep = func(delay time.Duration) { h.Pauses = append(h.Pauses, delay) }
+	session.Refresher = h.Refresher
 	h.dernierRC = session.Run()
 	return h.dernierRC
 }

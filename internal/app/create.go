@@ -582,10 +582,10 @@ func (s *Session) configureStarter() error {
 			"Un dépôt modèle (--template) serait plus rapide.")
 	}
 	if s.Starter.NeedsWorkflowScope() {
-		if present, known := s.Client.HasScope("workflow"); known && !present {
-			s.Console.Warning("Des fichiers visent .github/workflows : la portée « workflow » " +
-				"est requise (gh auth refresh -s workflow).")
-		}
+		// Sans cette portée, GitHub refuse le commit entier des fichiers de
+		// départ. Le dire — et le corriger — ici vaut mieux qu'à la dernière
+		// étape ; un refus, lui, n'empêche pas de poursuivre la création.
+		_ = s.ensureScope("workflow", "l'envoi des fichiers de départ serait refusé")
 	}
 
 	if s.Options.CommitMessage != "" {

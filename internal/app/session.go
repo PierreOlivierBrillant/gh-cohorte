@@ -9,6 +9,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -39,6 +40,12 @@ type Session struct {
 	ConfigFile string
 	Sleep      func(time.Duration)
 	Now        func() time.Time
+	// Refresher renouvelle le jeton ; nil branche la session sur le vrai gh.
+	Refresher *scopes.Refresher
+
+	// tokenOrigin dit d'où vient le jeton — « gh », « oauth_token », ou une
+	// variable d'environnement. Ce que gh peut renouveler en dépend.
+	tokenOrigin string
 
 	// saved est l'état des réglages au chargement : il dit ce qui a changé.
 	saved       config.Settings
@@ -118,6 +125,12 @@ func (s *Session) run() (int, error) {
 		removed := s.Cache.Clear()
 		s.Console.Success("Cache vidé (%d entrée(s)).", removed)
 		return ExitOK, nil
+	}
+
+	if s.Options.RefreshToken {
+		// Renouveler le jeton ne demande ni organisation ni mode : c'est une
+		// séance à soi seule, comme la purge du cache.
+		return ExitOK, s.refreshTokenFromFlags()
 	}
 
 	mode, err := s.chooseMode()
@@ -207,6 +220,10 @@ func (s *Session) chooseMode() (string, error) {
 
 // authenticate résout le jeton par gh et affiche le compte connecté.
 func (s *Session) authenticate() error {
+	// Les options avancées peuvent avoir déjà lu le jeton : rien à refaire.
+	if s.Client != nil {
+		return nil
+	}
 	s.Console.Heading("Authentification GitHub")
 	host := s.Options.Host
 	if host == "" {
@@ -245,6 +262,7 @@ func (s *Session) authenticate() error {
 	}
 	s.Client = client
 	s.Viewer = user.Login
+	s.tokenOrigin = origin
 	s.Console.Printf("  Jeton fourni par %s.", s.Console.Dim(origin))
 	s.Console.Printf("  Connecté en tant que %s sur %s.", s.Console.OK("@"+s.Viewer), s.Console.Dim(host))
 
@@ -252,6 +270,10 @@ func (s *Session) authenticate() error {
 	// liste existe vraiment.
 	if present, known := client.HasScope("repo"); known && !present {
 		s.Console.Warning("La portée « repo » semble absente : la création de dépôts privés peut échouer.")
+		// « --refresh-token » s'apprête déjà à la demander : rien à proposer.
+		if !s.Options.RefreshToken {
+			s.offerScope("repo")
+		}
 	}
 	return nil
 }

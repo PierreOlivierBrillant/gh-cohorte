@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 )
 
 // États possibles d'un travail.
@@ -46,6 +48,7 @@ type Job struct {
 	mutex   sync.Mutex
 	status  string
 	failure string
+	scope   string // portée manquante, quand l'échec vient de là
 	result  any
 	events  []Event
 	changed chan struct{}
@@ -61,8 +64,11 @@ type State struct {
 	Label   string `json:"label"`
 	Status  string `json:"status"`
 	Failure string `json:"failure,omitempty"`
-	Result  any    `json:"result,omitempty"`
-	Events  int    `json:"events"`
+	// Scope nomme la portée qui a manqué : l'interface propose alors de
+	// renouveler le jeton plutôt que de laisser l'échec sans suite.
+	Scope  string `json:"scope,omitempty"`
+	Result any    `json:"result,omitempty"`
+	Events int    `json:"events"`
 }
 
 // Context expire dès que le travail est annulé.
@@ -77,7 +83,7 @@ func (j *Job) State() State {
 	defer j.mutex.Unlock()
 	return State{
 		ID: j.ID, Kind: j.Kind, Label: j.Label, Status: j.status,
-		Failure: j.failure, Result: j.result, Events: len(j.events),
+		Failure: j.failure, Scope: j.scope, Result: j.result, Events: len(j.events),
 	}
 }
 
@@ -124,13 +130,13 @@ func (j *Job) finish(result any, err error) {
 	case j.ctx.Err() != nil:
 		j.status = JobCanceled
 	case err != nil:
-		j.status, j.failure = JobFailed, err.Error()
+		j.status, j.failure, j.scope = JobFailed, err.Error(), ghapi.MissingScope(err)
 	default:
 		j.status, j.result = JobDone, result
 	}
 	j.ended = time.Now()
 	state := State{ID: j.ID, Kind: j.Kind, Label: j.Label, Status: j.status,
-		Failure: j.failure, Result: j.result}
+		Failure: j.failure, Scope: j.scope, Result: j.result}
 	j.mutex.Unlock()
 	j.emit(Event{Kind: EventEnd, Text: state.Status, Data: state})
 }

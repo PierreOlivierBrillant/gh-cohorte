@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 )
 
@@ -313,21 +315,85 @@ func TestGestionSuppressionConfirmee(t *testing.T) {
 	h.contient("Groupe « tp1 » — 2 dépôt(s)")
 }
 
-func TestGestionSuppressionPorteeManquante(t *testing.T) {
+// Refuser le renouvellement laisse tout en place : la suppression ne part même
+// pas, puisqu'elle serait refusée.
+func TestGestionSuppressionPorteeManquanteRefusee(t *testing.T) {
 	state := groupe(t)
 	state.Scopes = "repo, read:org"
-	state.FailOn["DELETE /repos/acme/tp1-jlpicard"] = fakegh.Failure{
-		Status: 403, Message: "Must have admin rights to Repository. (delete_repo scope)",
-	}
 	h := gestion(t, state, "tp1")
 
-	code, _ := h.script("supprimer", "tp1-jlpicard", "tp1-jlpicard", "quitter")
+	code, _ := h.script("supprimer", "tp1-jlpicard", "non", "quitter")
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	h.contient("gh auth refresh -s delete_repo", "Suppression impossible")
+	h.contient("n'a pas la portée « delete_repo »", "Annulé : rien n'a été supprimé")
 	if _, existe := state.Repos["acme/tp1-jlpicard"]; !existe {
 		t.Error("rien ne doit être supprimé")
+	}
+	if state.CallCount("DELETE /repos/acme/tp1-jlpicard") != 0 {
+		t.Error("la suppression n'aurait pas dû être tentée")
+	}
+}
+
+// Accepter le renouvellement obtient la portée et la suppression se poursuit,
+// sans qu'il faille relancer l'outil.
+func TestGestionSuppressionApresRenouvellement(t *testing.T) {
+	state := groupe(t)
+	state.Scopes = "repo, read:org"
+	h := gestion(t, state, "tp1")
+	h.Refresher = accordeLesPortees(state, nil)
+
+	code, _ := h.script("supprimer", "tp1-jlpicard", "oui", "tp1-jlpicard", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Jeton renouvelé", "« tp1-jlpicard » supprimé")
+	if _, existe := state.Repos["acme/tp1-jlpicard"]; existe {
+		t.Error("le dépôt aurait dû être supprimé")
+	}
+}
+
+// Un jeton « fine-grained » n'annonce aucune portée : rien ne peut être vérifié
+// d'avance, et c'est le refus de GitHub qui déclenche la proposition. La
+// suppression n'ayant pas eu lieu, elle se reprend.
+func TestGestionSuppressionRepriseApresRefusDeGitHub(t *testing.T) {
+	state := groupe(t)
+	state.Scopes = ""
+	echec := "DELETE /repos/acme/tp1-jlpicard"
+	state.FailOn[echec] = fakegh.Failure{
+		Status: 403, Message: "Must have admin rights to Repository.", Accepted: "delete_repo",
+	}
+	h := gestion(t, state, "tp1")
+	// Le jeton renouvelé est celui que GitHub accepte : le refus disparaît.
+	h.Refresher = accordeLesPortees(state, func() { delete(state.FailOn, echec) })
+
+	code, _ := h.script("supprimer", "tp1-jlpicard", "tp1-jlpicard", "oui", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("« tp1-jlpicard » supprimé")
+	if _, existe := state.Repos["acme/tp1-jlpicard"]; existe {
+		t.Error("le dépôt aurait dû être supprimé")
+	}
+}
+
+// accordeLesPortees imite « gh auth refresh » : il accorde ce qui lui est
+// demandé, comme GitHub le ferait après un passage par le navigateur.
+func accordeLesPortees(state *fakegh.State, ensuite func()) *scopes.Refresher {
+	return &scopes.Refresher{
+		Locate: func() (string, error) { return "gh", nil },
+		Run: func(_ context.Context, _ string, args []string, _ scopes.Request) error {
+			for index, argument := range args {
+				if argument == "--scopes" && index+1 < len(args) {
+					state.Scopes = strings.ReplaceAll(args[index+1], ",", ", ")
+				}
+			}
+			if ensuite != nil {
+				ensuite()
+			}
+			return nil
+		},
+		Read: func(string) (string, string) { return "jeton-renouvele", "gh" },
 	}
 }
 

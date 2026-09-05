@@ -114,6 +114,7 @@ func TestUsageEnFrancais(t *testing.T) {
 	for _, fragment := range []string{
 		"organisation GitHub cible", "gérer un groupe existant",
 		"simuler sans rien créer", "{assignment}", "Codes de retour",
+		"régénérer le jeton GitHub", "portées à obtenir",
 	} {
 		if !strings.Contains(texte, fragment) {
 			t.Errorf("aide sans « %s » :\n%s", fragment, texte)
@@ -179,5 +180,16 @@ func TestOptionsFiltreEtTriDeLaListe(t *testing.T) {
 	}
 	if _, err := app.Parse([]string{"--sort", "popularite"}, io.Discard); err == nil {
 		t.Fatal("un tri inconnu doit être refusé")
+	}
+}
+
+func TestParseRenouvellementDuJeton(t *testing.T) {
+	options := analyser(t, "--refresh-token", "--scopes", "workflow,delete_repo")
+	if !options.RefreshToken || options.Scopes != "workflow,delete_repo" {
+		t.Fatalf("options = %+v", options)
+	}
+	// Sans « --scopes », ce sont toutes les portées dont l'outil se sert.
+	if seul := analyser(t, "--refresh-token"); seul.Scopes != "" {
+		t.Fatalf("portées = %q", seul.Scopes)
 	}
 }
