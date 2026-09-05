@@ -360,6 +360,11 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
    assemblage au lieu d'une seule ligne de commandes. */
 .champ.recherche { width: auto; flex: 0 1 16rem; min-width: 9rem; }
 
+/* Là où le bandeau porte davantage de commandes — la liste d'un travail se
+   copie, s'exporte, se clone —, la recherche prend ce qui reste plutôt qu'une
+   largeur fixe : à seize rem, elle repoussait la dernière commande à la ligne. */
+.champ.recherche.souple { flex: 1 1 10rem; }
+
 .menu-ancre { position: relative; }
 
 /* Le menu est posé au-dessus de la page plutôt que dans la boîte : celle-ci
