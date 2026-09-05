@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
@@ -79,6 +80,59 @@ func TestProgressionHorsTerminal(t *testing.T) {
 	if !strings.Contains(sortie, "8/8") {
 		t.Errorf("la fin doit être annoncée : %q", sortie)
 	}
+}
+
+func TestRoueMuetteHorsTerminal(t *testing.T) {
+	c, tampon := console()
+	passe := false
+	ui.Await(c, "Vérification du jeton…", func() { passe = true })
+
+	if !passe {
+		t.Fatal("l'action doit se dérouler, terminal ou pas")
+	}
+	if sortie := tampon.String(); sortie != "" {
+		t.Errorf("une animation n'a rien à faire dans un journal : %q", sortie)
+	}
+}
+
+func TestRoueTourneEtSEfface(t *testing.T) {
+	c, tampon := console()
+	// La roue ne s'anime que sur un terminal ; le tampon en tient lieu, ce qui
+	// permet d'examiner ce qu'elle y aurait écrit.
+	c.TTY = true
+
+	roue := ui.NewSpinner(c, "Lecture de l'organisation acme…")
+	roue.Start()
+	roue.Detail("42 lus")
+	time.Sleep(400 * time.Millisecond)
+	roue.Stop()
+
+	sortie := tampon.String()
+	if !strings.Contains(sortie, "Lecture de l'organisation acme…") {
+		t.Errorf("la roue doit dire ce qu'on attend : %q", sortie)
+	}
+	if !strings.Contains(sortie, "42 lus") {
+		t.Errorf("le détail doit suivre l'attente : %q", sortie)
+	}
+	if strings.Contains(sortie, "\n") {
+		t.Errorf("la roue tient sur une ligne : %q", sortie)
+	}
+	// La ligne appartient à ce qui vient ensuite : elle doit être rendue vide.
+	if !strings.HasSuffix(sortie, "\r\x1b[K") {
+		t.Errorf("la roue doit effacer sa ligne en partant : %q", sortie)
+	}
+}
+
+func TestRoueSArreteDeuxFoisSansBroncher(t *testing.T) {
+	c, _ := console()
+	c.TTY = true
+	roue := ui.NewSpinner(c, "Attente")
+	roue.Start()
+	roue.Stop()
+	roue.Stop()
+	// Un Stop sans Start ne doit pas davantage bloquer : l'arrêt vient parfois
+	// d'un chemin d'erreur qui n'a rien lancé.
+	ui.NewSpinner(c, "Jamais lancée").Stop()
 }
 
 func TestScriptedAsk(t *testing.T) {

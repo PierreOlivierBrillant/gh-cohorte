@@ -11,6 +11,11 @@
 </head>
 <body>
 
+<!-- Un trait file en haut de la fenêtre tant qu'une requête est en route :
+     sans lui, rien ne distingue une page qui attend d'une page qui a fini. -->
+<div id="attente-reseau" class="attente-reseau" role="progressbar"
+     aria-label="Chargement en cours" hidden></div>
+
 <!-- Barre globale, à la manière de l'en-tête sombre de GitHub. -->
 <header class="barre-globale">
   <button type="button" id="accueil" class="produit">gh cohorte <span class="version" id="version"></span></button>
@@ -41,6 +46,18 @@
 </div>
 
 <main>
+
+  <!-- ---------------------------------------------------------- lancement -->
+  <!-- Seule vue visible au chargement : elle occupe la page le temps que le
+       serveur réponde, et cède la place à la première vraie vue. -->
+  <section id="vue-demarrage" class="vue">
+    <div class="demarrage" aria-live="polite">
+      <span class="roue" id="demarrage-roue" aria-hidden="true"></span>
+      <p id="demarrage-texte">Connexion au serveur local…</p>
+      <p class="note" id="demarrage-detail"></p>
+      <button type="button" id="demarrage-reessayer" class="bouton" hidden>Réessayer</button>
+    </div>
+  </section>
 
   <!-- ------------------------------------------------- choix de l'organisation -->
   <section id="vue-organisation" class="vue" hidden>

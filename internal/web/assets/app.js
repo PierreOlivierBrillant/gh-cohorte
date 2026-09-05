@@ -47,8 +47,15 @@ async function api(methode, chemin, corps) {
     options.headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(corps);
   }
-  const reponse = await fetch(chemin, options);
-  const texte = await reponse.text();
+  debutRequete();
+  let reponse;
+  let texte;
+  try {
+    reponse = await fetch(chemin, options);
+    texte = await reponse.text();
+  } finally {
+    finRequete();
+  }
   let donnees = null;
   if (texte) {
     try { donnees = JSON.parse(texte); } catch { donnees = { error: texte }; }
@@ -57,6 +64,87 @@ async function api(methode, chemin, corps) {
     throw new Error((donnees && donnees.error) || `Erreur ${reponse.status}`);
   }
   return donnees;
+}
+
+// ------------------------------------------------------- attente du serveur
+
+// Tout ce que la page demande passe par api() : compter les requêtes en route
+// suffit à savoir si l'on attend. Le trait du haut ne paraît qu'au bout d'un
+// moment — beaucoup de réponses arrivent en quelques millisecondes, et un
+// clignotement se remarque plus qu'une attente courte.
+const DELAI_ATTENTE = 250;
+
+let requetesEnRoute = 0;
+let minuterieAttente = null;
+
+function debutRequete() {
+  requetesEnRoute += 1;
+  if (requetesEnRoute > 1 || minuterieAttente) return;
+  minuterieAttente = setTimeout(() => {
+    minuterieAttente = null;
+    if (requetesEnRoute === 0) return;
+    $('attente-reseau').hidden = false;
+    document.body.setAttribute('aria-busy', 'true');
+  }, DELAI_ATTENTE);
+}
+
+function finRequete() {
+  requetesEnRoute = Math.max(0, requetesEnRoute - 1);
+  if (requetesEnRoute > 0) return;
+  if (minuterieAttente) {
+    clearTimeout(minuterieAttente);
+    minuterieAttente = null;
+  }
+  $('attente-reseau').hidden = true;
+  document.body.removeAttribute('aria-busy');
+}
+
+// enAttente occupe une zone encore vide le temps qu'elle se remplisse : sans
+// cela, rien ne distingue une liste vide d'une liste qui arrive.
+function enAttente(conteneur, texte) {
+  vider(conteneur);
+  conteneur.append(el('div', { classe: 'boite-vide attente' },
+    el('span', { classe: 'roue', 'aria-hidden': 'true' }),
+    el('span', { texte })));
+}
+
+// enEchec remplace l'attente quand la réponse n'est jamais venue : rester sur
+// « chargement… » ferait croire que ça arrive encore.
+function enEchec(conteneur, texte) {
+  vider(conteneur);
+  conteneur.append(el('div', { classe: 'boite-vide', texte }));
+}
+
+// occuper estompe une zone déjà remplie pendant qu'elle se recharge : trier ou
+// filtrer ne doit pas faire clignoter ce qu'on était en train de lire.
+function occuper(noeud, occupe) {
+  noeud.classList.toggle('occupe', occupe);
+  if (occupe) noeud.setAttribute('aria-busy', 'true');
+  else noeud.removeAttribute('aria-busy');
+}
+
+// attendreTable marque une des grandes tables — les dépôts d'un travail, les
+// étudiants d'un groupe — pendant que le serveur répond : celle qui montre
+// déjà quelque chose s'estompe, celle qui est vide annonce ce qu'elle attend.
+// « fini » rend ce que la réponse vaut, et dit l'échec plutôt que de laisser
+// « chargement… » à l'écran.
+function attendreTable(table, vide, texte) {
+  const corps = $(table);
+  const mot = $(vide);
+  const remplie = !corps.hidden;
+  if (remplie) {
+    occuper(corps, true);
+  } else {
+    mot.hidden = false;
+    mot.textContent = texte;
+  }
+  return {
+    fini(donnees, echec) {
+      occuper(corps, false);
+      if (!donnees && !remplie) mot.textContent = echec;
+      return !!donnees;
+    },
+  };
 }
 
 // tenter exécute une action et affiche l'erreur éventuelle sans casser la page.
@@ -575,8 +663,17 @@ $('ouvrir-reglages').addEventListener('click', () => afficherVue('reglages'));
 
 async function chargerGroupes(force) {
   if (!etat.organisation) return;
+  const liste = $('parcours-liste');
+  const premiere = !liste.firstChild;
+  if (premiere) enAttente(liste, 'Chargement des groupes…');
+  else occuper(liste, true);
+
   const donnees = await tenter(() => api('GET', '/api/classrooms'), 'Groupes');
-  if (!donnees) return;
+  occuper(liste, false);
+  if (!donnees) {
+    if (premiere) enEchec(liste, "Les groupes n'ont pas pu être chargés.");
+    return;
+  }
   // Seuls les groupes de l'organisation choisie sont montrés : c'est elle qui
   // cadre tout ce que l'interface propose.
   etat.groupes = (donnees.classrooms || []).filter((groupe) =>
@@ -817,12 +914,15 @@ async function montrerCandidats(org, force) {
   const conteneur = $('accueil-candidats');
   vider(conteneur);
   if (!org) return;
-  conteneur.append(el('div', { classe: 'boite-vide', texte: 'Lecture des dépôts…' }));
+  enAttente(conteneur, `Lecture des dépôts de ${org}…`);
 
   const donnees = await tenter(() => api('GET',
     `/api/orgs/${encode(org)}/candidates${force ? '?refresh=1' : ''}`), 'Inventaire');
+  if (!donnees) {
+    enEchec(conteneur, "L'inventaire des dépôts n'a pas pu être lu.");
+    return;
+  }
   vider(conteneur);
-  if (!donnees) return;
 
   const candidats = donnees.candidates || [];
   if (candidats.length === 0) {
@@ -1124,8 +1224,9 @@ async function ouvrirTravail(travail, force, sansHistorique) {
 }
 
 async function chargerTravail(travail, force, toutCocher) {
+  const attente = attendreTable('detail-table', 'detail-vide', 'Chargement des dépôts…');
   const detail = await tenter(() => api('GET', adresseTravail(travail.name, force)), 'Travail');
-  if (!detail) return false;
+  if (!attente.fini(detail, "Les dépôts n'ont pas pu être chargés.")) return false;
 
   // « repos » compte les dépôts dans la fiche du travail et les énumère dans le
   // détail : on ne garde que la liste, sous un nom qui ne prête pas à confusion.
@@ -1788,8 +1889,10 @@ function adresseEtudiants(force) {
 }
 
 async function chargerEtudiants(force) {
+  const attente = attendreTable('etudiants-table', 'etudiants-vide',
+    'Chargement des étudiants…');
   const donnees = await tenter(() => api('GET', adresseEtudiants(force)), 'Étudiants');
-  if (!donnees) return;
+  if (!attente.fini(donnees, "La liste des étudiants n'a pas pu être chargée.")) return;
   etat.etudiants = donnees.students || [];
 
   // Une sélection ne survit pas à ce que le filtre écarte : on déplace ce
@@ -2978,9 +3081,36 @@ $('quitter').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ démarrage
 
+// L'écran du lancement dit ce qu'on attend et, si rien ne vient, laisse de
+// quoi réessayer : une fenêtre blanche ne disait ni l'un ni l'autre.
+function demarrageDit(texte, detail = '') {
+  $('demarrage-roue').hidden = false;
+  $('demarrage-texte').textContent = texte;
+  $('demarrage-detail').textContent = detail;
+  $('demarrage-reessayer').hidden = true;
+}
+
+function demarrageEchoue(raison) {
+  for (const vue of document.querySelectorAll('.vue')) {
+    vue.hidden = vue.id !== 'vue-demarrage';
+  }
+  $('demarrage-roue').hidden = true;
+  $('demarrage-texte').textContent = "Le serveur local n'a pas répondu.";
+  $('demarrage-detail').textContent = raison;
+  $('demarrage-reessayer').hidden = false;
+}
+
+$('demarrage-reessayer').addEventListener('click', () => { demarrer(); });
+
 async function demarrer() {
-  const contexte = await tenter(() => api('GET', '/api/context'), 'Session');
-  if (!contexte) return;
+  demarrageDit('Connexion au serveur local…');
+  let contexte;
+  try {
+    contexte = await api('GET', '/api/context');
+  } catch (erreur) {
+    demarrageEchoue(erreur.message);
+    return;
+  }
   etat.contexte = contexte;
   etat.reglages = contexte.settings;
 
@@ -3004,10 +3134,13 @@ async function demarrer() {
   // Rien n'est accessible tant qu'une organisation n'a pas été choisie : si
   // aucune n'a été mémorisée, c'est la première chose demandée.
   if (!etat.reglages.org) {
+    demarrageDit('Lecture de vos organisations GitHub…',
+      'GitHub est interrogé pour la première fois : cela peut prendre un moment.');
     await demanderOrganisation();
     return;
   }
   etat.organisation = etat.reglages.org;
+  demarrageDit(`Lecture des groupes de ${etat.organisation}…`);
   // L'adresse dit où reprendre : recharger la page ou coller un lien ramène au
   // même endroit qu'avant.
   await allerA(lireAdresse());

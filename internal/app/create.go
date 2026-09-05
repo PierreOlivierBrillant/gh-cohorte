@@ -7,6 +7,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
@@ -481,7 +482,10 @@ func (s *Session) checkTemplate() error {
 	if err != nil {
 		return err
 	}
-	data, err := s.Client.GetRepo(owner, repo)
+	var data *ghapi.Repo
+	ui.Await(s.Console, "Vérification du dépôt modèle "+owner+"/"+repo+"…", func() {
+		data, err = s.Client.GetRepo(owner, repo)
+	})
 	if err != nil {
 		s.Console.Warning("Modèle non vérifiable : %v", err)
 		return nil

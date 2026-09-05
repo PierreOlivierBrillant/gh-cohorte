@@ -231,7 +231,10 @@ func (s *Session) authenticate() error {
 	if err != nil {
 		return err
 	}
-	user, err := client.AuthenticatedUser()
+	var user *ghapi.User
+	ui.Await(s.Console, "Vérification du jeton auprès de "+host+"…", func() {
+		user, err = client.AuthenticatedUser()
+	})
 	if err != nil {
 		if ghapi.StatusOf(err) == 401 {
 			return valid.Errorf(
@@ -290,7 +293,10 @@ func (s *Session) chooseOrg() error {
 			org = answer
 		}
 
-		data, err := s.Client.GetOrg(org)
+		var data *ghapi.Org
+		ui.Await(s.Console, "Lecture de l'organisation "+org+"…", func() {
+			data, err = s.Client.GetOrg(org)
+		})
 		if err != nil {
 			message := err.Error()
 			switch ghapi.StatusOf(err) {
@@ -335,7 +341,11 @@ func (s *Session) warnIfNotAdmin(org string) {
 		return
 	}
 
-	role, err := s.Client.OrgMembership(org, s.Viewer)
+	var role string
+	var err error
+	ui.Await(s.Console, "Vérification de votre rôle dans "+org+"…", func() {
+		role, err = s.Client.OrgMembership(org, s.Viewer)
+	})
 	if err != nil {
 		return
 	}
