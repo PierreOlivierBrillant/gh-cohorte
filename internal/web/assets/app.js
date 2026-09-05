@@ -2502,10 +2502,7 @@ function preparerMigration(groupe) {
       'garde une redirection depuis chaque ancien nom : les clones déjà faits continuent de ' +
       'fonctionner.';
 
-  $('mig-table').hidden = true;
-  $('mig-resume').textContent = '';
-  $('mig-lancer').disabled = true;
-  vider($('mig-avis'));
+  oublierApercuMigration();
 
   if (!herite) {
     $('mig-session').value = groupe.session;
@@ -2543,10 +2540,63 @@ function corpsMigration() {
   };
 }
 
+// Le dernier aperçu obtenu. La case « laisser en place » ne change pas le plan
+// — les mêmes dépôts sont bloqués qu'on l'accepte ou non —, elle change ce qu'on
+// en fait : garder l'aperçu permet de redire les conséquences du choix sans
+// redemander le plan au serveur.
+let apercuMigration = null;
+
+// oublierApercuMigration ramène l'écran à avant l'aperçu : changer la place
+// d'arrivée périme le plan affiché.
+function oublierApercuMigration() {
+  apercuMigration = null;
+  $('mig-table').hidden = true;
+  $('mig-ignorer').checked = false;
+  $('mig-resume').textContent = '';
+  majAvisMigration();
+}
+
+// majAvisMigration dit ce que l'aperçu implique, la case comprise, et n'ouvre le
+// bouton que si la migration peut aboutir. La case ne se montre que lorsqu'elle
+// a quelque chose à décider : la proposer quand aucun dépôt n'est bloqué, c'est
+// offrir un choix sans effet.
+function majAvisMigration() {
+  const apercu = apercuMigration;
+  const bloques = apercu ? apercu.blocked : 0;
+  const ignorer = $('mig-ignorer').checked;
+  $('mig-ignorer-case').hidden = bloques === 0;
+  vider($('mig-avis'));
+  if (!apercu) {
+    $('mig-lancer').disabled = true;
+    return;
+  }
+  if (bloques && !ignorer) {
+    $('mig-avis').append(el('div', { classe: 'avis alerte',
+      texte: `${bloques} dépôt(s) ne peuvent pas être renommés. Complétez la liste des ` +
+        "étudiants — comptes manquants, noms complets à retrouver — ou acceptez de les laisser " +
+        'en place.' }));
+  } else if (apercu.ready === 0) {
+    $('mig-avis').append(el('div', { classe: 'avis alerte', texte: 'Aucun dépôt à renommer.' }));
+  } else {
+    $('mig-avis').append(el('div', { classe: 'avis',
+      texte: (bloques ? `${bloques} dépôt(s) garderont leur nom actuel. ` : '') +
+        phraseBascule(apercu) }));
+  }
+  $('mig-lancer').disabled = apercu.ready === 0 || (bloques > 0 && !ignorer);
+}
+
+// phraseBascule dit ce que devient le groupe lui-même. C'est le serveur qui en
+// décide — un groupe ne suit ses dépôts que si aucun ne reste en arrière — et
+// l'aperçu le rapporte, plutôt que de le redéduire ici.
+function phraseBascule(apercu) {
+  if (apercu.switch) return `Le groupe devient « ${apercu.scope} ».`;
+  return `Le groupe reste « ${etat.groupe.label} » : c'est ainsi qu'il continue de les voir. ` +
+    `Les dépôts renommés apparaîtront à part, sous « ${apercu.scope} ».`;
+}
+
 $('mig-apercu-bouton').addEventListener('click', async () => {
   const apercu = await tenter(() => api('POST',
     `/api/classrooms/${encode(etat.groupe.scope)}/migration/preview`, corpsMigration()), 'Migration');
-  vider($('mig-avis'));
   if (!apercu) return;
 
   const corps = $('mig-table').querySelector('tbody');
@@ -2561,22 +2611,17 @@ $('mig-apercu-bouton').addEventListener('click', async () => {
   $('mig-table').hidden = apercu.rows.length === 0;
   $('mig-resume').textContent = `${apercu.ready} dépôt(s) à renommer` +
     (apercu.blocked ? `, ${apercu.blocked} bloqué(s)` : '');
-  if (apercu.blocked) {
-    $('mig-avis').append(el('div', { classe: 'avis alerte',
-      texte: `${apercu.blocked} dépôt(s) ne peuvent pas être renommés. Complétez la liste des ` +
-        "étudiants — comptes manquants, noms complets à retrouver — ou acceptez de les laisser " +
-        'en place.' }));
-  }
-  $('mig-lancer').disabled = apercu.ready === 0;
+  apercuMigration = apercu;
+  majAvisMigration();
 });
 
-for (const id of ['mig-session', 'mig-cours', 'mig-section', 'mig-ignorer']) {
-  $(id).addEventListener('change', () => {
-    $('mig-table').hidden = true;
-    $('mig-resume').textContent = '';
-    $('mig-lancer').disabled = true;
-  });
+for (const id of ['mig-session', 'mig-cours', 'mig-section']) {
+  $(id).addEventListener('change', oublierApercuMigration);
 }
+
+// La case ne périme pas l'aperçu : elle ne touche pas au plan, seulement à ce
+// qu'on décide d'en faire. La relire suffit.
+$('mig-ignorer').addEventListener('change', majAvisMigration);
 
 $('mig-lancer').addEventListener('click', async () => {
   const corps = corpsMigration();
@@ -2597,8 +2642,8 @@ $('mig-lancer').addEventListener('click', async () => {
   journaliser(`${bilan.renamed} renommé(s) · ${bilan.skipped} laissé(s) en place · ` +
     `${bilan.failed} en échec`, bilan.failed ? 'warn' : 'ok');
   if (!bilan.switched) {
-    journaliser('Le groupe reste sur l\'ancienne nomenclature : des dépôts sont restés en ' +
-      'arrière.', 'warn');
+    journaliser(`Le groupe reste « ${etat.groupe.label} » : des dépôts sont restés en arrière, ` +
+      'et il continue de les voir.', 'warn');
   }
   await ouvrirGroupe(etat.groupe.scope, true, true);
   afficherVue('groupe-reglages');
