@@ -132,6 +132,31 @@ func TestBuildGroupe(t *testing.T) {
 	}
 }
 
+// Un préfixe se saisit sans avoir à dire ce qui le termine : le tiret des noms
+// qu'aucune convention n'organise, ou le point de la nomenclature à cinq
+// niveaux. Sans cela, l'assistant du terminal ne pourrait ouvrir aucun travail
+// nommé comme l'outil les nomme.
+func TestBuildLitLesDeuxNomenclatures(t *testing.T) {
+	repos := []groups.RepoInfo{
+		{Name: "a26.5n6.01.tp1.emilie-cote"},
+		{Name: "a26.5n6.01.tp1.jlpicard"},
+		{Name: "a26.5n6.01.tp2.jlpicard"},
+		{Name: "a26.5n6.02.tp1.jlpicard"},
+	}
+	travail := groups.Build("a26.5n6.01.tp1", repos)
+	if travail.Len() != 2 || travail.Repos[0].Suffix != "emilie-cote" {
+		t.Fatalf("travail = %+v", travail)
+	}
+	// Le préfixe d'un groupe retient tous ses travaux, et rien du groupe voisin.
+	if groupe := groups.Build("a26.5n6.01", repos); groupe.Len() != 3 {
+		t.Fatalf("groupe = %+v", groupe)
+	}
+	// Un préfixe qui s'arrête au milieu d'un niveau ne retient rien.
+	if partiel := groups.Build("a26.5n6.01.tp", repos); partiel.Len() != 0 {
+		t.Fatalf("préfixe partiel = %+v", partiel)
+	}
+}
+
 func TestBuildPrefixeVide(t *testing.T) {
 	if groupe := groups.Build("  ", []groups.RepoInfo{{Name: "tp1-a"}}); groupe.Len() != 0 {
 		t.Errorf("un préfixe vide ne doit rien retenir : %+v", groupe)

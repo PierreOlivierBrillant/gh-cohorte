@@ -15,6 +15,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
@@ -32,6 +33,7 @@ var manageMenu = ui.Options(
 	"cloner", "Cloner des dépôts en local",
 	"pull", "Mettre à jour des clones existants",
 	"supprimer", "Supprimer un dépôt",
+	"renommer", "Renommer ce travail",
 	"deplacer", "Déplacer ce travail vers un groupe",
 	"filtrer", "Filtrer ou trier la liste",
 	"rafraichir", "Recharger la liste",
@@ -128,7 +130,7 @@ func (m *manageSession) chooseGroup() (*groups.Group, error) {
 		if group.Len() > 0 {
 			return &group, nil
 		}
-		console.Failure("Aucun dépôt ne commence par « %s- ».", prefix)
+		console.Failure("Aucun dépôt dans « %s ».", prefix)
 		if !m.session.Interactive() {
 			return nil, valid.Errorf("Groupe « %s » introuvable dans « %s ».", prefix, m.org)
 		}
@@ -194,7 +196,10 @@ func (m *manageSession) chooseGroup() (*groups.Group, error) {
 			if strings.TrimSpace(answer) == "" {
 				return nil, nil
 			}
-			cleaned, err := valid.SlugFragment(answer, "Préfixe")
+			// Le préfixe d'un travail porte des points — « a26.5n6.01.tp1 » : ses
+			// niveaux se mettent en forme un à un, sinon le point deviendrait un
+			// tiret et le préfixe ne retrouverait plus rien.
+			cleaned, err := naming.Path(answer, "Préfixe")
 			if err != nil {
 				console.Failure("%v", err)
 				continue
@@ -204,7 +209,7 @@ func (m *manageSession) chooseGroup() (*groups.Group, error) {
 
 		group := groups.Build(prefix, repos)
 		if group.Len() == 0 {
-			console.Failure("Aucun dépôt ne commence par « %s- ».", prefix)
+			console.Failure("Aucun dépôt dans « %s ».", prefix)
 			continue
 		}
 		return &group, nil
@@ -1204,13 +1209,23 @@ func (m *manageSession) relocateTo(group *groups.Group, place, name string) (int
 	}
 
 	console.Heading("« " + group.Prefix + " » vers " + arrivee.Scope())
+	console.Note("Le dernier niveau est conservé tel quel : l'assistant ne tient pas de " +
+		"liste d'étudiants. L'interface web y met le nom complet quand elle le connaît.")
+	return m.appliquerRenommage(lignes,
+		"%d dépôt(s) déplacé(s) vers « "+arrivee.Scope()+" ».")
+}
+
+// appliquerRenommage montre le plan, le fait confirmer, puis renomme. Déplacer
+// un travail et le renommer aboutissent tous deux ici : c'est la même écriture,
+// et elle ne doit se raconter que d'une façon. Seule la phrase de succès
+// distingue les deux — elle porte un « %d » pour le nombre de dépôts.
+func (m *manageSession) appliquerRenommage(lignes []classroom.Move, succes string) (int, error) {
+	console := m.session.Console
 	rows := make([][]string, 0, len(lignes))
 	for index, ligne := range lignes {
 		rows = append(rows, []string{itoa(index + 1), ligne.Repo, ligne.Target})
 	}
 	console.Table([]string{"#", "Dépôt actuel", "Nouveau nom"}, rows, 40)
-	console.Note("Le dernier niveau est conservé tel quel : l'assistant ne tient pas de " +
-		"liste d'étudiants. L'interface web y met le nom complet quand elle le connaît.")
 	console.Note("GitHub garde une redirection depuis chaque ancien nom.")
 
 	if m.session.Options.DryRun {
@@ -1247,7 +1262,78 @@ func (m *manageSession) relocateTo(group *groups.Group, place, name string) (int
 		console.Warning("%d dépôt(s) renommé(s), %d en échec.", renommes, echecs)
 		return ExitFailure, nil
 	}
-	console.Success("%d dépôt(s) déplacé(s) vers « %s ».", renommes, arrivee.Scope())
+	console.Success(succes, renommes)
+	return ExitOK, nil
+}
+
+// ------------------------------------------------------ renommer le travail
+
+// Un travail mal nommé — une faute de frappe distribuée à trente personnes — se
+// corrige sans le déplacer. Son nom est un niveau du nom de chaque dépôt : il
+// n'y a pas de fiche où le changer, les dépôts sont tout ce qu'un travail est.
+//
+// Cela demande que le préfixe géré dise déjà à quel groupe il appartient : sans
+// place, un nom seul ne compose pas un nom de dépôt lisible. Un préfixe hérité
+// se déplace donc d'abord — et il prend le nom qu'on veut au passage.
+
+// rename demande le nouveau nom, puis renomme le travail.
+func (m *manageSession) rename(group *groups.Group) (int, error) {
+	name, err := m.session.Prompt.Ask(ui.Question{
+		Title:   "Nouveau nom du travail",
+		Default: shortAssignmentName(group.Prefix),
+	})
+	if err != nil {
+		return ExitOK, err
+	}
+	return m.renameTo(group, name)
+}
+
+// renameTo renomme les dépôts du travail pour qu'ils portent le nom donné, sans
+// changer de place. Le plan se montre en entier avant la première écriture.
+func (m *manageSession) renameTo(group *groups.Group, name string) (int, error) {
+	repos, err := m.loadRepos(false)
+	if err != nil {
+		return ExitOK, err
+	}
+	place, _, reconnu := naming.SplitAssignment(group.Prefix)
+	if !reconnu {
+		return ExitOK, valid.Errorf(
+			"« %s » ne dit pas à quel groupe il appartient : renommer ce travail y "+
+				"composerait un nom de dépôt illisible. Déplacez-le d'abord vers une place "+
+				"« session.cours.groupe » — il prend le nom voulu au passage.", group.Prefix)
+	}
+	cours, err := classroom.AtScope(m.org, place,
+		classroom.DefaultsFrom(m.session.Settings))
+	if err != nil {
+		return ExitOK, err
+	}
+	// Le nom est mis en forme ici plutôt que dans le plan seul : c'est lui qui
+	// retrouvera le travail renommé, et il doit être celui des dépôts.
+	fragment, err := naming.Fragment(name, "Travail")
+	if err != nil {
+		return ExitOK, err
+	}
+	lignes, err := classroom.PlanRenameAssignment(cours, group.Prefix, fragment, repos)
+	if err != nil {
+		return ExitOK, err
+	}
+
+	m.session.Console.Heading("« " + group.Prefix + " » vers « " + fragment + " »")
+	code, err := m.appliquerRenommage(lignes, "%d dépôt(s) renommé(s).")
+	if err != nil || code != ExitOK {
+		return code, err
+	}
+
+	// Le travail répond désormais à son nouveau nom : la session le suit, plutôt
+	// que de retomber sur un préfixe qui ne désigne plus rien. Une simulation ou
+	// un refus n'ont rien renommé : le préfixe reste alors celui qu'il était.
+	repos, err = m.loadRepos(false)
+	if err != nil {
+		return ExitOK, err
+	}
+	if renomme := groups.Build(cours.AssignmentID(fragment), repos); renomme.Len() > 0 {
+		*group = renomme
+	}
 	return ExitOK, nil
 }
 
@@ -1290,6 +1376,14 @@ func (m *manageSession) run() (int, error) {
 			return m.relocateTo(group, place, name)
 		}
 
+		// Sans place d'arrivée, « --rename-to » renomme le travail là où il est.
+		// C'est le même drapeau : il dit le nom que le travail prend, que la
+		// place change ou non.
+		if name := strings.TrimSpace(m.session.Options.RenameTo); name != "" {
+			m.session.Options.RenameTo = ""
+			return m.renameTo(group, name)
+		}
+
 		showList := true
 		for {
 			// La liste n'est redonnée que si elle a changé : sinon elle chasserait
@@ -1318,7 +1412,7 @@ func (m *manageSession) run() (int, error) {
 
 			// « filtrer » a déjà remontré la liste à chaque changement.
 			showList = action == "ajouter" || action == "supprimer" ||
-				action == "rafraichir" || action == "deplacer"
+				action == "rafraichir" || action == "deplacer" || action == "renommer"
 			if showList {
 				repos, err := m.loadRepos(false)
 				if err != nil {
@@ -1328,7 +1422,7 @@ func (m *manageSession) run() (int, error) {
 				// Un travail déplacé ne répond plus à son ancien préfixe : il
 				// n'y a plus rien à gérer ici, on retourne au choix du groupe.
 				if refreshed.Len() == 0 {
-					m.session.Console.Note("Plus aucun dépôt ne commence par « %s- ».",
+					m.session.Console.Note("Plus aucun dépôt dans « %s ».",
 						group.Prefix)
 					break
 				}
@@ -1354,6 +1448,9 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return m.pullClones(group)
 	case "supprimer":
 		return m.deleteRepo(group)
+	case "renommer":
+		_, err := m.rename(group)
+		return err
 	case "deplacer":
 		_, err := m.relocate(group)
 		return err

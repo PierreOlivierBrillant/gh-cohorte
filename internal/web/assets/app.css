@@ -399,6 +399,29 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .menu-pied { display: flex; justify-content: flex-end; border-top: 1px solid var(--bord);
   padding-top: .7rem; }
 
+/* Un menu de commandes, par opposition à un menu de réglages : chaque ligne est
+   un bouton pleine largeur, sans bordure — c'est la boîte qui en tient lieu. */
+.menu-liste { padding: .3rem; }
+.menu-liste > * + * { margin-top: 0; }
+
+.menu-liste button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: .875rem;
+  padding: .4rem .6rem;
+  border: 0;
+  border-radius: var(--rayon);
+  background: none;
+  color: var(--texte);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.menu-liste button:hover:not(:disabled) { background: var(--fond-creux); }
+.menu-liste button:disabled { opacity: .55; cursor: default; }
+
 /* Le tri est là où il se lit : dans l'en-tête de la colonne qu'il ordonne. */
 .tableau.triable th[data-tri] { padding: 0; }
 

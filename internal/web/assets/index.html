@@ -201,19 +201,28 @@
     <div class="boite" id="adoption-suite" hidden>
       <div class="boite-entete"><strong>Le groupe à déclarer</strong></div>
       <div class="boite-corps">
+        <p class="note">Adopter ces dépôts, c'est les réunir sous un groupe qui saura les lire
+          avec ce gabarit. Sur GitHub, rien n'est créé, renommé ni supprimé : le groupe est une
+          fiche gardée sur cette machine, et l'oublier ne touche aucun dépôt.</p>
         <fieldset class="groupe-radio">
-          <legend class="etiquette">Ce que le groupe retient des personnes trouvées</legend>
+          <legend class="etiquette">Ce que le gabarit a lu à la place de <code>{student}</code></legend>
+          <p class="aide" id="adoption-exemple"></p>
           <label class="case"><input type="radio" name="adoption-comptes" value="comptes" checked>
-            <span><strong>Ce sont des comptes GitHub</strong>
-            <span class="aide">Ils deviennent la liste des étudiants ; les noms complets se
-              retrouvent ensuite.</span></span></label>
+            <span><strong>Des comptes GitHub</strong>
+            <span class="aide">Ces textes deviennent la liste des étudiants du groupe : chaque
+              dépôt est aussitôt rattaché à quelqu'un, et le bouton « Retrouver les noms
+              complets » ira chercher leurs vrais noms sur GitHub.</span></span></label>
           <label class="case"><input type="radio" name="adoption-comptes" value="noms">
-            <span><strong>Ce sont des noms de personnes</strong>
-            <span class="aide">La liste reste à importer : un nom ne dit pas quel compte
-              GitHub lui répond.</span></span></label>
+            <span><strong>Autre chose : des noms, des équipes, des numéros</strong>
+            <span class="aide">Un nom écrit dans un dépôt ne dit pas à quel compte GitHub il
+              appartient : le groupe est alors déclaré sans liste d'étudiants. Ses travaux et ses
+              dépôts s'affichent quand même, mais tant qu'une liste « nom complet, compte
+              GitHub » n'est pas importée depuis « Étudiants », aucun dépôt n'est rattaché à
+              quelqu'un et aucun travail ne peut être distribué.</span></span></label>
         </fieldset>
-        <p class="note">Le groupe suivra ce gabarit jusqu'à sa migration. « Réglages du groupe »
-          propose ensuite de renommer ses dépôts vers la nomenclature courante.</p>
+        <p class="note">Rien n'est définitif : la liste s'importe ou se corrige plus tard. Le
+          gabarit, lui, sert tant que les dépôts gardent ces noms — « Réglages du groupe »
+          propose ensuite de les renommer vers la nomenclature courante.</p>
       </div>
       <div class="boite-pied">
         <span class="espace"></span>
@@ -252,9 +261,20 @@
         <h2 id="detail-titre"></h2>
         <p class="note" id="detail-resume"></p>
       </div>
+      <!-- Ce qu'on fait au travail entier tient dans un menu : distribuer aux
+           manquants est ce qu'on vient y faire presque toujours, le reste ne
+           mérite pas d'occuper la barre à demeure. -->
       <div class="actions">
-        <button type="button" id="detail-acces" class="bouton">Inspecter les accès</button>
-        <button type="button" id="detail-deplacer" class="bouton">Déplacer ce travail…</button>
+        <div class="menu-ancre">
+          <button type="button" id="detail-menu-ouvrir" class="bouton"
+            aria-expanded="false" aria-haspopup="true"
+            aria-controls="detail-menu">Ce travail</button>
+          <div class="menu-flottant menu-liste" id="detail-menu" hidden role="menu">
+            <button type="button" id="detail-acces" role="menuitem">Inspecter les accès</button>
+            <button type="button" id="detail-renommer" role="menuitem">Renommer ce travail…</button>
+            <button type="button" id="detail-deplacer" role="menuitem">Déplacer ce travail…</button>
+          </div>
+        </div>
         <button type="button" id="detail-distribuer" class="bouton vert">Distribuer aux manquants</button>
       </div>
     </div>

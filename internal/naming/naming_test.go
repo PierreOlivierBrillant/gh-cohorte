@@ -115,3 +115,37 @@ func TestIdentifiants(t *testing.T) {
 		t.Fatalf("identifiant %q", id)
 	}
 }
+
+// L'identifiant d'un travail dit à la fois la place de son groupe et son nom :
+// renommer le travail est ce qui a besoin des deux.
+func TestDecoupeDunIdentifiantDeTravail(t *testing.T) {
+	place, nom, reconnu := naming.SplitAssignment("a26.5n6.01.tp1")
+	if !reconnu || place != "a26.5n6.01" || nom != "tp1" {
+		t.Fatalf("découpe : %q / %q / %v", place, nom, reconnu)
+	}
+	// Ce qui ne porte pas les quatre niveaux ne se coupe pas : ni un préfixe de
+	// groupe, ni un nom de dépôt complet, ni un préfixe hérité.
+	for _, refuse := range []string{
+		"a26.5n6.01", "a26.5n6.01.tp1.emilie-cote", "travail-de-tp1", "", "a26..01.tp1",
+	} {
+		if _, _, reconnu := naming.SplitAssignment(refuse); reconnu {
+			t.Fatalf("« %s » n'aurait pas dû se découper", refuse)
+		}
+	}
+}
+
+// Un préfixe saisi à la main garde ses points : c'est ce qui le distingue d'un
+// fragment, où la mise en forme les remplacerait par des tirets.
+func TestMiseEnFormeDunPrefixeSaisi(t *testing.T) {
+	chemin, err := naming.Path(" A26.5N6.01 ", "Préfixe")
+	if err != nil || chemin != "a26.5n6.01" {
+		t.Fatalf("chemin %q (%v)", chemin, err)
+	}
+	if chemin, err := naming.Path("Travail de session", "Préfixe"); err != nil ||
+		chemin != "travail-de-session" {
+		t.Fatalf("chemin %q (%v)", chemin, err)
+	}
+	if _, err := naming.Path("a26..01", "Préfixe"); err == nil {
+		t.Fatal("un niveau vide aurait dû être refusé")
+	}
+}
