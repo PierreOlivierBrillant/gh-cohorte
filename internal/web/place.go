@@ -29,12 +29,22 @@ func (s *Server) place(request *http.Request) (classroom.Classroom, error) {
 
 // placeAt résout une place donnée autrement que par l'adresse — le groupe
 // d'arrivée d'un déplacement, par exemple.
+// Les noms sont versés ici, dès la résolution : le fichier local ne les garde
+// plus une fois le registre à jour, et tout ce qui suit — afficher, planifier,
+// refuser un travail faute de nom — les attend présents. Sans inventaire à
+// disposition, seuls les noms des personnes déjà listées sont comblés ; les
+// inscriptions que les dépôts révèlent viennent avec « enrichi ».
 func (s *Server) placeAt(scope string) (classroom.Classroom, error) {
 	org := s.org()
+	set, _ := s.names(org)
 	if cours, trouve := s.classrooms.Find(org, scope); trouve {
-		return cours, nil
+		return cours.Enrich(set, nil), nil
 	}
-	return classroom.AtScope(org, scope, classroom.DefaultsFrom(s.Settings()))
+	cours, err := classroom.AtScope(org, scope, classroom.DefaultsFrom(s.Settings()))
+	if err != nil {
+		return cours, err
+	}
+	return cours.Enrich(set, nil), nil
 }
 
 // enrichi verse dans un groupe ce que le registre de l'organisation sait de ses

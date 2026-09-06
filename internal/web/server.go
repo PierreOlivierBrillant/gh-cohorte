@@ -110,6 +110,12 @@ func New(deps Deps) (*Server, error) {
 		resolvers:  map[string]*identity.Resolver{},
 		registries: map[string]*registry.Store{},
 	}
+	// Le magasin consulte le registre avant d'écrire : un nom que le registre
+	// porte déjà n'a pas à être redit dans le fichier local.
+	server.classrooms.Resolving(func(org string) classroom.Names {
+		set, _ := server.names(org)
+		return set
+	})
 	server.handler = server.guard(server.routes())
 	return server, nil
 }

@@ -66,9 +66,24 @@ func (s *Session) publishRegistry() (int, error) {
 	}
 	s.Console.Success("%d fiche(s) publiée(s) ; le registre en compte %d.",
 		plan.Count(), publie.Len())
-	// Le fichier local reste en place : publier n'efface rien, et rien
-	// n'oblige à recommencer si quelque chose s'est mal passé.
-	s.Console.Note("Le fichier des groupes de ce poste est inchangé.")
+
+	// Ce qui vient de monter n'a plus à être redit ici. La sauvegarde précède
+	// l'allègement : rien n'oblige à croire un outil sur parole.
+	copie, err := store.Backup("avant-registre")
+	if err != nil {
+		return ExitFailure, err
+	}
+	allegees, err := store.Trim(org, publie)
+	if err != nil {
+		return ExitFailure, err
+	}
+	if allegees > 0 {
+		s.Console.Note("%d nom(s) retiré(s) du fichier des groupes : le registre "+
+			"en est désormais la source.", allegees)
+		if copie != "" {
+			s.Console.Note("Le fichier d'avant est recopié dans %s.", copie)
+		}
+	}
 	return ExitOK, nil
 }
 

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"testing"
 	"time"
 
@@ -157,9 +156,4 @@ func TestNeConserveQueLesChampsUtiles(t *testing.T) {
 	if len(champs) != 4 {
 		t.Errorf("%d champ(s) conservé(s) : %+v", len(champs), champs)
 	}
-}
-
-// itoa met un horodatage sous une forme utilisable dans du JSON.
-func itoa(value float64) string {
-	return strconv.FormatFloat(value, 'f', 0, 64)
 }

@@ -397,6 +397,31 @@ func (c Classroom) Enrich(names Names, repos []groups.RepoInfo) Classroom {
 	return c
 }
 
+// Trimmed retire de la liste les noms que le registre porte déjà à l'identique.
+// Le fichier local n'a plus à les redire : le registre en est la source, et
+// deux exemplaires d'un même nom finissent toujours par diverger.
+//
+// Un nom que le registre ignore, ou qu'il porte autrement, reste écrit ici.
+// Rien ne doit se perdre parce que la publication n'a pas encore eu lieu, ni
+// qu'un désaccord n'a pas été tranché.
+func (c Classroom) Trimmed(names Names) Classroom {
+	if names == nil {
+		return c
+	}
+	allegee := make([]roster.Person, 0, len(c.Students))
+	for _, student := range c.Students {
+		if nom := strings.TrimSpace(student.FullName); nom != "" {
+			if connu, trouve := names.Lookup(student.Username); trouve &&
+				strings.EqualFold(connu.FullName, nom) {
+				student.FullName = ""
+			}
+		}
+		allegee = append(allegee, student)
+	}
+	c.Students = allegee
+	return c
+}
+
 // declared retire ce que le registre a révélé, pour ne garder que ce qui a été
 // déclaré ici. C'est cette liste-là qui s'écrit sur le disque.
 func (c Classroom) declared() Classroom {

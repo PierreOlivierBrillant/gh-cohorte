@@ -28,6 +28,10 @@ type publicationRendu struct {
 	// Teams énumère les équipes de l'organisation, pour qu'on puisse donner
 	// accès au registre à celle qui enseigne.
 	Teams []string `json:"teams,omitempty"`
+	// Trimmed compte les noms retirés du fichier local après publication, et
+	// Backup dit où le fichier d'avant a été recopié.
+	Trimmed int    `json:"trimmed,omitempty"`
+	Backup  string `json:"backup,omitempty"`
 }
 
 // teamsOf énumère les équipes de l'organisation. N'en voir aucune n'est pas une
@@ -164,6 +168,20 @@ func (s *Server) handleRegistryPublish(writer http.ResponseWriter, request *http
 		return
 	}
 
+	// Ce qui vient de monter n'a plus à être redit dans le fichier local. La
+	// sauvegarde précède l'allègement : rien n'oblige à croire un outil sur
+	// parole.
+	copie, err := s.classrooms.Backup("avant-registre")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	allegees, err := s.classrooms.Trim(org, publie)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+
 	// Ce qui reste à faire après coup : vide quand tout est monté. C'est plus
 	// honnête qu'un simple « c'est fait », qui ne dirait rien des comptes sans
 	// nom ni des désaccords qu'on a choisi de ne pas reprendre.
@@ -172,5 +190,6 @@ func (s *Server) handleRegistryPublish(writer http.ResponseWriter, request *http
 		Org: org, Repo: registry.RepoName, Plan: restant,
 		Total: restant.Count(), Published: plan.Count(),
 		Exposure: s.registryOf(org).Exposure(), RegistrySize: publie.Len(),
+		Trimmed: allegees, Backup: copie,
 	})
 }

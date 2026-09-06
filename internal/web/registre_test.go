@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -185,6 +186,8 @@ type publicationVue struct {
 	Exposure     string   `json:"exposure"`
 	RegistrySize int      `json:"registry_size"`
 	Teams        []string `json:"teams"`
+	Trimmed      int      `json:"trimmed"`
+	Backup       string   `json:"backup"`
 }
 
 // L'aperçu montre ce que publier ferait, sans rien écrire.
@@ -353,5 +356,54 @@ func TestDonnerAccesAUneEquipeDepuisLInterface(t *testing.T) {
 	}
 	if !strings.Contains(bilan.Message, "sans en fermer aucun") {
 		t.Errorf("message = %q", bilan.Message)
+	}
+}
+
+// ------------------------------------------------------------- allègement
+
+// Publier depuis l'interface allège aussi le fichier local, après l'avoir
+// recopié : le registre est désormais la source des noms.
+func TestPublierAllegeLeFichierLocal(t *testing.T) {
+	h := avantLeRegistre(t, nil, cohorte("a26", "5n6", "01",
+		"Émilie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard"))
+
+	var vue publicationVue
+	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{}, &vue)
+	if vue.Trimmed != 2 || vue.Backup == "" {
+		t.Fatalf("publication = %+v", vue)
+	}
+
+	local, err := os.ReadFile(h.Groupes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(local), "Émilie Côté") {
+		t.Fatalf("les noms sont restés dans le fichier local :\n%s", local)
+	}
+	if !strings.Contains(string(local), "emilie-cote") {
+		t.Fatalf("les inscriptions ont disparu :\n%s", local)
+	}
+	sauvegarde, err := os.ReadFile(vue.Backup)
+	if err != nil || !strings.Contains(string(sauvegarde), "Émilie Côté") {
+		t.Fatalf("sauvegarde = %v, %v", err, string(sauvegarde))
+	}
+}
+
+// Et l'interface continue de montrer les noms : elle les prend au registre.
+func TestLesNomsRestentVisiblesApresAllegement(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01", "Émilie Côté", "emilie-cote"))
+	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{}, nil)
+
+	var vue struct {
+		Students []struct {
+			FullName string `json:"full_name"`
+			Username string `json:"username"`
+		} `json:"students"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/a26.5n6.01/students", nil, &vue)
+	if len(vue.Students) != 1 || vue.Students[0].FullName != "Émilie Côté" {
+		t.Fatalf("liste = %+v", vue.Students)
 	}
 }

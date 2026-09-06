@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -307,5 +308,79 @@ func TestUneEquipeInconnueSeSignale(t *testing.T) {
 	h.Options.RegistryTeam = "fantome"
 	if code := h.muet(); code == app.ExitOK {
 		t.Fatalf("code = %d — une équipe inconnue doit échouer\n%s", code, h.texte())
+	}
+}
+
+// ------------------------------------------------------------- allègement
+
+// Publier retire du fichier local les noms que le registre porte désormais :
+// deux exemplaires d'un même nom finissent toujours par diverger.
+func TestPublierAllegeLeFichierLocal(t *testing.T) {
+	state := fakegh.NewState()
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{
+			{FullName: "Émilie Côté", Username: "emilie-cote"},
+			{FullName: "Jean-Luc Picard", Username: "jlpicard"},
+		},
+	})
+	h.Options.PublishRegistry = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+
+	local := h.groupesLocaux()
+	if strings.Contains(local, "Émilie Côté") || strings.Contains(local, "Jean-Luc Picard") {
+		t.Fatalf("les noms sont restés dans le fichier local :\n%s", local)
+	}
+	// Les comptes, eux, restent : c'est l'inscription au groupe.
+	if !strings.Contains(local, "emilie-cote") || !strings.Contains(local, "jlpicard") {
+		t.Fatalf("les inscriptions ont disparu :\n%s", local)
+	}
+	h.contient("2 nom(s) retiré(s)", "avant-registre")
+
+	// La sauvegarde, elle, porte encore les noms.
+	sauvegarde, err := os.ReadFile(classroom.PathNextTo(h.Reglages) + ".avant-registre")
+	if err != nil {
+		t.Fatalf("sauvegarde absente : %v", err)
+	}
+	if !strings.Contains(string(sauvegarde), "Émilie Côté") {
+		t.Fatalf("la sauvegarde ne porte pas les noms :\n%s", sauvegarde)
+	}
+}
+
+// Un nom que le registre n'a pas pu prendre reste écrit ici : rien ne doit se
+// perdre parce qu'un désaccord n'a pas été tranché.
+func TestUnNomNonRepriResteDansLeFichierLocal(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", registry.RepoName, true)
+	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
+		registry.StudentsFile: `{"version":1,"students":[` +
+			`{"username":"emilie-cote","full_name":"Émilie Côté","slugs":["emilie-cote"]}]}`,
+	}, registry.Branch)
+
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{
+			{FullName: "Emilie Cote", Username: "emilie-cote"}, // désaccord
+			{FullName: "Jean-Luc Picard", Username: "jlpicard"},
+		},
+	})
+	h.Options.PublishRegistry = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+
+	local := h.groupesLocaux()
+	// Picard est monté : son nom part d'ici. Le désaccord reste, entier.
+	if strings.Contains(local, "Jean-Luc Picard") {
+		t.Fatalf("un nom monté est resté dans le fichier local :\n%s", local)
+	}
+	if !strings.Contains(local, "Emilie Cote") {
+		t.Fatalf("un nom que le registre n'a pas repris a disparu :\n%s", local)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
@@ -49,6 +50,18 @@ func (h *harnais) depots() []string {
 		}
 	}
 	return gardes
+}
+
+// groupesLocaux rend le fichier des groupes de ce poste, tel qu'il est sur le
+// disque : ce que la machine déclare vraiment, sans ce que le registre y verse
+// à la lecture.
+func (h *harnais) groupesLocaux() string {
+	h.t.Helper()
+	contenu, err := os.ReadFile(classroom.PathNextTo(h.Reglages))
+	if err != nil {
+		return ""
+	}
+	return string(contenu)
 }
 
 func nouveau(t *testing.T, state *fakegh.State) *harnais {
