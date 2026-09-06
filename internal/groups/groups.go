@@ -54,6 +54,61 @@ func Ordinary(repos []RepoInfo) []RepoInfo {
 	return gardes
 }
 
+// Une écriture ne périme pas forcément l'inventaire. Renommer ou supprimer un
+// dépôt est un changement qu'on connaît exactement : le répercuter sur
+// l'inventaire déjà en main évite de le relire en entier. À l'échelle d'un
+// département — plusieurs milliers de dépôts, des dizaines de pages —, c'est la
+// différence entre un geste instantané et une attente à chaque fois.
+//
+// Ce que devient un inventaire se décide ici, et non dans les interfaces : le
+// terminal et le navigateur font le même geste et doivent en tirer le même
+// inventaire. Chacun garde en revanche sa façon de retenir sa copie.
+//
+// Une création, elle, oblige à relire. Le dépôt neuf n'est pas dans
+// l'inventaire, et sa date de dernier envoi ne s'invente pas : les fichiers de
+// départ y sont déposés après sa création, si bien que ce que GitHub a répondu
+// à la création est déjà dépassé. Une date inventée fausserait la colonne
+// « dernier envoi » et le filtre des muets.
+
+// Renamed est un dépôt renommé : son ancien nom, et ce qu'il est devenu.
+type Renamed struct {
+	Before string
+	After  RepoInfo
+}
+
+// WithRenamed suit dans un inventaire les dépôts qu'on vient de renommer. Un
+// renommage à moitié fait n'est pas un problème : seuls ceux qui ont abouti
+// sont dans la liste.
+func WithRenamed(repos []RepoInfo, done []Renamed) []RepoInfo {
+	if len(repos) == 0 || len(done) == 0 {
+		return repos
+	}
+	suivis := make(map[string]RepoInfo, len(done))
+	for _, item := range done {
+		suivis[strings.ToLower(item.Before)] = item.After
+	}
+	suivi := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if apres, change := suivis[strings.ToLower(repo.Name)]; change {
+			// La date de dernier envoi ne bouge pas : renommer n'est pas pousser.
+			repo.Name, repo.HTMLURL, repo.Private = apres.Name, apres.HTMLURL, apres.Private
+		}
+		suivi = append(suivi, repo)
+	}
+	return suivi
+}
+
+// WithoutRepo retire d'un inventaire un dépôt qu'on vient de supprimer.
+func WithoutRepo(repos []RepoInfo, name string) []RepoInfo {
+	restants := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if !strings.EqualFold(repo.Name, name) {
+			restants = append(restants, repo)
+		}
+	}
+	return restants
+}
+
 // Repo est un dépôt appartenant à un groupe.
 type Repo struct {
 	Name     string

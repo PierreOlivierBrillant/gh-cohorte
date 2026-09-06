@@ -875,3 +875,20 @@ func TestTravailRefuseUnePlaceHeritee(t *testing.T) {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }
+
+// L'assistant relisait l'organisation entière après chaque renommage. À
+// l'échelle d'un département — plusieurs milliers de dépôts, des dizaines de
+// pages —, c'est une attente à chaque geste, pour un changement qu'on connaît
+// exactement.
+func TestRenommageSuitLInventaireSansLeRelire(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	h.Options.RenameTo = "projet-final"
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	// Une seule lecture : celle du départ. Le renommage n'en provoque pas d'autre.
+	if lues := h.State.CallCount("GET /orgs/acme/repos"); lues != 1 {
+		t.Errorf("%d lecture(s) de l'inventaire : un renommage se suit, il ne se relit pas", lues)
+	}
+}

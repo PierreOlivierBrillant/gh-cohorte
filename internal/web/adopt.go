@@ -185,7 +185,7 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		" vers « " + arrivee.Label() + " »"
 	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
-		var suivis []Renamed
+		var suivis []groups.Renamed
 		for index, ligne := range renommages {
 			if job.Canceled() {
 				break
@@ -197,7 +197,7 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
-				suivis = append(suivis, Renamed{Before: ligne.Repo, After: apres})
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}

@@ -270,6 +270,17 @@ type Repo struct {
 	} `json:"template_repository"`
 }
 
+// Info ne retient du dépôt que ce qu'un inventaire en garde. C'est par là qu'un
+// dépôt créé ou renommé rejoint l'inventaire sans qu'on ait à le relire.
+func (r *Repo) Info() groups.RepoInfo {
+	if r == nil {
+		return groups.RepoInfo{}
+	}
+	return groups.RepoInfo{
+		Name: r.Name, Private: r.Private, HTMLURL: r.HTMLURL, PushedAt: r.PushedAt,
+	}
+}
+
 // Collaborator décrit un collaborateur d'un dépôt.
 type Collaborator struct {
 	Login string `json:"login"`

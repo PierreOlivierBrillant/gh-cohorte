@@ -7,12 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/orgs"
@@ -257,27 +255,9 @@ func (s *Server) forget(org string) {
 	s.deps.Cache.Forget(cache.ReposKey(org))
 }
 
-// Une écriture ne périme pas forcément tout l'inventaire. Renommer ou supprimer
-// un dépôt est un changement qu'on connaît exactement : le répercuter sur
-// l'inventaire déjà en main évite de le relire en entier. À l'échelle d'un
-// département — plusieurs milliers de dépôts, des dizaines de pages —, c'est la
-// différence entre une opération instantanée et une attente à chaque geste.
-//
-// Une création, elle, oblige encore à tout relire. Le dépôt neuf n'est pas dans
-// l'inventaire, et sa date de dernier envoi ne s'invente pas : les fichiers de
-// départ y sont déposés après sa création, si bien que ce que GitHub a répondu
-// à la création est déjà dépassé. Une date inventée fausserait la colonne
-// « dernier envoi » et le filtre des muets — mieux vaut relire.
-
-// Renamed est un dépôt renommé : son ancien nom, et ce que GitHub a rendu.
-type Renamed struct {
-	Before string
-	After  *ghapi.Repo
-}
-
-// updateInventory applique un changement connu à l'inventaire retenu, en
-// mémoire comme dans le cache. Sans inventaire connu, il n'y a rien à
-// corriger : la prochaine lecture partira de GitHub.
+// updateInventory applique à l'inventaire retenu — en mémoire comme dans le
+// cache — un changement que « groups » sait décrire. Sans inventaire connu, il
+// n'y a rien à corriger : la prochaine lecture partira de GitHub.
 func (s *Server) updateInventory(org string, apply func([]groups.RepoInfo) []groups.RepoInfo) {
 	s.mutex.Lock()
 	known, found := s.inventory[org]
@@ -291,50 +271,27 @@ func (s *Server) updateInventory(org string, apply func([]groups.RepoInfo) []gro
 		}
 		known = cached
 	}
-	corrige := apply(append([]groups.RepoInfo(nil), known...))
+	corrige := apply(known)
 	s.remember(org, corrige)
 	s.deps.Cache.Set(cache.ReposKey(org), corrige)
 }
 
 // renamed suit dans l'inventaire les dépôts qu'on vient de renommer. Ils sont
 // repris d'un bloc, après la boucle : le cache s'écrit une fois, pas une fois
-// par dépôt. Un renommage à moitié fait n'est pas un problème — seuls ceux qui
-// ont abouti sont dans la liste.
-func (s *Server) renamed(org string, done []Renamed) {
+// par dépôt.
+func (s *Server) renamed(org string, done []groups.Renamed) {
 	if len(done) == 0 {
 		return
 	}
-	suivis := make(map[string]*ghapi.Repo, len(done))
-	for _, item := range done {
-		if item.After != nil {
-			suivis[strings.ToLower(item.Before)] = item.After
-		}
-	}
 	s.updateInventory(org, func(repos []groups.RepoInfo) []groups.RepoInfo {
-		for index, repo := range repos {
-			apres, change := suivis[strings.ToLower(repo.Name)]
-			if !change {
-				continue
-			}
-			// La date de dernier envoi ne bouge pas : renommer n'est pas pousser.
-			repos[index].Name = apres.Name
-			repos[index].HTMLURL = apres.HTMLURL
-			repos[index].Private = apres.Private
-		}
-		return repos
+		return groups.WithRenamed(repos, done)
 	})
 }
 
 // deleted retire de l'inventaire un dépôt qu'on vient de supprimer.
 func (s *Server) deleted(org, name string) {
 	s.updateInventory(org, func(repos []groups.RepoInfo) []groups.RepoInfo {
-		restants := repos[:0]
-		for _, repo := range repos {
-			if !strings.EqualFold(repo.Name, name) {
-				restants = append(restants, repo)
-			}
-		}
-		return restants
+		return groups.WithoutRepo(repos, name)
 	})
 }
 

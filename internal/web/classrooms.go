@@ -525,7 +525,7 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 	label := "Dépôts de @" + apres.Username + " au nom de " + apres.FullName
 	job := s.jobs.Start("renommage", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
-		var suivis []Renamed
+		var suivis []groups.Renamed
 		for index, ligne := range renommages {
 			if job.Canceled() {
 				break
@@ -537,7 +537,7 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
-				suivis = append(suivis, Renamed{Before: ligne.Repo, After: apres})
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}

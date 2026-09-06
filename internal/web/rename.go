@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -91,7 +92,7 @@ func (s *Server) handleRenameAssignment(writer http.ResponseWriter, request *htt
 	label := "Renommage de « " + avant + " » en « " + apres + " »"
 	job := s.jobs.Start("renommage", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
-		var suivis []Renamed
+		var suivis []groups.Renamed
 		for index, ligne := range lignes {
 			if job.Canceled() {
 				break
@@ -104,7 +105,7 @@ func (s *Server) handleRenameAssignment(writer http.ResponseWriter, request *htt
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
-				suivis = append(suivis, Renamed{Before: ligne.Repo, After: apres})
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
