@@ -461,6 +461,32 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .tableau td .actions { flex-wrap: nowrap; }
 .tableau td .lien + .lien { margin-left: .6rem; }
 
+/* La ligne dépliée d'un étudiant : ses dépôts, rangés sous le groupe d'où ils
+   viennent. Elle prolonge la ligne au-dessus plutôt que d'en former une autre,
+   et le survol ne la détache pas de celle qu'elle complète. */
+.tableau tr.ligne-depliee, .tableau tr.ligne-depliee:hover { background: var(--fond-doux); }
+.depots { display: flex; flex-direction: column; gap: .6rem; }
+.depots-du-cours { display: flex; flex-direction: column; gap: .25rem; }
+.depots-du-cours .etiquette { font-size: .8125rem; color: var(--texte-doux); }
+
+/* Un cours suivi est une puce cliquable, et une personne en a parfois beaucoup :
+   un cadre les sépare là où deux liens côte à côte se confondraient. */
+.cours-suivi {
+  display: inline-block;
+  padding: 0 .6rem;
+  border-radius: 999px;
+  font: inherit;
+  font-size: .75rem;
+  line-height: 1.5rem;
+  background: var(--fond-creux);
+  color: var(--lien);
+  border: 1px solid var(--bord);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cours-suivi:hover { border-color: var(--lien); }
+
 /* ------------------------------------------------------------------- avis */
 
 .avis {

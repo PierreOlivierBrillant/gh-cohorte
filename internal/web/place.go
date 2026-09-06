@@ -34,30 +34,10 @@ func (s *Server) placeAt(scope string) (classroom.Classroom, error) {
 	return classroom.AtScope(org, scope, classroom.DefaultsFrom(s.Settings()))
 }
 
-// visibles rassemble les groupes de l'organisation : ceux qu'on a déclarés, et
-// ceux que les dépôts dessinent sans qu'on ait rien eu à déclarer. Un groupe
-// existe parce que ses dépôts existent ; le fichier local n'ajoute que ce
-// qu'eux ne savent pas dire.
+// visibles rassemble les groupes de l'organisation. Le magasin en décide : le
+// terminal doit voir les mêmes groupes que le navigateur.
 func (s *Server) visibles(org string, repos []groups.RepoInfo) []classroom.Classroom {
-	declares := s.classrooms.List(org)
-	vus := map[string]bool{}
-	for _, cours := range declares {
-		vus[normaliserScope(cours.Scope())] = true
-	}
-
-	liste := append([]classroom.Classroom(nil), declares...)
-	for _, candidat := range classroom.Places(repos) {
-		if vus[normaliserScope(candidat)] {
-			continue
-		}
-		cours, err := classroom.AtScope(org, candidat, classroom.DefaultsFrom(s.Settings()))
-		if err != nil {
-			continue
-		}
-		vus[normaliserScope(candidat)] = true
-		liste = append(liste, cours)
-	}
-	return liste
+	return s.classrooms.Visible(org, repos, classroom.DefaultsFrom(s.Settings()))
 }
 
 func normaliserScope(scope string) string {

@@ -181,3 +181,20 @@ func TestOptionsFiltreEtTriDeLaListe(t *testing.T) {
 		t.Fatal("un tri inconnu doit être refusé")
 	}
 }
+
+// L'annuaire se demande aussi en ligne de commande : ce que le navigateur pose
+// dans sa barre, un script le pose en drapeaux.
+func TestOptionsAnnuaire(t *testing.T) {
+	options, err := app.Parse([]string{
+		"--students", "--session", "a26", "--course", "5n6",
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("analyse : %v", err)
+	}
+	if !options.StudentsRequested {
+		t.Fatal("« --students » doit ouvrir l'annuaire")
+	}
+	if options.Filter.Session != "a26" || options.Filter.Course != "5n6" {
+		t.Fatalf("filtre : %+v", options.Filter)
+	}
+}

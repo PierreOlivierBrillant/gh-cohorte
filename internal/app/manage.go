@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/clone"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
@@ -81,33 +80,13 @@ func (m *manageSession) forget() {
 
 // loadRepos charge les dépôts de l'organisation : mémoire, puis cache, puis API.
 func (m *manageSession) loadRepos(force bool) ([]groups.RepoInfo, error) {
-	console := m.session.Console
 	if m.loaded && !force {
 		return m.repos, nil
 	}
-
-	key := cache.ReposKey(m.org)
-	if !force {
-		var cached []groups.RepoInfo
-		if m.session.Cache.Get(key, cache.ReposTTL, &cached) && len(cached) > 0 {
-			m.repos, m.loaded = cached, true
-			console.Printf("  %s dépôt(s) %s", console.OK(itoa(len(cached))),
-				console.Dim("(cache : "+m.session.Cache.Describe()+")"))
-			return cached, nil
-		}
-	}
-
-	spin := ui.NewSpinner(console, "Chargement des dépôts de "+m.org+"…")
-	spin.Start()
-	repos, err := m.session.Client.ListOrgRepos(m.org, func(total int) {
-		spin.Detail(itoa(total) + " lus")
-	})
-	spin.Stop()
+	repos, err := m.session.orgRepos(m.org, force)
 	if err != nil {
 		return nil, err
 	}
-	console.Printf("  %s dépôt(s) dans l'organisation.", console.OK(itoa(len(repos))))
-	m.session.Cache.Set(key, repos)
 	m.repos, m.loaded = repos, true
 	return repos, nil
 }

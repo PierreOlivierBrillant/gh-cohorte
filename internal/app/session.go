@@ -140,6 +140,9 @@ func (s *Session) run() (int, error) {
 		return ExitOK, err
 	}
 
+	if mode == "etudiants" {
+		return newDirectorySession(s).run()
+	}
 	if mode == "gerer" {
 		s.manager = newManageSession(s, s.Options.Manage)
 		return s.manager.run()
@@ -170,6 +173,9 @@ func (s *Session) chooseMode() (string, error) {
 	if s.Options.Web {
 		return "web", nil
 	}
+	if s.Options.StudentsRequested {
+		return "etudiants", nil
+	}
 	if s.Options.ManageRequested {
 		return "gerer", nil
 	}
@@ -189,6 +195,7 @@ func (s *Session) chooseMode() (string, error) {
 		choice, err := s.Prompt.Choose("Que voulez-vous faire ?", ui.Options(
 			"creer", "Créer des dépôts pour une liste de personnes",
 			"gerer", "Lister et gérer un groupe de dépôts existant",
+			"etudiants", "Lister les étudiants de l'organisation",
 			"web", "Ouvrir l'interface graphique dans le navigateur",
 			"avance", "Options avancées",
 			"quitter", "Quitter",
