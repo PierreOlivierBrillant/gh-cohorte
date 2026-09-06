@@ -138,9 +138,6 @@ func (s *Store) Sessions(org string) []Session {
 	return SessionsOf(courts)
 }
 
-// Path renvoie l'emplacement du fichier.
-func (s *Store) Path() string { return s.path }
-
 // detach copie la liste des étudiants : sans cela, le groupe rendu partagerait
 // sa tranche avec le magasin, et le modifier écrirait dans son dos.
 func detach(classroom Classroom) Classroom {

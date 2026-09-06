@@ -138,15 +138,6 @@ func (h *harnais) muet() int {
 	return h.executer(&ui.ScriptPrompter{})
 }
 
-// derniereQuestion retrouve une question posée pendant la dernière session.
-func (h *harnais) derniereQuestion(fragment string) (ui.Question, bool) {
-	h.t.Helper()
-	if h.scripte == nil {
-		return ui.Question{}, false
-	}
-	return h.scripte.AskedFor(fragment)
-}
-
 // dernierMenu retrouve un menu proposé pendant la dernière session.
 func (h *harnais) dernierMenu(fragment string) (ui.Menu, bool) {
 	h.t.Helper()

@@ -160,9 +160,6 @@ func (s *Server) Serve(lifetime context.Context) error {
 	return nil
 }
 
-// Close libère le port sans avoir servi (erreur au démarrage).
-func (s *Server) Close() error { return s.listener.Close() }
-
 // routes déclare l'API et la page.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()

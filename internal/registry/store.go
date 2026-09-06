@@ -66,9 +66,6 @@ func New(client *ghapi.Client, org string, local *cache.Cache) *Store {
 	return &Store{client: client, org: org, now: time.Now, local: local}
 }
 
-// Org renvoie l'organisation dont c'est le registre.
-func (s *Store) Org() string { return s.org }
-
 // Snapshot est le registre tel qu'il était à un commit donné.
 type Snapshot struct {
 	Set *Set

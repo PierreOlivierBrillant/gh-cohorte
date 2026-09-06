@@ -65,12 +65,6 @@ type HuhPrompter struct {
 // NewPrompter construit le questionneur interactif.
 func NewPrompter(console *Console) *HuhPrompter { return &HuhPrompter{console: console} }
 
-// NewPrompterWithIO construit un questionneur dont l'entrée et la sortie sont
-// fournies : les tests y jouent des touches sans avoir besoin d'un terminal.
-func NewPrompterWithIO(console *Console, input io.Reader, output io.Writer) *HuhPrompter {
-	return &HuhPrompter{console: console, input: input, output: output}
-}
-
 // Interactive indique que des questions peuvent être posées.
 func (p *HuhPrompter) Interactive() bool { return true }
 

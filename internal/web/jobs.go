@@ -71,9 +71,6 @@ type State struct {
 	Events int    `json:"events"`
 }
 
-// Context expire dès que le travail est annulé.
-func (j *Job) Context() context.Context { return j.ctx }
-
 // Canceled indique une annulation demandée depuis le navigateur.
 func (j *Job) Canceled() bool { return j.ctx.Err() != nil }
 

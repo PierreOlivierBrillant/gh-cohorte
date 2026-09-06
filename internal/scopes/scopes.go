@@ -55,15 +55,6 @@ func Find(name string) (Scope, bool) {
 	return Scope{}, false
 }
 
-// Label nomme une portée en français, ou renvoie son nom brut si l'outil ne
-// s'en sert pas : GitHub en accorde d'autres, et elles doivent rester lisibles.
-func Label(name string) string {
-	if scope, found := Find(name); found {
-		return scope.Label
-	}
-	return name
-}
-
 // Describe met en mots ce qu'un jeton annonce d'une portée. Un jeton
 // « fine-grained » n'annonce aucune portée : rien ne peut alors être affirmé.
 func Describe(present, known bool) string {
