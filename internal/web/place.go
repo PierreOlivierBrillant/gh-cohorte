@@ -39,7 +39,3 @@ func (s *Server) placeAt(scope string) (classroom.Classroom, error) {
 func (s *Server) visibles(org string, repos []groups.RepoInfo) []classroom.Classroom {
 	return s.classrooms.Visible(org, repos, classroom.DefaultsFrom(s.Settings()))
 }
-
-func normaliserScope(scope string) string {
-	return classroom.NormalizeScope(scope)
-}

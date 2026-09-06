@@ -26,6 +26,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -44,6 +45,11 @@ type Deps struct {
 	ConfigFile string
 	Viewer     string
 	Host       string
+	// TokenOrigin dit d'où vient le jeton — « oauth_token », « gh », ou une
+	// variable d'environnement. Ce que gh peut renouveler en dépend.
+	TokenOrigin string
+	// Refresher renouvelle le jeton ; nil branche l'interface sur le vrai gh.
+	Refresher  *scopes.Refresher
 	Version    string
 	ReportDir  string
 	Jobs       int
@@ -161,6 +167,8 @@ func (s *Server) routes() http.Handler {
 	// --- contexte et réglages
 	mux.HandleFunc("GET /api/context", s.handleContext)
 	mux.HandleFunc("PUT /api/settings", s.handleSaveSettings)
+	mux.HandleFunc("GET /api/token", s.handleToken)
+	mux.HandleFunc("POST /api/token/refresh", s.handleRefreshToken)
 	mux.HandleFunc("POST /api/cache/clear", s.handleClearCache)
 	mux.HandleFunc("POST /api/quit", s.handleQuit)
 
@@ -191,6 +199,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/preview", s.handlePreviewAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move/preview", s.handleRelocatePreview)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move", s.handleRelocate)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/rename/preview", s.handleRenameAssignmentPreview)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/rename", s.handleRenameAssignment)
 	mux.HandleFunc("GET /api/classrooms/{scope}/assignments/{name}", s.handleAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/access", s.handleAssignmentAccess)
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/preview", s.handleMigrationPreview)
@@ -287,7 +297,9 @@ func decode(request *http.Request, target any) error {
 	return nil
 }
 
-// fail traduit une erreur du domaine en réponse HTTP.
+// fail traduit une erreur du domaine en réponse HTTP. La portée manquante, si
+// GitHub l'a nommée, part avec : l'interface propose alors de renouveler le
+// jeton au lieu d'annoncer un refus sans suite.
 func fail(writer http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	switch {
@@ -302,5 +314,17 @@ func fail(writer http.ResponseWriter, err error) {
 			status = http.StatusBadGateway
 		}
 	}
-	writeJSON(writer, status, map[string]string{"error": err.Error()})
+	payload := map[string]string{"error": err.Error()}
+	if scope := ghapi.MissingScope(err); scope != "" {
+		payload["scope"] = scope
+	}
+	writeJSON(writer, status, payload)
+}
+
+// failScope refuse une action que le jeton n'autorise pas, avant même de la
+// tenter : l'interface en fait la même proposition que sur un refus de GitHub.
+func failScope(writer http.ResponseWriter, scope, message string) {
+	writeJSON(writer, http.StatusForbidden, map[string]string{
+		"error": message, "scope": scope,
+	})
 }

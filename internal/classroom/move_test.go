@@ -323,3 +323,111 @@ func TestUnDepotNommeParLeCompteResteRattache(t *testing.T) {
 		t.Fatalf("cible composée : %+v", lignes)
 	}
 }
+
+// ------------------------------------------------------ renommer un travail
+
+// Le cas courant : un travail mal nommé, et rien d'autre à changer. Seul le
+// niveau du travail bouge dans le nom de chaque dépôt.
+func TestRenommerUnTravailNeTouchePasAuReste(t *testing.T) {
+	inventaire := depots(
+		"a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp1.jlpicard",
+		"a26.5n6.01.tp2.jlpicard",
+	)
+	cours := groupe("a26", "5n6", "01", cohorte)
+
+	lignes, err := classroom.PlanRenameAssignment(cours, "a26.5n6.01.tp1",
+		"projet-final", inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	cibles := map[string]string{}
+	for _, ligne := range lignes {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if len(cibles) != 2 ||
+		cibles["a26.5n6.01.tp1.emilie-cote"] != "a26.5n6.01.projet-final.emilie-cote" ||
+		cibles["a26.5n6.01.tp1.jlpicard"] != "a26.5n6.01.projet-final.jlpicard" {
+		t.Fatalf("cibles composées : %v", cibles)
+	}
+}
+
+// Le nom saisi passe par la nomenclature : « Projet final » ne peut pas entrer
+// tel quel dans un nom de dépôt.
+func TestRenommerUnTravailMetLeNomEnForme(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.jlpicard")
+	cours := groupe("a26", "5n6", "01", nil)
+
+	lignes, err := classroom.PlanRenameAssignment(cours, "a26.5n6.01.tp1",
+		"Projet final", inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(lignes) != 1 || lignes[0].Target != "a26.5n6.01.projet-final.jlpicard" {
+		t.Fatalf("cible composée : %+v", lignes)
+	}
+}
+
+// On renomme le travail, pas les personnes : un dépôt qui porte encore un compte
+// GitHub le garde, même quand le nom complet est désormais connu. Le corriger a
+// sa propre opération, et mêler les deux rendrait le renommage illisible.
+func TestRenommerUnTravailGardeLeNiveauDeLEtudiant(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.jlpicard")
+	cours := groupe("a26", "5n6", "01",
+		personnes("Jean-Luc Picard", "jlpicard"))
+
+	lignes, err := classroom.PlanRenameAssignment(cours, "a26.5n6.01.tp1",
+		"tp2", inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(lignes) != 1 || lignes[0].Target != "a26.5n6.01.tp2.jlpicard" {
+		t.Fatalf("cible composée : %+v", lignes)
+	}
+}
+
+// Renommer vers le nom déjà porté ne fait rien : le dire vaut mieux que de
+// lancer une opération vide.
+func TestRenommerUnTravailRefuseLeMemeNom(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.jlpicard")
+	cours := groupe("a26", "5n6", "01", nil)
+
+	_, err := classroom.PlanRenameAssignment(cours, "a26.5n6.01.tp1", "tp1", inventaire)
+	if err == nil || !strings.Contains(err.Error(), "porte déjà ce nom") {
+		t.Fatalf("refus attendu : %v", err)
+	}
+}
+
+// Un nom déjà pris par un autre travail refuse l'opération entière : la moitié
+// des dépôts renommés laisserait deux travaux là où il n'y en avait qu'un.
+func TestRenommerUnTravailRefuseUneCollision(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.jlpicard", "a26.5n6.01.tp2.jlpicard")
+	cours := groupe("a26", "5n6", "01", nil)
+
+	_, err := classroom.PlanRenameAssignment(cours, "a26.5n6.01.tp1", "tp2", inventaire)
+	if err == nil || !strings.Contains(err.Error(), "existe déjà") {
+		t.Fatalf("collision attendue : %v", err)
+	}
+}
+
+// Un travail sans dépôt n'existe pas : il n'y a rien à renommer.
+func TestRenommerUnTravailInconnu(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.jlpicard")
+	cours := groupe("a26", "5n6", "01", nil)
+
+	_, err := classroom.PlanRenameAssignment(cours, "a26.5n6.01.tp9", "tp2", inventaire)
+	if err == nil || !strings.Contains(err.Error(), "Aucun dépôt") {
+		t.Fatalf("refus attendu : %v", err)
+	}
+}
+
+// Un groupe resté à l'ancienne nomenclature ne sait pas nommer : le renommage
+// est refusé avant toute écriture, et le refus dit par où passer.
+func TestRenommerUnTravailRefuseUnGroupeHerite(t *testing.T) {
+	inventaire := depots("vieux-tp1-jlpicard")
+	cours := heritage("vieux-tp1", "jlpicard")
+
+	_, err := classroom.PlanRenameAssignment(cours, "vieux-tp1", "tp2", inventaire)
+	if err == nil || !strings.Contains(err.Error(), "nomenclature") {
+		t.Fatalf("refus attendu : %v", err)
+	}
+}

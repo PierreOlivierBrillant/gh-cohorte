@@ -158,3 +158,40 @@ func TestLoadEncodageInvalide(t *testing.T) {
 		t.Error("un fichier non UTF-8 doit être refusé")
 	}
 }
+
+func TestMarqueDeDoublonRetiree(t *testing.T) {
+	cas := []struct {
+		compte string
+		base   string
+		marque bool
+	}{
+		{"aleksilepaj-1", "aleksilepaj", true},
+		{"emilie-cote-12", "emilie-cote", true},
+		// Un compte peut légitimement finir par un nombre : rien dans le nom
+		// seul ne dit lequel des deux on lit.
+		{"LT-9", "LT", true},
+		{"jlpicard", "jlpicard", false},
+		// Rien à retirer : il ne resterait rien.
+		{"2149656", "2149656", false},
+		{"-1", "-1", false},
+	}
+	for _, essai := range cas {
+		base, marque := roster.WithoutDuplicateMarker(essai.compte)
+		if base != essai.base || marque != essai.marque {
+			t.Errorf("%q → %q (%v), attendu %q (%v)",
+				essai.compte, base, marque, essai.base, essai.marque)
+		}
+	}
+}
+
+func TestDeuxNomsCompletsPeuventEtreLaMemePersonne(t *testing.T) {
+	if !roster.SameName("Alexis Lepage", "alexis lepage") {
+		t.Error("la casse ne fait pas deux personnes")
+	}
+	if !roster.SameName("", "Alexis Lepage") || !roster.SameName("Alexis Lepage", "  ") {
+		t.Error("un nom encore inconnu ne contredit rien")
+	}
+	if roster.SameName("Alexis Lepage", "Émilie Côté") {
+		t.Error("deux noms différents sont deux personnes")
+	}
+}
