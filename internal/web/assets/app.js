@@ -2975,6 +2975,108 @@ $('cache-vider').addEventListener('click', async () => {
   dessinerChemins(bilan.paths);
 });
 
+// ------------------------------------------------------ registre des étudiants
+
+// Les noms complets vivent dans un dépôt privé de l'organisation : c'est ce qui
+// permet à un collègue de les voir sans avoir rien déclaré chez lui. Ce qu'un
+// poste a accumulé avant le registre ne monte pas tout seul, et rien n'est
+// versé sans avoir été montré d'abord.
+
+let registreApercu = null;
+
+// lignesDeFiches met en table des personnes.
+function lignesDeFiches(entetes, lignes) {
+  return el('table', { classe: 'tableau' },
+    el('thead', {}, el('tr', {}, entetes.map((titre) => el('th', { texte: titre })))),
+    el('tbody', {}, lignes.map((cellules) =>
+      el('tr', {}, cellules.map((valeur) => el('td', { texte: valeur }))))));
+}
+
+// dessinerRegistre écrit ce que la publication ferait.
+function dessinerRegistre(vue) {
+  const resume = $('registre-resume');
+  const detail = $('registre-detail');
+  vider(resume);
+  vider(detail);
+  registreApercu = vue;
+
+  const plan = vue.plan || {};
+  const neuves = plan.new || [];
+  const desaccords = plan.renamed || [];
+  const ambigus = plan.ambiguous || [];
+  const sansNom = plan.nameless || [];
+
+  const publie = vue.published || 0;
+  if (publie > 0) {
+    resume.append(el('div', { classe: 'avis succes',
+      texte: `${publie} fiche(s) publiée(s). Le registre en compte ${vue.registry_size}.` }));
+  } else {
+    resume.append(el('div', { classe: 'avis',
+      texte: `Le registre connaît ${vue.registry_size} fiche(s) ; ce poste en apporte `
+        + `${vue.total} à écrire.` }));
+  }
+  if (vue.exposure) {
+    resume.append(el('div', { classe: 'avis alerte', texte: vue.exposure }));
+  }
+  if (vue.notice) {
+    resume.append(el('div', { classe: 'avis alerte', texte: vue.notice }));
+  }
+
+  if (neuves.length) {
+    detail.append(el('p', { classe: 'note', texte: `${neuves.length} nouvelle(s) fiche(s)` }));
+    detail.append(lignesDeFiches(['Nom complet', 'Compte'],
+      neuves.map((fiche) => [fiche.full_name, '@' + fiche.username])));
+  }
+  if (desaccords.length) {
+    detail.append(el('p', { classe: 'note',
+      texte: `${desaccords.length} désaccord(s) de nom — cochez ci-dessous pour que ce `
+        + 'poste l\'emporte.' }));
+    detail.append(lignesDeFiches(['Compte', 'Au registre', 'Sur ce poste'],
+      desaccords.map((item) => ['@' + item.username, item.registry, item.local])));
+  }
+  if (ambigus.length) {
+    detail.append(el('p', { classe: 'note',
+      texte: `${ambigus.length} compte(s) que ce poste nomme de plusieurs façons. Le premier `
+        + 'est retenu ; les autres restent rattachés par leur slug.' }));
+    detail.append(lignesDeFiches(['Compte', 'Retenu', 'Trouvés'],
+      ambigus.map((item) => ['@' + item.username, item.chosen, (item.names || []).join(' · ')])));
+  }
+  if (sansNom.length) {
+    detail.append(el('p', { classe: 'note',
+      texte: `${sansNom.length} compte(s) sans nom complet connu : rien ne peut être publié `
+        + 'pour eux (@' + sansNom.join(', @') + ').' }));
+  }
+
+  const aPublier = vue.total > 0;
+  $('registre-publier').hidden = !aPublier;
+  $('registre-prefer-local-bloc').hidden = desaccords.length === 0;
+  $('registre-etat').textContent = aPublier ? '' : 'Rien à publier.';
+}
+
+$('registre-apercu').addEventListener('click', async () => {
+  const org = etat.organisation;
+  if (!org) { message('Choisissez d\'abord une organisation.', 'erreur'); return; }
+  const vue = await tenter(() => api('GET', `/api/orgs/${encode(org)}/registry`), 'Registre');
+  if (vue) dessinerRegistre(vue);
+});
+
+$('registre-publier').addEventListener('click', async () => {
+  const org = etat.organisation;
+  if (!org || !registreApercu) return;
+  const total = registreApercu.total;
+  const local = $('registre-prefer-local').checked;
+  const accord = await demander('Publier le registre',
+    el('p', { texte: `${total} fiche(s) seront écrites dans « ${org}/${registreApercu.repo} ». `
+      + 'Le fichier de ce poste reste inchangé.' }), 'Publier');
+  if (!accord) return;
+
+  const vue = await tenter(
+    () => api('POST', `/api/orgs/${encode(org)}/registry`, { prefer_local: local }), 'Registre');
+  if (!vue) return;
+  message(`${vue.published} fiche(s) publiée(s).`);
+  dessinerRegistre(vue);
+});
+
 // ------------------------------------------------------- portées du jeton
 
 // L'outil ne fabrique aucun jeton : il redemande à gh d'en obtenir un portant

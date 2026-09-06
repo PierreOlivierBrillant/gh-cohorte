@@ -212,6 +212,9 @@ func (s *Session) run() (int, error) {
 		return ExitOK, err
 	}
 
+	if mode == "registre" {
+		return s.publishRegistry()
+	}
 	if mode == "etudiants" {
 		return newDirectorySession(s).run()
 	}
@@ -245,6 +248,9 @@ func (s *Session) chooseMode() (string, error) {
 	if s.Options.Web {
 		return "web", nil
 	}
+	if s.Options.PublishRegistry {
+		return "registre", nil
+	}
 	if s.Options.StudentsRequested {
 		return "etudiants", nil
 	}
@@ -268,6 +274,7 @@ func (s *Session) chooseMode() (string, error) {
 			"creer", "Créer des dépôts pour une liste de personnes",
 			"gerer", "Lister et gérer un groupe de dépôts existant",
 			"etudiants", "Lister les étudiants de l'organisation",
+			"registre", "Publier les noms au registre de l'organisation",
 			"web", "Ouvrir l'interface graphique dans le navigateur",
 			"avance", "Options avancées",
 			"quitter", "Quitter",

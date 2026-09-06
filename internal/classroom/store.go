@@ -199,6 +199,20 @@ func (s *Store) Visible(org string, repos []groups.RepoInfo, defauts Defaults,
 	return declares
 }
 
+// People rassemble les personnes de tous les groupes déclarés dans une
+// organisation, groupe par groupe et dans l'ordre des places.
+//
+// Les doublons y restent. Un compte nommé de deux façons dans deux groupes est
+// précisément ce qu'il faut montrer avant de publier : c'est à qui reçoit la
+// liste de dire ce que cela veut dire, non à ce magasin de le deviner.
+func (s *Store) People(org string) []roster.Person {
+	var gens []roster.Person
+	for _, cours := range s.List(org) {
+		gens = append(gens, cours.Students...)
+	}
+	return gens
+}
+
 // Find retrouve un groupe par sa place dans une organisation. C'est la seule
 // façon de le désigner : un identifiant tiré au hasard ne voudrait rien dire
 // hors de cette machine, alors que la place est dans le nom des dépôts.

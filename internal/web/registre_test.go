@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
@@ -151,5 +152,128 @@ func TestUnNomCorrigeVautPourToutLeMondeSansOrphelinerLesDepots(t *testing.T) {
 	if annuaire.Students[0].Repos != 1 || annuaire.Unmatched != 0 {
 		t.Fatalf("le dépôt sous l'ancien slug s'est détaché : %d dépôt(s), %d orphelin(s)",
 			annuaire.Students[0].Repos, annuaire.Unmatched)
+	}
+}
+
+// ------------------------------------------------------------- publication
+
+// publicationVue est ce que l'aperçu et la publication renvoient.
+type publicationVue struct {
+	Org  string `json:"org"`
+	Repo string `json:"repo"`
+	Plan struct {
+		New []struct {
+			Username string   `json:"username"`
+			FullName string   `json:"full_name"`
+			Slugs    []string `json:"slugs"`
+		} `json:"new"`
+		Renamed []struct {
+			Username string `json:"username"`
+			Registry string `json:"registry"`
+			Local    string `json:"local"`
+		} `json:"renamed"`
+		Known     int `json:"known"`
+		Ambiguous []struct {
+			Username string   `json:"username"`
+			Names    []string `json:"names"`
+			Chosen   string   `json:"chosen"`
+		} `json:"ambiguous"`
+		Nameless []string `json:"nameless"`
+	} `json:"plan"`
+	Total        int    `json:"total"`
+	Published    int    `json:"published"`
+	Exposure     string `json:"exposure"`
+	RegistrySize int    `json:"registry_size"`
+}
+
+// L'aperçu montre ce que publier ferait, sans rien écrire.
+func TestApercuDeLaPublicationNecritRien(t *testing.T) {
+	state := fakegh.NewState()
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01",
+		"Émilie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard"))
+
+	var vue publicationVue
+	h.json(http.MethodGet, "/api/orgs/acme/registry", nil, &vue)
+	if vue.Total != 2 || len(vue.Plan.New) != 2 {
+		t.Fatalf("aperçu = %+v", vue)
+	}
+	if vue.Repo != registry.RepoName || vue.Org != "acme" {
+		t.Fatalf("aperçu = %+v", vue)
+	}
+	if _, cree := state.Repos["acme/"+registry.RepoName]; cree {
+		t.Error("un aperçu ne doit rien écrire")
+	}
+}
+
+// La publication verse, puis dit ce qui reste à faire — rien, ici.
+func TestPublicationParLInterfaceWeb(t *testing.T) {
+	state := fakegh.NewState()
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01", "Émilie Côté", "emilie-cote"))
+
+	var vue publicationVue
+	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{}, &vue)
+	if vue.Published != 1 || vue.Total != 0 || vue.RegistrySize != 1 {
+		t.Fatalf("publication = %+v", vue)
+	}
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	if !strings.Contains(contenu, "Émilie Côté") {
+		t.Fatalf("registre =\n%s", contenu)
+	}
+}
+
+// Publier deux fois est refusé plutôt que silencieux : un « c'est fait » qui
+// n'a rien fait n'apprend rien.
+func TestPublierDeuxFoisEstRefuse(t *testing.T) {
+	h := avantLeRegistre(t, nil, cohorte("a26", "5n6", "01", "Émilie Côté", "emilie-cote"))
+	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{}, nil)
+
+	reponse, contenu := h.requete(http.MethodPost, "/api/orgs/acme/registry", map[string]any{})
+	if reponse.StatusCode < 400 {
+		t.Fatalf("statut = %d — publier deux fois doit être refusé", reponse.StatusCode)
+	}
+	if !strings.Contains(string(contenu), "Rien à publier") {
+		t.Fatalf("message = %s", contenu)
+	}
+}
+
+// Le désaccord se montre, et « prefer_local » le tranche dans l'autre sens.
+func TestLeDesaccordSeTrancheALaDemande(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", registry.RepoName, true)
+	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
+		registry.StudentsFile: `{"version":1,"students":[` +
+			`{"username":"emilie-cote","full_name":"Émilie Côté","slugs":["emilie-cote"]}]}`,
+	}, registry.Branch)
+
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01", "Emilie Cote", "emilie-cote"))
+
+	var apercu publicationVue
+	h.json(http.MethodGet, "/api/orgs/acme/registry", nil, &apercu)
+	if len(apercu.Plan.Renamed) != 1 || apercu.Plan.Renamed[0].Registry != "Émilie Côté" {
+		t.Fatalf("aperçu = %+v", apercu.Plan)
+	}
+
+	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{"prefer_local": true}, nil)
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	if !strings.Contains(contenu, `"Emilie Cote"`) {
+		t.Fatalf("le nom du poste n'a pas été repris :\n%s", contenu)
+	}
+	// L'ancien nom a tout de même nommé des dépôts : son slug reste.
+	if !strings.Contains(contenu, "emilie-cote") {
+		t.Fatalf("le slug de l'ancien nom a disparu :\n%s", contenu)
+	}
+}
+
+// L'aperçu porte l'avertissement sur la permission de base : c'est le moment
+// où l'on s'apprête à déposer des noms dans l'organisation.
+func TestLApercuAvertitSurLaPermissionDeBase(t *testing.T) {
+	state := fakegh.NewState()
+	state.DefaultRepoPermission["acme"] = "read"
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01", "Émilie Côté", "emilie-cote"))
+
+	var vue publicationVue
+	h.json(http.MethodGet, "/api/orgs/acme/registry", nil, &vue)
+	if !strings.Contains(vue.Exposure, "read") {
+		t.Fatalf("avertissement = %q", vue.Exposure)
 	}
 }

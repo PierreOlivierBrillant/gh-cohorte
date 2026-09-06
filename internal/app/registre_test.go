@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 )
 
 // La règle du dépôt veut qu'une capacité existe dans les trois interfaces. Le
@@ -113,4 +115,139 @@ func TestAnnuaireDuTerminalLitLeRegistre(t *testing.T) {
 	}
 	h.contient("Émilie Côté", "Jean-Luc Picard")
 	h.absent("Aucun étudiant connu")
+}
+
+// ------------------------------------------------------------- publication
+
+// Le cas de la migration : un poste qui a des années de noms, un registre vide.
+func TestPublicationVerseLesNomsDuPoste(t *testing.T) {
+	state := fakegh.NewState()
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{
+			{FullName: "Émilie Côté", Username: "emilie-cote"},
+			{FullName: "Jean-Luc Picard", Username: "jlpicard"},
+		},
+	})
+	h.Options.PublishRegistry = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	for _, attendu := range []string{"Émilie Côté", "Jean-Luc Picard", "emilie-cote"} {
+		if !strings.Contains(contenu, attendu) {
+			t.Fatalf("« %s » manque au registre :\n%s", attendu, contenu)
+		}
+	}
+	h.contient("2 fiche(s) publiée(s)")
+}
+
+// La simulation montre tout et n'écrit rien.
+func TestPublicationEnSimulationNEcritRien(t *testing.T) {
+	state := fakegh.NewState()
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Émilie Côté", Username: "emilie-cote"}},
+	})
+	h.Options.PublishRegistry = true
+	h.Options.DryRun = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Émilie Côté", "Simulation")
+	if _, cree := state.Repos["acme/"+registry.RepoName]; cree {
+		t.Error("une simulation ne doit rien écrire")
+	}
+}
+
+// Le même compte, nommé de deux façons dans deux groupes : c'est le
+// dédoublonnage demandé. La publication tranche, mais elle le dit.
+func TestPublicationSignaleUnCompteNommeDeuxFois(t *testing.T) {
+	state := fakegh.NewState()
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Émilie Côté", Username: "emilie-cote"}},
+	})
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "h27", Course: "5n6", Group: "02",
+		Students: []roster.Person{{FullName: "Emlie Côté", Username: "emilie-cote"}},
+	})
+	h.Options.PublishRegistry = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("ambigu", "Émilie Côté", "Emlie Côté")
+
+	// Les deux slugs sont montés : aucun dépôt ne se détache, quel que soit le
+	// nom retenu.
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	for _, slug := range []string{"emilie-cote", "emlie-cote"} {
+		if !strings.Contains(contenu, slug) {
+			t.Fatalf("le slug « %s » n'est pas monté :\n%s", slug, contenu)
+		}
+	}
+}
+
+// Publier deux fois de suite ne réécrit rien la seconde.
+func TestPublierDeuxFoisNAJouteRien(t *testing.T) {
+	state := fakegh.NewState()
+	premiere := nouveau(t, state)
+	premiere.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Émilie Côté", Username: "emilie-cote"}},
+	})
+	premiere.Options.PublishRegistry = true
+	premiere.Options.Yes = true
+	if code := premiere.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, premiere.texte())
+	}
+	commits := state.CallCount("POST /repos/acme/.cohorte/git/commits")
+
+	seconde := nouveau(t, state)
+	seconde.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Émilie Côté", Username: "emilie-cote"}},
+	})
+	seconde.Options.PublishRegistry = true
+	seconde.Options.Yes = true
+	if code := seconde.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, seconde.texte())
+	}
+	seconde.contient("rien à publier")
+	if apres := state.CallCount("POST /repos/acme/.cohorte/git/commits"); apres != commits {
+		t.Errorf("%d commit(s) de plus pour une publication sans effet", apres-commits)
+	}
+}
+
+// Un désaccord se montre et, par défaut, le registre garde son nom.
+func TestPublicationMontreUnDesaccordSansTrancherSeule(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", registry.RepoName, true)
+	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
+		registry.StudentsFile: `{"version":1,"students":[` +
+			`{"username":"emilie-cote","full_name":"Émilie Côté","slugs":["emilie-cote"]}]}`,
+	}, registry.Branch)
+
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Emilie Cote", Username: "emilie-cote"}},
+	})
+	h.Options.PublishRegistry = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("désaccord", "le registre garde le sien")
+
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	if !strings.Contains(contenu, "Émilie Côté") || strings.Contains(contenu, `"Emilie Cote"`) {
+		t.Fatalf("le registre n'a pas gardé son nom :\n%s", contenu)
+	}
 }

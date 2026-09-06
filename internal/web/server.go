@@ -208,6 +208,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/access", s.handleAssignmentAccess)
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/preview", s.handleMigrationPreview)
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/apply", s.handleMigrationApply)
+	mux.HandleFunc("GET /api/orgs/{org}/registry", s.handleRegistryPreview)
+	mux.HandleFunc("POST /api/orgs/{org}/registry", s.handleRegistryPublish)
 	mux.HandleFunc("GET /api/orgs/{org}/candidates", s.handleCandidates)
 	mux.HandleFunc("POST /api/orgs/{org}/match", s.handleMatchPattern)
 

@@ -205,3 +205,21 @@ func TestParseRenouvellementDuJeton(t *testing.T) {
 		t.Fatalf("portées = %q", seul.Scopes)
 	}
 }
+
+func TestDrapeauxDePublicationDuRegistre(t *testing.T) {
+	options, err := app.Parse([]string{"--publish-registry", "--prefer-local"}, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse : %v", err)
+	}
+	if !options.PublishRegistry || !options.PreferLocal {
+		t.Fatalf("options = %+v", options)
+	}
+	// Sans eux, rien n'est demandé : publier ne doit jamais arriver par défaut.
+	nues, err := app.Parse(nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nues.PublishRegistry || nues.PreferLocal {
+		t.Fatalf("options = %+v", nues)
+	}
+}

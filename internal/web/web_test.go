@@ -22,6 +22,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/web"
 )
@@ -176,6 +177,36 @@ func (h *harnais) decoder(contenu []byte, cible any) {
 	h.t.Helper()
 	if err := json.Unmarshal(contenu, cible); err != nil {
 		h.t.Fatalf("réponse illisible (%s) : %v", contenu, err)
+	}
+}
+
+// avantLeRegistre monte une interface dont le fichier local porte déjà des
+// groupes, sans que le registre de l'organisation en sache rien.
+//
+// C'est l'état d'un poste d'avant le registre : des années de noms dans un
+// fichier que plus rien ne lira. Les groupes sont écrits avant que le serveur
+// n'ouvre son magasin, sans quoi il ne les verrait pas.
+func avantLeRegistre(t *testing.T, state *fakegh.State,
+	cours ...classroom.Classroom) *harnais {
+	t.Helper()
+	return nouveauAvec(t, state, func(deps *web.Deps) {
+		store := classroom.Open(classroom.PathNextTo(deps.ConfigFile))
+		for _, item := range cours {
+			if _, err := store.Save(item); err != nil {
+				t.Fatalf("déclaration : %v", err)
+			}
+		}
+	})
+}
+
+// cohorte compose un groupe à partir de couples « nom complet, compte ».
+func cohorte(session, cours, section string, couples ...string) classroom.Classroom {
+	gens := make([]roster.Person, 0, len(couples)/2)
+	for index := 0; index+1 < len(couples); index += 2 {
+		gens = append(gens, roster.Person{FullName: couples[index], Username: couples[index+1]})
+	}
+	return classroom.Classroom{
+		Org: "acme", Session: session, Course: cours, Group: section, Students: gens,
 	}
 }
 

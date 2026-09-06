@@ -714,3 +714,46 @@ func TestMagasinCorrigeUnCompteMarqueDUnAutreGroupe(t *testing.T) {
 		t.Fatalf("liste relue : %+v", relu.Students)
 	}
 }
+
+// Publier le registre part de tout ce qu'un poste sait des personnes : les
+// doublons y restent, car un compte nommé de deux façons est ce qu'il faut
+// montrer avant de trancher.
+func TestPersonnesDeTousLesGroupes(t *testing.T) {
+	dossier := t.TempDir()
+	store := classroom.Open(filepath.Join(dossier, "groupes.json"))
+	if _, err := store.Save(classroom.Classroom{
+		Org: "acme", Session: "h27", Course: "5n6", Group: "02",
+		Students: []roster.Person{{FullName: "Emlie Côté", Username: "ecote"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{
+			{FullName: "Émilie Côté", Username: "ecote"},
+			{FullName: "Jean-Luc Picard", Username: "jlpicard"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(classroom.Classroom{
+		Org: "autre", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Ailleurs", Username: "ailleurs"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	gens := store.People("acme")
+	// Rangés par place : « a26… » avant « h27… », quel que soit l'ordre d'écriture.
+	if len(gens) != 3 || gens[0].Username != "ecote" || gens[0].FullName != "Émilie Côté" {
+		t.Fatalf("personnes = %+v", gens)
+	}
+	if gens[2].FullName != "Emlie Côté" {
+		t.Fatalf("le doublon n'a pas été conservé : %+v", gens)
+	}
+	for _, person := range gens {
+		if person.Username == "ailleurs" {
+			t.Error("une autre organisation s'est glissée dans la liste")
+		}
+	}
+}

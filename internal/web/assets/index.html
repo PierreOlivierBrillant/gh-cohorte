@@ -704,6 +704,29 @@
       </div>
     </div>
 
+    <!-- Le registre des étudiants vit dans l'organisation. Ce qu'un poste a
+         accumulé avant lui ne monte pas tout seul : cette boîte le montre puis
+         le verse. -->
+    <div class="boite">
+      <div class="boite-entete"><strong>Registre des étudiants</strong></div>
+      <div class="boite-corps">
+        <p class="note">Les noms complets vivent dans un dépôt privé de
+          l'organisation, pour que vos collègues les voient aussi. Ce que ce
+          poste sait et que le registre ignore encore se publie ici.</p>
+        <div id="registre-resume" class="avis-pile"></div>
+        <div id="registre-detail"></div>
+        <label class="case" id="registre-prefer-local-bloc" hidden>
+          <input type="checkbox" id="registre-prefer-local">
+          <span>En cas de désaccord, garder le nom de ce poste</span>
+        </label>
+      </div>
+      <div class="boite-pied">
+        <button type="button" id="registre-apercu" class="bouton">Voir ce qui monterait</button>
+        <button type="button" id="registre-publier" class="bouton vert" hidden>Publier</button>
+        <span class="note" id="registre-etat"></span>
+      </div>
+    </div>
+
     <div class="boite">
       <div class="boite-entete"><strong>Fichiers</strong></div>
       <table class="tableau" id="chemins">

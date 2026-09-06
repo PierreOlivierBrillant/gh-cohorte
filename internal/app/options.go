@@ -27,7 +27,14 @@ type Options struct {
 	// StudentsRequested ouvre l'annuaire : les étudiants de l'organisation
 	// entière, avec les cours que chacun a suivis.
 	StudentsRequested bool
-	Roster            string
+	// PublishRegistry verse au registre de l'organisation les noms que ce
+	// poste a accumulés, puis quitte. Avec --dry-run, il montre seulement ce
+	// qu'il ferait ; avec --yes, il ne demande pas confirmation.
+	PublishRegistry bool
+	// PreferLocal fait gagner les noms de ce poste sur ceux du registre quand
+	// les deux diffèrent. Sans lui, le registre garde les siens.
+	PreferLocal bool
+	Roster      string
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
@@ -91,6 +98,7 @@ Utilisation :
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
   gh cohorte --students --session a26         étudiants de la session a26
+  gh cohorte --publish-registry --dry-run     ce que publier les noms ferait
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
   gh cohorte --refresh-token --scopes delete_repo
@@ -101,6 +109,8 @@ Drapeaux :
   --org ORG                organisation GitHub cible
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
   --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
+  --publish-registry       verser au registre de l'organisation les noms de ce poste
+  --prefer-local           en cas de désaccord, garder le nom de ce poste
   --session COURT          ne lister que les étudiants d'une session (« a26 »)
   --course SIGLE           ne lister que les étudiants d'un cours (« 5n6 »)
   --filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
@@ -172,6 +182,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.StringVar(&options.Org, "org", "", "organisation GitHub cible")
 	set.BoolVar(&options.StudentsRequested, "students", false,
 		"lister les étudiants de l'organisation")
+	set.BoolVar(&options.PublishRegistry, "publish-registry", false,
+		"verser au registre les noms de ce poste")
+	set.BoolVar(&options.PreferLocal, "prefer-local", false,
+		"garder les noms de ce poste en cas de désaccord")
 	session := set.String("session", "", "ne lister qu'une session")
 	sigle := set.String("course", "", "ne lister qu'un cours")
 	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")

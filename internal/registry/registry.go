@@ -338,15 +338,24 @@ func (c Change) message() string {
 	}
 	var parties []string
 	if n := len(c.Learn); n > 0 {
-		parties = append(parties, fmt.Sprintf("%d étudiant(s)", n))
+		parties = append(parties, plural(n, "%d étudiant", "%d étudiants"))
 	}
 	if n := len(c.Forget); n > 0 {
-		parties = append(parties, fmt.Sprintf("retire %d compte(s)", n))
+		parties = append(parties, plural(n, "retire %d compte", "retire %d comptes"))
 	}
 	if len(parties) == 0 {
 		return "Met le registre à jour"
 	}
 	return "Inscrit au registre : " + strings.Join(parties, ", ")
+}
+
+// plural accorde un décompte. Les messages de commit se lisent : « 1 étudiants »
+// se remarque, et rien ne justifie de l'écrire.
+func plural(count int, singulier, pluriel string) string {
+	if count == 1 {
+		return fmt.Sprintf(singulier, count)
+	}
+	return fmt.Sprintf(pluriel, count)
 }
 
 // -------------------------------------------------------------- lecture/écriture
