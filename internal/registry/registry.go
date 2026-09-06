@@ -38,8 +38,11 @@ const (
 	Branch = "main"
 	// StudentsFile porte le registre lui-même.
 	StudentsFile = "etudiants.json"
-	// ReadmeFile explique le dépôt à qui l'ouvre sur github.com.
-	ReadmeFile = "LISEZMOI.md"
+	// ReadmeFile explique le dépôt à qui l'ouvre sur github.com. C'est bien
+	// « README.md » : GitHub n'affiche que celui-là sur la page du dépôt, et
+	// c'est aussi le fichier que la création avec « auto_init » y dépose — le
+	// nôtre prend sa place plutôt que de s'ajouter à côté.
+	ReadmeFile = "README.md"
 )
 
 // Version est celle du schéma écrit. Elle est relue, jamais devinée : un

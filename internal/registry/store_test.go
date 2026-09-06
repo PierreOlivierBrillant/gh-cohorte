@@ -540,3 +540,62 @@ func sortedNoms(fichiers map[string]string) []string {
 	sort.Strings(noms)
 	return noms
 }
+
+// L'organisation n'a pas de « .cohorte » : la première publication doit le
+// créer, et le créer déjà garni.
+//
+// Un dépôt sans aucun commit n'est pas un dépôt git pour GitHub, qui répond
+// « Git Repository is empty. » à qui vient y lire. Le faire naître avec son
+// premier commit évite cet état transitoire au lieu d'avoir à le traverser :
+// aucune requête ne part donc vers un dépôt vide.
+func TestLeDepotEstCreeDejaGarni(t *testing.T) {
+	state := fakegh.NewState()
+	serveur := fakegh.New(state)
+	t.Cleanup(serveur.Close)
+
+	// Toute requête adressée au registre est observée : si l'une d'elles part
+	// alors que le dépôt n'a pas de commit, le test doit le dire.
+	depot := "acme/" + registry.RepoName
+	var videAuPassage []string
+	var mutex sync.Mutex
+	state.Hook = func(request *http.Request) {
+		if !strings.Contains(request.URL.Path, "/"+registry.RepoName+"/") {
+			return
+		}
+		if state.HasCommits(depot) {
+			return
+		}
+		if _, existe := state.Repos[depot]; !existe {
+			return // le dépôt n'est pas encore né : c'est autre chose
+		}
+		mutex.Lock()
+		videAuPassage = append(videAuPassage, request.Method+" "+request.URL.Path)
+		mutex.Unlock()
+	}
+
+	store := registry.New(clientVers(t, serveur), "acme", nil)
+	if _, err := store.Apply(registry.Learn(personne("Émilie Côté", "ecote"))); err != nil {
+		t.Fatalf("première publication : %v", err)
+	}
+
+	if len(videAuPassage) > 0 {
+		t.Fatalf("requêtes vers un dépôt sans commit : %v", videAuPassage)
+	}
+	cree := state.Repos[depot]
+	if cree == nil || !cree.Private {
+		t.Fatalf("dépôt = %+v", cree)
+	}
+
+	// Ce qui explique le dépôt a pris la place du fichier que « auto_init »
+	// y avait déposé, plutôt que de s'ajouter à côté.
+	fichiers := state.Files(depot, registry.Branch)
+	if !strings.Contains(fichiers[registry.ReadmeFile], "gh cohorte") {
+		t.Fatalf("%s = %q", registry.ReadmeFile, fichiers[registry.ReadmeFile])
+	}
+	if !strings.Contains(fichiers[registry.StudentsFile], "Émilie Côté") {
+		t.Fatalf("registre = %q", fichiers[registry.StudentsFile])
+	}
+	if len(sortedNoms(fichiers)) != 2 {
+		t.Fatalf("le dépôt porte autre chose que ses deux fichiers : %v", sortedNoms(fichiers))
+	}
+}

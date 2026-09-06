@@ -231,6 +231,15 @@ func (s *State) CallCount(fragment string) int {
 	return count
 }
 
+// HasCommits dit si un dépôt porte au moins une branche. Un test s'en sert pour
+// vérifier qu'aucune écriture ne part vers un dépôt encore vide — l'état où
+// GitHub répond « Git Repository is empty. ».
+func (s *State) HasCommits(fullName string) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.hasCommitsLocked(fullName)
+}
+
 // AllCalls renvoie une copie du journal des appels.
 func (s *State) AllCalls() []string {
 	s.mutex.Lock()

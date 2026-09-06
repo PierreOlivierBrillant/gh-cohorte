@@ -189,8 +189,14 @@ func (s *Store) Apply(change Change) (*Set, error) {
 		if !bouge {
 			return snapshot.Set, nil
 		}
-		if err := s.ensureRepo(); err != nil {
+		cree, err := s.ensureRepo()
+		if err != nil {
 			return nil, err
+		}
+		if cree {
+			// Le dépôt vient de naître avec son premier commit : la tête
+			// relevée avant lui n'existait pas. On recommence, c'est tout.
+			continue
 		}
 		commit, err := s.commit(suivant, snapshot, change.message())
 		if err == nil {
@@ -240,30 +246,36 @@ func (s *Store) commit(set *Set, snapshot Snapshot, message string) (string, err
 	return commit, err
 }
 
-// ensureRepo s'assure que le dépôt du registre existe et qu'il est privé.
+// ensureRepo s'assure que le dépôt du registre existe et qu'il est privé. Le
+// booléen dit qu'il vient d'être créé.
+//
+// Il naît avec son premier commit — « auto_init ». Un dépôt sans aucun commit
+// n'est pas un dépôt git pour GitHub, qui répond « Git Repository is empty. »
+// à qui vient y lire ; le faire naître garni évite cet état transitoire au lieu
+// d'avoir à le traverser.
 //
 // Le registre porte des noms d'étudiants. Il est créé privé, et l'outil refuse
 // d'y écrire s'il a été rendu public : mieux vaut une écriture qui échoue
 // bruyamment qu'une liste de noms exposée sans que personne s'en aperçoive.
-func (s *Store) ensureRepo() error {
+func (s *Store) ensureRepo() (bool, error) {
 	repo, err := s.client.GetRepo(s.org, RepoName)
 	if err != nil {
-		return s.step("ouverture", err)
+		return false, s.step("ouverture", err)
 	}
 	if repo == nil {
 		if _, err := s.client.CreateOrgRepo(
-			s.org, RepoName, true, Description, false); err != nil {
-			return s.step("création", err)
+			s.org, RepoName, true, Description, true); err != nil {
+			return false, s.step("création", err)
 		}
-		return nil
+		return true, nil
 	}
 	if !repo.Private {
-		return valid.Errorf(
+		return false, valid.Errorf(
 			"Le dépôt « %s/%s » est public : il porte des noms d'étudiants et rien n'y "+
 				"sera écrit tant qu'il le restera. Repassez-le en privé dans ses réglages "+
 				"GitHub.", s.org, RepoName)
 	}
-	return nil
+	return false, nil
 }
 
 // ForgetHistory réécrit la branche du registre en un seul commit, sans passé.
@@ -342,7 +354,7 @@ func (s *Store) Grant(team string) error {
 	if strings.TrimSpace(team) == "" {
 		return valid.Errorf("Aucune équipe désignée.")
 	}
-	if err := s.ensureRepo(); err != nil {
+	if _, err := s.ensureRepo(); err != nil {
 		return err
 	}
 	return s.step("accès de l'équipe « "+team+" »",
