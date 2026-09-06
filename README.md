@@ -119,11 +119,18 @@ se lit sans connaître le pseudonyme de personne. En contrepartie, le nom comple
 est obligatoire et deux homonymes font échouer la préparation avant toute
 écriture.
 
-**GitHub reste la seule source de vérité** : sessions, cours, groupes, travaux
-et étudiants se lisent tous dans le nom des dépôts. Un groupe n'a rien à
-déclarer pour exister, et le fichier local ne retient que des choix déjà faits —
-la liste importée d'un CSV, les réglages du dernier travail — jamais une
-information qui ne serait pas déjà sur GitHub.
+**GitHub reste la seule source de vérité.** Sessions, cours, groupes et travaux
+se lisent dans le nom des dépôts : un groupe n'a rien à déclarer pour exister.
+
+Le dernier niveau, lui, est un nom slugifié — rien n'y dit à quel compte il
+appartient. C'est ce que retient le **registre** : un fichier unique dans un
+dépôt privé `.cohorte` de l'organisation, un nom complet par compte, écrit une
+fois pour tout le monde. Vos collègues voient donc les mêmes noms que vous sans
+rien avoir déclaré, et corriger une orthographe ne détache pas les dépôts créés
+sous l'ancienne. Les noms déjà accumulés sur un poste s'y versent en une fois
+(`gh cohorte --publish-registry`). Le fichier local ne garde plus que ce qui n'a
+de sens que sur cette machine : les groupes déclarés ici, les réglages du
+dernier travail.
 
 Une organisation en cours d'année n'a rien à renommer : les dépôts nommés
 autrement sont repérés par préfixe ou décrits par un gabarit
@@ -188,7 +195,10 @@ Les inventaires d'organisation sont mis en cache dans le répertoire du système
   dépôt exige d'en retaper le nom exact, et aucune option, `--yes` compris, ne
   court-circuite cette confirmation.
 - Les données d'étudiants (bilans, listes, clones) sont exclues du dépôt par le
-  `.gitignore`.
+  `.gitignore`. Le registre, lui, vit dans un dépôt privé de l'organisation :
+  l'outil refuse d'y écrire s'il devient public, signale une permission de base
+  qui l'ouvrirait aux étudiants membres, sait en donner l'accès à une équipe
+  enseignante et en réécrire l'historique.
 
 ## Options
 
@@ -226,10 +236,11 @@ Les tests montent un faux serveur GitHub local (`internal/fakegh`) et de vrais
 dépôts git locaux (`file://`) : rien ne sort de la machine.
 
 La logique vit dans les paquets du domaine — `internal/naming` (la
-nomenclature), `internal/classroom` (les groupes), `internal/plan`,
-`internal/groups`, `internal/roster`, `internal/students`, `internal/runner`,
-`internal/clone` — et les trois interfaces (`internal/web`, `internal/app`) n'en
-sont que des façades. C'est ce qui garantit qu'elles ne divergent pas.
+nomenclature), `internal/classroom` (les groupes), `internal/registry` (le
+registre des étudiants), `internal/plan`, `internal/groups`, `internal/roster`,
+`internal/students`, `internal/runner`, `internal/clone` — et les trois
+interfaces (`internal/web`, `internal/app`) n'en sont que des façades. C'est ce
+qui garantit qu'elles ne divergent pas.
 [`CLAUDE.md`](CLAUDE.md) énonce les règles à ne pas perdre de vue.
 
 Publication : pousser une étiquette `vX.Y.Z` déclenche le workflow
