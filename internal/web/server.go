@@ -176,6 +176,11 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/orgs", s.handleOrgs)
 	mux.HandleFunc("GET /api/orgs/{org}", s.handleOrg)
 
+	// --- étudiants de l'organisation
+	// L'annuaire traverse les groupes : une personne y a une seule ligne, quels
+	// que soient les cours et les sessions qu'elle a suivis.
+	mux.HandleFunc("GET /api/students", s.handleDirectory)
+
 	// --- groupes
 	// Un groupe se désigne par sa place — « a26.5n6.1010 » —, celle-là même qui
 	// est écrite dans le nom de chacun de ses dépôts.

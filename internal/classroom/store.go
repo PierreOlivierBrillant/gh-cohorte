@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -162,6 +163,33 @@ func (s *Store) List(org string) []Classroom {
 		return strings.ToLower(copie[i].Scope()) < strings.ToLower(copie[j].Scope())
 	})
 	return copie
+}
+
+// Visible rassemble les groupes d'une organisation : ceux qu'on a déclarés, et
+// ceux que les dépôts dessinent sans qu'on ait rien eu à déclarer. Un groupe
+// existe parce que ses dépôts existent ; le fichier local n'ajoute que ce
+// qu'eux ne savent pas dire.
+//
+// Les trois interfaces partent de cette liste : ce que l'une montre comme
+// groupe, les autres doivent le montrer aussi.
+func (s *Store) Visible(org string, repos []groups.RepoInfo, defauts Defaults) []Classroom {
+	declares := s.List(org)
+	vus := map[string]bool{}
+	for _, cours := range declares {
+		vus[NormalizeScope(cours.Scope())] = true
+	}
+	for _, place := range Places(repos) {
+		if vus[NormalizeScope(place)] {
+			continue
+		}
+		cours, err := AtScope(org, place, defauts)
+		if err != nil {
+			continue
+		}
+		vus[NormalizeScope(place)] = true
+		declares = append(declares, cours)
+	}
+	return declares
 }
 
 // Find retrouve un groupe par sa place dans une organisation. C'est la seule

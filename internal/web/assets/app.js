@@ -273,6 +273,15 @@ const etat = {
   // Ce que la liste d'un travail montre : les mêmes critères, appliqués aux
   // mêmes lignes — un dépôt par personne — par le même paquet du serveur.
   filtreTravail: { texte: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false },
+  // L'annuaire de l'organisation : ses lignes, ses critères, et qui est déplié.
+  annuaire: {
+    lignes: [],
+    filtre: {
+      texte: '', session: '', cours: '', activite: '', apres: '', avant: '',
+      tri: 'nom', desc: false,
+    },
+    deplies: new Set(),
+  },
   deplaces: new Set(),
   // Les travaux cochés dans la liste d'un groupe, pour les déplacer ensemble.
   travauxChoisis: new Set(),
@@ -471,6 +480,7 @@ function cheminDeLaVue(nom) {
   const groupe = etat.groupe ? encode(etat.groupe.scope) : '';
   switch (nom) {
     case 'organisation': return '/organisation';
+    case 'annuaire': return '/etudiants';
     case 'nouveau-groupe': return '/nouveau-groupe';
     case 'adoption': return '/adoption';
     case 'reglages': return '/reglages';
@@ -502,6 +512,8 @@ function lireAdresse() {
         vue: vueDuGroupe(morceaux[2]), groupe: morceaux[1] || '',
         travail: morceaux[3] || '',
       };
+    case 'etudiants':
+      return { vue: 'annuaire' };
     case 'nouveau-groupe': case 'adoption': case 'reglages': case 'organisation':
       return { vue: morceaux[0] };
     default:
@@ -589,6 +601,7 @@ function afficherVue(nom, sansHistorique) {
   // retour les redemande plutôt que de laisser voir un état périmé.
   if (nom === 'parcours') chargerGroupes();
   if (nom === 'reglages') rafraichirEmplacements();
+  if (nom === 'annuaire') chargerAnnuaire();
   if (nom === 'etudiants') chargerEtudiants();
   if (nom === 'groupe-reglages') ecrireReglagesGroupe();
 }
@@ -653,6 +666,9 @@ function ficheDeLEntete(nom) {
   if (nom === 'parcours') {
     const actions = [
       { texte: 'Recharger', action: () => chargerGroupes(true) },
+      // La hiérarchie mène aux étudiants d'un groupe ; l'annuaire les prend
+      // dans l'autre sens, et n'appartient donc à aucun niveau du parcours.
+      { texte: 'Étudiants', action: () => afficherVue('annuaire') },
       { texte: 'Nouveau groupe', classe: 'vert', action: () => ouvrirNouveauGroupe() },
     ];
     if (!session) {
@@ -675,6 +691,13 @@ function ficheDeLEntete(nom) {
     };
   }
 
+  if (nom === 'annuaire') {
+    return {
+      fil: [racine, { texte: 'Étudiants' }], titre: 'Étudiants',
+      sousTitre: `Organisation ${etat.organisation} · une personne, les cours qu'elle a suivis`,
+      actions: [{ texte: 'Recharger', action: () => chargerAnnuaire(true) }],
+    };
+  }
   if (nom === 'nouveau-groupe') {
     return { fil: [racine, { texte: 'Nouveau groupe' }], titre: 'Nouveau groupe',
       sousTitre: 'Des étudiants, une place dans la hiérarchie.' };
@@ -2471,6 +2494,193 @@ $('etudiants-importer').addEventListener('click', async () => {
   }
   await ouvrirGroupe(etat.groupe.scope);
   afficherVue('etudiants');
+});
+
+// ------------------------------------------- annuaire de l'organisation
+
+// La hiérarchie va de la session au groupe puis à ses étudiants : elle répond
+// à « qui est dans ce groupe ». L'annuaire prend le chemin inverse — une
+// personne par ligne, ses cours en face — et répond à « qu'a-t-elle suivi ».
+// C'est la seule vue où l'on voit quelqu'un revenir d'une session à l'autre :
+// deux listes de groupe montrent deux inscriptions, jamais la même personne.
+//
+// Le tri et le filtre partent au serveur, comme pour la liste d'un groupe :
+// c'est le même paquet qui décide de ce qu'ils veulent dire.
+
+function adresseAnnuaire(force) {
+  const filtre = etat.annuaire.filtre;
+  const parametres = new URLSearchParams();
+  if (filtre.texte) parametres.set('q', filtre.texte);
+  if (filtre.session) parametres.set('session', filtre.session);
+  if (filtre.cours) parametres.set('course', filtre.cours);
+  if (filtre.activite) parametres.set('activity', filtre.activite);
+  if (filtre.apres) parametres.set('after', filtre.apres);
+  if (filtre.avant) parametres.set('before', filtre.avant);
+  if (filtre.tri !== 'nom') parametres.set('sort', filtre.tri);
+  if (filtre.desc) parametres.set('desc', '1');
+  if (force) parametres.set('refresh', '1');
+  const suite = parametres.toString();
+  return `/api/students${suite ? '?' + suite : ''}`;
+}
+
+async function chargerAnnuaire(force) {
+  if (!etat.organisation) return;
+  const attente = attendreTable('annuaire-table', 'annuaire-vide',
+    'Chargement des étudiants…');
+  const donnees = await tenter(() => api('GET', adresseAnnuaire(force)), 'Étudiants');
+  if (!attente.fini(donnees, "L'annuaire n'a pas pu être chargé.")) return;
+  etat.annuaire.lignes = donnees.students || [];
+  etat.annuaire.deplies = new Set();
+
+  // Les sessions de l'annuaire servent aussi à nommer : « a26 » s'y lit
+  // « Automne 2026 » même si aucun groupe n'a encore été ouvert.
+  if (donnees.sessions && donnees.sessions.length) etat.sessions = donnees.sessions;
+  remplirSessionsDuFiltre(donnees.sessions || []);
+  if (remplirCoursDuFiltre(donnees.courses || [])) { chargerAnnuaire(force); return; }
+
+  dessinerAnnuaire();
+  resumerAnnuaire(donnees);
+  barreAnnuaire.maj();
+}
+
+// dessinerAnnuaire rend les lignes déjà chargées : déplier un étudiant ne
+// redemande rien au serveur, tout est là.
+function dessinerAnnuaire() {
+  const corps = $('annuaire-table').querySelector('tbody');
+  vider(corps);
+  $('annuaire-table').hidden = etat.annuaire.lignes.length === 0;
+  $('annuaire-vide').hidden = etat.annuaire.lignes.length > 0;
+  for (const ligne of etat.annuaire.lignes) {
+    corps.append(ligneAnnuaire(ligne));
+    if (etat.annuaire.deplies.has(ligne.username)) corps.append(depotsAnnuaire(ligne));
+  }
+}
+
+function ligneAnnuaire(ligne) {
+  return el('tr', {},
+    el('td', ligne.full_name
+      ? { texte: ligne.full_name }
+      : { classe: 'vide', texte: 'nom inconnu' }),
+    el('td', {}, el('code', { texte: '@' + ligne.username })),
+    el('td', {}, ligne.enrollments.length === 0
+      ? el('span', { classe: 'vide', texte: 'aucun cours' })
+      : el('span', { classe: 'etiquettes' },
+          ligne.enrollments.map((inscription) => el('button', {
+            classe: 'cours-suivi', type: 'button',
+            texte: jetonDuCours(inscription), title: titreDuCours(inscription),
+            onclick: () => ouvrirGroupe(inscription.scope),
+          })))),
+    el('td', {}, ligne.repos === 0
+      ? el('span', { classe: 'vide', texte: 'aucun' })
+      : el('button', {
+          classe: 'lien', type: 'button', texte: String(ligne.repos),
+          title: 'Voir ses dépôts',
+          onclick: () => {
+            if (etat.annuaire.deplies.has(ligne.username)) {
+              etat.annuaire.deplies.delete(ligne.username);
+            } else {
+              etat.annuaire.deplies.add(ligne.username);
+            }
+            dessinerAnnuaire();
+          },
+        })),
+    el('td', ligne.pushed_at ? { texte: ligne.pushed_at } : { classe: 'vide', texte: 'jamais' }));
+}
+
+function jetonDuCours(inscription) {
+  if (!inscription.session) return inscription.label;
+  return `${sigle(inscription.session)} · ${sigle(inscription.course)}`;
+}
+
+function titreDuCours(inscription) {
+  if (!inscription.session) return inscription.scope;
+  return `${inscription.session_name || inscription.session} · ${sigle(inscription.course)}` +
+    ` · groupe ${inscription.group}`;
+}
+
+// depotsAnnuaire déplie les dépôts d'une personne, rangés sous le groupe d'où
+// ils viennent : deux groupes peuvent avoir chacun leur « tp1 ».
+function depotsAnnuaire(ligne) {
+  // Les inscriptions arrivent déjà rangées, de la session la plus récente à
+  // la plus ancienne : c'est le serveur qui en décide, pour tout le monde.
+  const blocs = ligne.enrollments
+    .filter((inscription) => inscription.assignments.length > 0)
+    .map((inscription) => el('div', { classe: 'depots-du-cours' },
+      el('span', { classe: 'etiquette', texte: titreDuCours(inscription) }),
+      el('span', { classe: 'etiquettes' }, inscription.assignments.map((travail) =>
+        el('a', {
+          classe: 'jeton lien', href: travail.url,
+          target: '_blank', rel: 'noreferrer noopener',
+          texte: travail.name, title: travail.repo,
+        })))));
+  return el('tr', { classe: 'ligne-depliee' },
+    el('td', {}), el('td', { colspan: '4' }, el('div', { classe: 'depots' }, blocs)));
+}
+
+function resumerAnnuaire(donnees) {
+  const parts = [donnees.shown !== donnees.total
+    ? `${donnees.shown} étudiant(s) sur ${donnees.total}`
+    : `${donnees.total} étudiant(s)`];
+  parts.push(`${(donnees.sessions || []).length} session(s)`);
+  parts.push(`${(donnees.courses || []).length} cours`);
+  // Les dépôts que personne ne réclame ne sont pas des étudiants de plus :
+  // leur nom slugifié ne désigne aucune liste. Les taire ferait lire une
+  // liste trouée comme si elle était entière.
+  if (donnees.unmatched) parts.push(`${donnees.unmatched} dépôt(s) sans étudiant connu`);
+  $('annuaire-resume').textContent = parts.join(' · ');
+  $('annuaire-vide').textContent = donnees.total === 0
+    ? "Aucun étudiant connu dans cette organisation. Déclarez un groupe et importez sa liste."
+    : 'Aucun étudiant ne répond à ces critères.';
+}
+
+function remplirSessionsDuFiltre(liste) {
+  const choix = $('annuaire-session');
+  const retenue = etat.annuaire.filtre.session;
+  vider(choix);
+  choix.append(el('option', { value: '', texte: 'toutes' }));
+  for (const session of liste) {
+    choix.append(el('option', { value: session.short, texte: session.name }));
+  }
+  choix.value = liste.some((session) => session.short === retenue) ? retenue : '';
+  etat.annuaire.filtre.session = choix.value;
+}
+
+// remplirCoursDuFiltre suit la session choisie : les cours proposés sont les
+// siens. Un cours devenu impossible est effacé plutôt que laissé à filtrer une
+// liste vide — la fonction dit alors qu'il faut recharger.
+function remplirCoursDuFiltre(liste) {
+  const choix = $('annuaire-cours');
+  const retenu = etat.annuaire.filtre.cours;
+  vider(choix);
+  choix.append(el('option', { value: '', texte: 'tous' }));
+  for (const cours of liste) {
+    choix.append(el('option', { value: cours, texte: sigle(cours) }));
+  }
+  choix.value = liste.includes(retenu) ? retenu : '';
+  const efface = etat.annuaire.filtre.cours !== choix.value;
+  etat.annuaire.filtre.cours = choix.value;
+  return efface;
+}
+
+const barreAnnuaire = barreDeFiltre({
+  table: 'annuaire-table',
+  texte: 'annuaire-texte',
+  ouvrir: 'annuaire-filtre-ouvrir',
+  menu: 'annuaire-filtre-menu',
+  vider: 'annuaire-vider',
+  champs: [
+    ['annuaire-session', 'session'], ['annuaire-cours', 'cours'],
+    ['annuaire-activite', 'activite'],
+    ['annuaire-apres', 'apres'], ['annuaire-avant', 'avant'],
+  ],
+  criteres: () => etat.annuaire.filtre,
+  effacer: () => {
+    etat.annuaire.filtre = {
+      texte: '', session: '', cours: '', activite: '', apres: '', avant: '',
+      tri: 'nom', desc: false,
+    };
+  },
+  recharger: () => chargerAnnuaire(),
 });
 
 // -------------------------------------------------------- réglages du groupe

@@ -24,7 +24,10 @@ type Options struct {
 	Org             string
 	Manage          string // vide = choisir le groupe dans la liste
 	ManageRequested bool
-	Roster          string
+	// StudentsRequested ouvre l'annuaire : les étudiants de l'organisation
+	// entière, avec les cours que chacun a suivis.
+	StudentsRequested bool
+	Roster            string
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
@@ -87,6 +90,7 @@ Utilisation :
   gh cohorte                                  interface graphique dans le navigateur
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
+  gh cohorte --students --session a26         étudiants de la session a26
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
   gh cohorte --refresh-token --scopes delete_repo
@@ -96,6 +100,9 @@ Utilisation :
 Drapeaux :
   --org ORG                organisation GitHub cible
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
+  --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
+  --session COURT          ne lister que les étudiants d'une session (« a26 »)
+  --course SIGLE           ne lister que les étudiants d'un cours (« 5n6 »)
   --filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
   --pushed-after DATE      ne lister que les envois postérieurs à DATE (AAAA-MM-JJ)
   --pushed-before DATE     ne lister que les envois antérieurs à DATE
@@ -163,6 +170,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	delay := set.Float64("delay", -1, "marge entre deux créations")
 
 	set.StringVar(&options.Org, "org", "", "organisation GitHub cible")
+	set.BoolVar(&options.StudentsRequested, "students", false,
+		"lister les étudiants de l'organisation")
+	session := set.String("session", "", "ne lister qu'une session")
+	sigle := set.String("course", "", "ne lister qu'un cours")
 	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")
 	apres := set.String("pushed-after", "", "envois postérieurs à cette date")
 	avant := set.String("pushed-before", "", "envois antérieurs à cette date")
@@ -213,6 +224,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	// arrêter la ligne de commande, pas se perdre en cours de route.
 	options.Filter = students.Filter{
 		Text: *filtre, PushedAfter: *apres, PushedBefore: *avant,
+		Session: *session, Course: *sigle,
 	}
 	if *muets {
 		options.Filter.Activity = students.Silent

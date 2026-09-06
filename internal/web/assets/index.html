@@ -103,6 +103,67 @@
     </div>
   </section>
 
+  <!-- ------------------------------- annuaire : les étudiants de l'organisation -->
+  <!-- La hiérarchie descend jusqu'aux étudiants d'un groupe ; celle-ci les prend
+       à l'envers : une personne par ligne, et les cours qu'elle a suivis en
+       face. C'est la seule vue où l'on voit qu'elle est revenue. -->
+  <section id="vue-annuaire" class="vue" hidden>
+    <div class="boite">
+      <div class="boite-entete">
+        <span class="note" id="annuaire-resume"></span>
+        <span class="espace"></span>
+        <input type="search" id="annuaire-texte" class="champ recherche"
+          placeholder="Chercher un nom ou un compte">
+        <div class="menu-ancre">
+          <button type="button" id="annuaire-filtre-ouvrir" class="bouton"
+            aria-expanded="false" aria-controls="annuaire-filtre-menu">Filtrer</button>
+          <div class="menu-flottant" id="annuaire-filtre-menu" hidden>
+            <label class="champ-bloc">
+              <span class="etiquette">Session</span>
+              <select id="annuaire-session" class="champ"><option value="">toutes</option></select>
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">Cours</span>
+              <select id="annuaire-cours" class="champ"><option value="">tous</option></select>
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">Dépôts</span>
+              <select id="annuaire-activite" class="champ">
+                <option value="">tous</option>
+                <option value="avec">avec dépôt</option>
+                <option value="sans">sans dépôt</option>
+                <option value="muet">jamais d’envoi</option>
+              </select>
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">Dernier envoi après</span>
+              <input type="date" id="annuaire-apres" class="champ">
+            </label>
+            <label class="champ-bloc">
+              <span class="etiquette">… et avant</span>
+              <input type="date" id="annuaire-avant" class="champ">
+            </label>
+            <div class="menu-pied">
+              <button type="button" id="annuaire-vider" class="bouton petit">Tout effacer</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <table class="tableau triable" id="annuaire-table">
+        <thead><tr>
+          <th data-tri="nom"><button type="button">Étudiant<span class="fleche"></span></button></th>
+          <th data-tri="compte"><button type="button">Compte GitHub<span class="fleche"></span></button></th>
+          <th>Cours suivis</th>
+          <th class="etroit">Dépôts</th>
+          <th data-tri="envoi"><button type="button">Dernier envoi<span class="fleche"></span></button></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="boite-vide" id="annuaire-vide" hidden></div>
+    </div>
+  </section>
+
   <!-- --------------------------------------------- déclaration d'un groupe -->
   <section id="vue-nouveau-groupe" class="vue" hidden>
     <div class="boite">

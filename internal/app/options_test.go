@@ -183,6 +183,18 @@ func TestOptionsFiltreEtTriDeLaListe(t *testing.T) {
 	}
 }
 
+// L'annuaire se demande aussi en ligne de commande : ce que le navigateur pose
+// dans sa barre, un script le pose en drapeaux.
+func TestOptionsAnnuaire(t *testing.T) {
+	options := analyser(t, "--students", "--session", "a26", "--course", "5n6")
+	if !options.StudentsRequested {
+		t.Fatal("« --students » doit ouvrir l'annuaire")
+	}
+	if options.Filter.Session != "a26" || options.Filter.Course != "5n6" {
+		t.Fatalf("filtre : %+v", options.Filter)
+	}
+}
+
 func TestParseRenouvellementDuJeton(t *testing.T) {
 	options := analyser(t, "--refresh-token", "--scopes", "workflow,delete_repo")
 	if !options.RefreshToken || options.Scopes != "workflow,delete_repo" {
