@@ -92,74 +92,131 @@
 
   <!-- ----------------------------------------------- reprise de dépôts -->
   <!-- Des dépôts qu'une autre convention a nommés — « travail-compte », ce que
-       GitHub Classroom produit. L'écran suit l'ordre des questions : quels
-       travaux sont là, qui est derrière chaque compte, où cela doit arriver. -->
+       GitHub Classroom produit. Les étapes sont empilées et repliées : une
+       seule est ouverte à la fois, et la page ne s'allonge donc pas avec le
+       nombre d'étudiants. Les longues listes défilent chez elles. -->
   <section id="vue-import" class="vue" hidden>
-    <div class="boite">
-      <div class="boite-entete"><strong>1. Le travail à reprendre</strong></div>
-      <div class="boite-corps">
-        <p class="note" id="import-resume"></p>
-        <div id="import-travaux" class="cases-travaux"></div>
-      </div>
-    </div>
+    <ol class="stepper" id="import-stepper">
 
-    <div class="boite">
-      <div class="boite-entete"><strong>2. La liste des étudiants</strong></div>
-      <div class="boite-corps">
-        <details id="import-aide">
-          <summary>Où prendre cette liste dans Omnivox ?</summary>
-          <pre class="aide-omnivox" id="import-aide-texte"></pre>
-        </details>
-        <label class="champ-bloc">
-          <span class="etiquette">Fichier de la liste</span>
-          <span class="ligne-champ">
-            <input type="text" id="import-liste" class="champ"
-              placeholder="ListeEtudiants_cours…_gr….csv">
-            <button type="button" class="bouton" data-parcourir="import-liste"
-              data-titre="Choisir la liste des étudiants">Parcourir…</button>
-          </span>
-        </label>
-      </div>
-    </div>
-
-    <div class="boite">
-      <div class="boite-entete"><strong>3. La place d'arrivée</strong></div>
-      <div class="boite-corps">
-        <div class="ligne-champs">
-          <label class="champ-bloc etroit-champ">
-            <span class="etiquette">Session</span>
-            <input type="text" id="import-session" class="champ" placeholder="a26">
-          </label>
-          <label class="champ-bloc etroit-champ">
-            <span class="etiquette">Cours</span>
-            <input type="text" id="import-cours" class="champ" placeholder="5N6">
-          </label>
-          <label class="champ-bloc etroit-champ">
-            <span class="etiquette">Groupe</span>
-            <input type="text" id="import-groupe" class="champ" placeholder="1030">
-          </label>
-          <label class="champ-bloc etroit-champ">
-            <span class="etiquette">Nom du travail à l'arrivée</span>
-            <input type="text" id="import-nom" class="champ">
-          </label>
+      <li class="etape" data-etape="travail">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">1</span>
+          <span class="etape-titre">Le travail à reprendre</span>
+          <span class="etape-resume" id="resume-travail"></span>
+        </button>
+        <div class="etape-corps">
+          <p class="note" id="import-resume"></p>
+          <div id="import-travaux" class="liste-choix"></div>
         </div>
-      </div>
-      <div class="boite-pied">
-        <button type="button" id="import-apercu" class="bouton">Voir ce qui serait repris</button>
-        <span class="note" id="import-etat"></span>
-      </div>
-    </div>
+      </li>
 
-    <div class="boite" id="import-plan" hidden>
-      <div class="boite-entete"><strong>4. Ce qui sera repris</strong></div>
-      <div class="boite-corps">
-        <div id="import-avis" class="avis-pile"></div>
-        <div id="import-detail"></div>
-      </div>
-      <div class="boite-pied">
-        <button type="button" id="import-appliquer" class="bouton vert">Reprendre ces dépôts</button>
-      </div>
-    </div>
+      <li class="etape" data-etape="liste">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">2</span>
+          <span class="etape-titre">La liste des étudiants</span>
+          <span class="etape-resume" id="resume-liste"></span>
+        </button>
+        <div class="etape-corps">
+          <details id="import-aide">
+            <summary>Où prendre cette liste dans Omnivox ?</summary>
+            <pre class="aide-omnivox" id="import-aide-texte"></pre>
+          </details>
+          <div class="depot" data-depot data-titre="Choisir la liste des étudiants"
+            tabindex="0" role="button">
+            <input type="hidden" id="import-liste">
+            <span class="depot-texte"></span>
+          </div>
+        </div>
+      </li>
+
+      <li class="etape" data-etape="place">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">3</span>
+          <span class="etape-titre">La place d'arrivée</span>
+          <span class="etape-resume" id="resume-place"></span>
+        </button>
+        <div class="etape-corps">
+          <div class="ligne-champs">
+            <label class="champ-bloc etroit-champ">
+              <span class="etiquette">Session</span>
+              <input type="text" id="import-session" class="champ" placeholder="a26">
+            </label>
+            <label class="champ-bloc etroit-champ">
+              <span class="etiquette">Cours</span>
+              <input type="text" id="import-cours" class="champ" placeholder="5N6">
+            </label>
+            <label class="champ-bloc etroit-champ">
+              <span class="etiquette">Groupe</span>
+              <input type="text" id="import-groupe" class="champ" placeholder="1030">
+            </label>
+            <label class="champ-bloc etroit-champ">
+              <span class="etiquette">Nom du travail à l'arrivée</span>
+              <input type="text" id="import-nom" class="champ">
+            </label>
+          </div>
+          <div class="actions">
+            <button type="button" id="import-apercu" class="bouton">Vérifier</button>
+            <span class="note" id="import-etat"></span>
+          </div>
+        </div>
+      </li>
+
+      <li class="etape" data-etape="verifier">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">4</span>
+          <span class="etape-titre">Vérifier les rapprochements</span>
+          <span class="etape-resume" id="resume-verifier"></span>
+        </button>
+        <div class="etape-corps">
+          <div id="import-avis" class="avis-pile"></div>
+          <div class="barre-filtre">
+            <label class="case"><input type="checkbox" id="import-filtre">
+              <span>N'afficher que ce qui reste à vérifier</span></label>
+            <span class="note" id="import-compte"></span>
+          </div>
+          <!-- Le tableau défile chez lui : la page garde la même hauteur, que
+               le groupe compte cinq personnes ou cinquante. -->
+          <div class="tableau-defile">
+            <table class="tableau" id="import-rapprochements">
+              <thead><tr>
+                <th>Compte GitHub</th><th>Étudiant</th><th>Reconnu par</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="note">Les dépôts prendront le <strong>nom complet</strong> de
+            l'étudiant. Un compte laissé sans personne gardera le sien.</p>
+          <!-- Le renommage découle du tableau du dessus : il se vérifie d'un
+               coup d'œil quand on veut, pas à chaque correction. -->
+          <details>
+            <summary>Voir les noms que les dépôts prendront</summary>
+            <div class="tableau-defile court">
+              <table class="tableau" id="import-renommages">
+                <thead><tr><th>Dépôt</th><th>Deviendra</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </details>
+          <div class="actions">
+            <button type="button" id="import-appliquer" class="bouton vert">
+              Reprendre ces dépôts</button>
+          </div>
+        </div>
+      </li>
+
+      <li class="etape" data-etape="journal">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">5</span>
+          <span class="etape-titre">Journal</span>
+          <span class="etape-resume" id="resume-journal"></span>
+        </button>
+        <div class="etape-corps">
+          <progress id="import-barre" max="100" value="0"></progress>
+          <div class="journal" id="import-journal"></div>
+        </div>
+      </li>
+
+    </ol>
   </section>
 
   <!-- ------------------------------- annuaire : les étudiants de l'organisation -->
@@ -259,12 +316,12 @@
       <div class="boite-corps">
         <label class="champ-bloc">
           <span class="etiquette">Fichier CSV de la machine</span>
+          <div class="depot" data-depot data-titre="Choisir la liste des étudiants"
+            tabindex="0" role="button">
+            <input type="hidden" id="nouveau-chemin">
+            <span class="depot-texte"></span>
+          </div>
           <span class="ligne-champ">
-            <input type="text" id="nouveau-chemin" class="champ" placeholder="cohorte.csv"
-              list="suggestions-roster">
-            <datalist id="suggestions-roster"></datalist>
-            <button type="button" class="bouton" data-parcourir="nouveau-chemin"
-              data-titre="Choisir la liste des étudiants">Parcourir…</button>
             <button type="button" id="nouveau-charger" class="bouton">Charger</button>
           </span>
         </label>
@@ -462,11 +519,12 @@
 
         <label class="champ-bloc">
           <span class="etiquette">Dossier de fichiers de départ</span>
+          <div class="depot" data-depot data-dossier="1"
+            data-titre="Choisir le dossier de départ" tabindex="0" role="button">
+            <input type="hidden" id="reglage-starter">
+            <span class="depot-texte"></span>
+          </div>
           <span class="ligne-champ">
-            <input type="text" id="reglage-starter" class="champ" list="suggestions-starter">
-            <datalist id="suggestions-starter"></datalist>
-            <button type="button" class="bouton" data-parcourir="reglage-starter"
-              data-dossier="1" data-titre="Choisir le dossier de départ">Parcourir…</button>
             <button type="button" id="starter-inspecter" class="bouton">Inspecter</button>
           </span>
           <span class="aide">Un dossier de cette machine, déposé dans chaque dépôt en un seul commit.</span>
@@ -759,11 +817,11 @@
         </label>
         <label class="champ-bloc">
           <span class="etiquette">Dossier des clones</span>
-          <span class="ligne-champ">
-            <input type="text" id="reglage-clone-dir" class="champ" placeholder=".">
-            <button type="button" class="bouton" data-parcourir="reglage-clone-dir"
-              data-dossier="1" data-titre="Choisir le dossier des clones">Parcourir…</button>
-          </span>
+          <div class="depot" data-depot data-dossier="1"
+            data-titre="Choisir le dossier des clones" tabindex="0" role="button">
+            <input type="hidden" id="reglage-clone-dir">
+            <span class="depot-texte"></span>
+          </div>
           <span class="aide">Là où « Cloner » proposera de déposer les dépôts.</span>
         </label>
         <p class="note" id="reglages-selecteur"></p>

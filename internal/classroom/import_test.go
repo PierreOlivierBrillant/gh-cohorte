@@ -57,7 +57,8 @@ func TestDepotsHorsNomenclatureEtLeursTravaux(t *testing.T) {
 func TestImportRapprocheEtRenomme(t *testing.T) {
 	inventaire := depots("tp1-ladamlarocque", "tp1-felixbourassa", "tp1-lyonnais")
 
-	plan, err := classroom.PlanImport(arrivee(), "tp1", "tp1", inscrits(), nil, inventaire)
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Name: "tp1", Entries: inscrits(), Guess: true}, inventaire)
 	if err != nil {
 		t.Fatalf("plan refusé : %v", err)
 	}
@@ -90,8 +91,9 @@ func TestImportRapprocheEtRenomme(t *testing.T) {
 // corriger « tp1-final-v2 » ne coûte rien.
 func TestImportPeutRenommerLeTravail(t *testing.T) {
 	inventaire := depots("projet-final-lyonnais")
-	plan, err := classroom.PlanImport(arrivee(), "projet-final", "Projet final",
-		inscrits(), nil, inventaire)
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "projet-final", Name: "Projet final", Entries: inscrits(), Guess: true},
+		inventaire)
 	if err != nil {
 		t.Fatalf("plan refusé : %v", err)
 	}
@@ -108,7 +110,8 @@ func TestUneListeQuiDitLesComptesNeSeDevinePas(t *testing.T) {
 		{FullName: "Étienne Lyonnais", StudentID: "1983429", Username: "xkcd42"},
 		{FullName: "Félix Bourassa", StudentID: "2143020"},
 	}
-	plan, err := classroom.PlanImport(arrivee(), "tp1", "tp1", dits, nil, inventaire)
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Name: "tp1", Entries: dits, Guess: true}, inventaire)
 	if err != nil {
 		t.Fatalf("plan refusé : %v", err)
 	}
@@ -125,11 +128,13 @@ func TestUneListeQuiDitLesComptesNeSeDevinePas(t *testing.T) {
 	}
 }
 
-// Un dépôt dont le compte ne mène à personne reste où il est, et le plan le
-// nomme : une liste trouée qu'on prend pour entière égare.
-func TestUnDepotSansPersonneResteEnPlace(t *testing.T) {
+// Un dépôt dont le compte ne mène à personne garde ce compte comme dernier
+// niveau : on ne peut pas lui inventer un nom, et le laisser derrière ferait un
+// travail à moitié importé. Le plan le nomme, pour qu'on puisse le corriger.
+func TestUnDepotSansPersonneGardeSonCompte(t *testing.T) {
 	inventaire := depots("tp1-lyonnais", "tp1-visiteur-anonyme-42")
-	plan, err := classroom.PlanImport(arrivee(), "tp1", "tp1", inscrits(), nil, inventaire)
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Name: "tp1", Entries: inscrits(), Guess: true}, inventaire)
 	if err != nil {
 		t.Fatalf("plan refusé : %v", err)
 	}
@@ -152,8 +157,30 @@ func TestUnDepotSansPersonneResteEnPlace(t *testing.T) {
 // Un préfixe qui ne désigne aucun dépôt se refuse plutôt que de rendre un plan
 // vide qu'on prendrait pour un succès.
 func TestUnPrefixeSansDepotEstRefuse(t *testing.T) {
-	if _, err := classroom.PlanImport(arrivee(), "absent", "tp1",
-		inscrits(), nil, depots("tp1-lyonnais")); err == nil {
+	if _, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "absent", Name: "tp1", Entries: inscrits(), Guess: true},
+		depots("tp1-lyonnais")); err == nil {
 		t.Fatal("un préfixe sans dépôt doit être refusé")
+	}
+}
+
+// Sans rapprochement, les comptes que la liste ne nomme pas restent sans
+// réponse : c'est ce qu'on a décidé à l'écran, et redeviner le déferait.
+func TestSansRapprochementRienNEstDevine(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-lyonnais")
+	corrige := []roster.Entry{
+		{FullName: "Étienne Lyonnais", Username: "tp1-inexistant"},
+	}
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Name: "tp1", Entries: corrige}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(plan.Unmatched) != 2 {
+		t.Fatalf("des comptes ont été devinés : %+v", plan.Pairings)
+	}
+	// L'ordre des dépôts est tenu même quand rien n'est reconnu.
+	if len(plan.Pairings) != 2 || plan.Pairings[0].Login != "ladamlarocque" {
+		t.Fatalf("rapprochements = %+v", plan.Pairings)
 	}
 }

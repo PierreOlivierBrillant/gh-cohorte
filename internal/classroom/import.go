@@ -73,14 +73,31 @@ type Import struct {
 // Ready dit qu'il y a quelque chose à écrire.
 func (i Import) Ready() bool { return len(i.Moves) > 0 }
 
+// ImportRequest décrit ce qu'on veut reprendre.
+type ImportRequest struct {
+	// Prefix est le travail tel que les dépôts le portent, Name celui qu'il
+	// prendra à l'arrivée.
+	Prefix string
+	Name   string
+	// Entries est la liste du groupe. Une entrée qui porte un compte le dit ;
+	// les autres restent à rapprocher.
+	Entries []roster.Entry
+	// Profiles associe un compte au nom affiché de son profil GitHub. C'est
+	// l'indice le plus sûr après le numéro d'étudiant ; il peut être nil.
+	Profiles map[string]string
+	// Guess autorise le rapprochement des comptes que la liste ne nomme pas.
+	//
+	// Une fois qu'on a corrigé un rapprochement à l'écran, non : le jugement
+	// rendu doit tenir, y compris quand il consiste à ne rapprocher personne.
+	// Redeviner alors déferait ce qu'on vient de décider.
+	Guess bool
+}
+
 // PlanImport compose l'importation d'un travail : le rapprochement d'abord, le
 // renommage ensuite.
-//
-// La liste tranche quand elle porte les comptes : on ne rapproche que ce qu'elle
-// laisse en blanc. Les profils GitHub — compte vers nom affiché — aident le
-// rapprochement quand on les connaît, et peuvent être nils.
-func PlanImport(arrivee Classroom, prefix, name string, entries []roster.Entry,
-	profiles map[string]string, repos []groups.RepoInfo) (Import, error) {
+func PlanImport(arrivee Classroom, demande ImportRequest,
+	repos []groups.RepoInfo) (Import, error) {
+	prefix, name, entries := demande.Prefix, demande.Name, demande.Entries
 	groupe := groups.Build(prefix, repos)
 	if groupe.Len() == 0 {
 		return Import{}, valid.Errorf("Aucun dépôt ne commence par « %s ».", prefix)
@@ -93,7 +110,7 @@ func PlanImport(arrivee Classroom, prefix, name string, entries []roster.Entry,
 	for _, depot := range groupe.Repos {
 		comptes = append(comptes, depot.Suffix)
 	}
-	rapprochements := pair(entries, comptes, profiles)
+	rapprochements := pair(entries, comptes, demande.Profiles, demande.Guess)
 
 	plan := Import{Prefix: groupe.Prefix, Name: name, Scope: arrivee.Scope(),
 		Pairings: rapprochements}
@@ -130,7 +147,7 @@ func PlanImport(arrivee Classroom, prefix, name string, entries []roster.Entry,
 // n'est jamais deviné : seuls les comptes qu'elle laisse en blanc passent par
 // le rapprochement, et les personnes déjà prises n'y sont plus candidates.
 func pair(entries []roster.Entry, logins []string,
-	profiles map[string]string) []roster.Pairing {
+	profiles map[string]string, guess bool) []roster.Pairing {
 	parCompte := map[string]roster.Entry{}
 	for _, entree := range entries {
 		if compte := strings.ToLower(strings.TrimSpace(entree.Username)); compte != "" {
@@ -150,8 +167,13 @@ func pair(entries []roster.Entry, logins []string,
 		}
 		reste = append(reste, login)
 	}
-	if len(reste) == 0 {
-		return rapprochements
+	if len(reste) == 0 || !guess {
+		// Sans rapprochement, les comptes que la liste ne nomme pas restent
+		// sans réponse : c'est ce que la personne a décidé.
+		for _, login := range reste {
+			rapprochements = append(rapprochements, roster.Pairing{Login: login})
+		}
+		return ordonner(rapprochements, logins)
 	}
 
 	libres := make([]roster.Entry, 0, len(entries))
@@ -162,10 +184,14 @@ func pair(entries []roster.Entry, logins []string,
 	}
 	devines := roster.Match(libres, reste, profiles)
 
-	// L'ordre rendu suit celui des dépôts, pour que la revue se lise dans le
-	// même ordre que la liste des dépôts qu'on est en train de regarder.
+	return ordonner(append(rapprochements, devines...), logins)
+}
+
+// ordonner range les rapprochements dans l'ordre des dépôts, pour que la revue
+// se lise dans le même ordre que ce qu'on est en train de regarder.
+func ordonner(rapprochements []roster.Pairing, logins []string) []roster.Pairing {
 	parLogin := map[string]roster.Pairing{}
-	for _, trouve := range append(rapprochements, devines...) {
+	for _, trouve := range rapprochements {
 		parLogin[trouve.Login] = trouve
 	}
 	ordonnes := make([]roster.Pairing, 0, len(logins))

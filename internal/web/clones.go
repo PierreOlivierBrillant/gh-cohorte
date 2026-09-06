@@ -6,32 +6,9 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/clone"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
-
-// handleSuggestPath complète un chemin saisi dans l'interface, comme le fait la
-// tabulation au terminal.
-func (s *Server) handleSuggestPath(writer http.ResponseWriter, request *http.Request) {
-	var body struct {
-		Path string `json:"path"`
-		Dirs bool   `json:"dirs"`
-	}
-	if err := decode(request, &body); err != nil {
-		fail(writer, err)
-		return
-	}
-	mode := complete.Path
-	if body.Dirs {
-		mode = complete.Dir
-	}
-	suggestions := complete.Suggest(body.Path, mode)
-	if suggestions == nil {
-		suggestions = []string{}
-	}
-	writeJSON(writer, http.StatusOK, map[string]any{"suggestions": suggestions})
-}
 
 // handleFindClones liste les dépôts git présents sous un dossier.
 func (s *Server) handleFindClones(writer http.ResponseWriter, request *http.Request) {

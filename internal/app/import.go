@@ -1,6 +1,7 @@
 package app
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
@@ -69,12 +70,24 @@ func (i *importSession) run() (int, error) {
 	if err != nil {
 		return ExitValidation, err
 	}
-	plan, err := classroom.PlanImport(arrivee, prefixe, nom, entrees,
-		i.profils(prefixe, repos), repos)
+	plan, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
+		Prefix: prefixe, Name: nom, Entries: entrees,
+		Profiles: i.profils(prefixe, repos), Guess: true,
+	}, repos)
 	if err != nil {
 		return ExitValidation, err
 	}
 	i.montrer(plan)
+
+	// Une ressemblance douteuse se tranche ici, avant que quoi que ce soit ne
+	// soit écrit : c'est le moment où cela ne coûte rien.
+	if i.session.Interactive() && !i.session.Options.Yes {
+		corrige, err := i.corriger(arrivee, plan, repos)
+		if err != nil {
+			return ExitOK, err
+		}
+		plan = corrige
+	}
 
 	if i.session.Options.DryRun {
 		console.Blank()
@@ -292,4 +305,124 @@ func (i *importSession) appliquer(arrivee classroom.Classroom,
 	}
 	console.Success("%d dépôt(s) repris dans « %s ».", renommes, arrivee.Scope())
 	return ExitOK, nil
+}
+
+// --- corriger un rapprochement
+
+// personneRetenue marque le choix de ne rapprocher personne. Une valeur vide
+// dirait « revenir », et ce n'est pas la même décision.
+const personneRetenue = "\x00personne"
+
+// corriger laisse trancher à la main ce que le rapprochement a deviné.
+//
+// C'est le même jugement que l'interface web rend au même moment. Sans lui, le
+// terminal ne saurait que tout accepter ou tout refuser, alors qu'une seule
+// ressemblance douteuse suffit à gâcher un import.
+func (i *importSession) corriger(arrivee classroom.Classroom, plan classroom.Import,
+	repos []groups.RepoInfo) (classroom.Import, error) {
+	console := i.session.Console
+
+	// Tout ce que la liste portait : ceux qu'un dépôt a trouvés, et ceux
+	// qu'aucun ne concerne. Les deux ensemble font le groupe.
+	noms := append([]string{}, plan.Absent...)
+	retenus := map[string]string{}
+	for _, trouve := range plan.Pairings {
+		if trouve.Found() {
+			noms = append(noms, trouve.Entry.FullName)
+			retenus[trouve.Login] = trouve.Entry.FullName
+		}
+	}
+	sort.Strings(noms)
+
+	for {
+		suite, err := i.session.Prompt.Confirm("Corriger un rapprochement ?", false)
+		if err != nil || !suite {
+			return plan, err
+		}
+		login, err := i.session.Prompt.Choose("Compte à corriger",
+			comptesACorriger(plan, retenus), "")
+		if err != nil || login == "" {
+			return plan, err
+		}
+		nom, err := i.session.Prompt.Choose("Étudiant pour @"+login,
+			etudiantsLibres(noms, retenus, login), retenus[login])
+		if err != nil {
+			return plan, err
+		}
+		if nom == "" {
+			continue
+		}
+
+		delete(retenus, login)
+		if nom != personneRetenue {
+			// Un nom ne peut désigner qu'un compte : le donner ici le retire
+			// de là où il était.
+			for autre, porte := range retenus {
+				if porte == nom {
+					delete(retenus, autre)
+				}
+			}
+			retenus[login] = nom
+		}
+
+		// Le plan est refait sans rien redeviner : le jugement rendu doit
+		// tenir, y compris quand il consiste à ne rapprocher personne.
+		refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
+			Prefix: plan.Prefix, Name: plan.Name,
+			Entries: entreesRetenues(noms, retenus),
+		}, repos)
+		if err != nil {
+			return plan, err
+		}
+		plan = refait
+		console.Blank()
+		i.montrer(plan)
+	}
+}
+
+// comptesACorriger énumère les dépôts et ce à quoi ils mènent pour l'instant.
+func comptesACorriger(plan classroom.Import, retenus map[string]string) []ui.Option {
+	options := make([]ui.Option, 0, len(plan.Pairings)+1)
+	for _, trouve := range plan.Pairings {
+		nom := retenus[trouve.Login]
+		if nom == "" {
+			nom = "personne"
+		}
+		options = append(options, ui.Option{
+			Value: trouve.Login, Label: "@" + trouve.Login + " → " + nom,
+		})
+	}
+	return append(options, ui.Option{Value: "", Label: "Terminer"})
+}
+
+// etudiantsLibres ne propose que ce qui reste : une personne déjà donnée à un
+// autre compte ne peut pas l'être deux fois.
+func etudiantsLibres(noms []string, retenus map[string]string, login string) []ui.Option {
+	pris := map[string]bool{}
+	for autre, nom := range retenus {
+		if autre != login {
+			pris[nom] = true
+		}
+	}
+	options := []ui.Option{{Value: personneRetenue, Label: "— personne —"}}
+	for _, nom := range noms {
+		if !pris[nom] {
+			options = append(options, ui.Option{Value: nom, Label: nom})
+		}
+	}
+	return append(options, ui.Option{Value: "", Label: "Revenir"})
+}
+
+// entreesRetenues rend la liste telle que les corrections l'ont laissée : un
+// nom par personne, et le compte qu'on lui a donné.
+func entreesRetenues(noms []string, retenus map[string]string) []roster.Entry {
+	parNom := map[string]string{}
+	for login, nom := range retenus {
+		parNom[nom] = login
+	}
+	liste := make([]roster.Entry, 0, len(noms))
+	for _, nom := range noms {
+		liste = append(liste, roster.Entry{FullName: nom, Username: parNom[nom]})
+	}
+	return liste
 }

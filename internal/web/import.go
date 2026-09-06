@@ -24,9 +24,14 @@ type importInput struct {
 	Name   string `json:"name"`
 	// Scope est la place d'arrivée : « a26.5n6.1030 ».
 	Scope string `json:"scope"`
-	// Path est le fichier de la liste ; People la remplace quand la personne a
-	// corrigé un rapprochement à l'écran.
-	Path   string          `json:"path"`
+	// Path est le fichier de la liste, Content ses octets quand elle a été
+	// déposée dans la page — un navigateur ne donne jamais le chemin d'un
+	// fichier déposé, mais il en donne le contenu.
+	Path    string `json:"path"`
+	Content []byte `json:"content"`
+	// People remplace la liste quand un rapprochement a été corrigé à l'écran.
+	// Sa présence dit aussi que plus rien ne doit être deviné : le jugement
+	// rendu tient, y compris quand il consiste à ne rapprocher personne.
 	People []roster.Person `json:"people"`
 }
 
@@ -65,27 +70,49 @@ func (s *Server) importPlan(org string, body importInput) (
 		return classroom.Import{}, vide, err
 	}
 
-	entrees := make([]roster.Entry, 0, len(body.People))
-	for _, personne := range body.People {
-		entrees = append(entrees, roster.Entry{
-			FullName: personne.FullName, Username: personne.Username,
-		})
+	entrees, deviner, err := s.entries(body)
+	if err != nil {
+		return classroom.Import{}, vide, err
 	}
-	if len(entrees) == 0 {
-		liste, err := roster.Load(body.Path)
-		if err != nil {
-			return classroom.Import{}, vide, err
+	demande := classroom.ImportRequest{
+		Prefix: body.Prefix, Name: body.Name, Entries: entrees, Guess: deviner,
+	}
+	if deviner {
+		demande.Profiles = s.profiles(org, body.Prefix, repos)
+	}
+	plan, err := classroom.PlanImport(arrivee, demande, repos)
+	return plan, arrivee, err
+}
+
+// entries rend la liste du groupe et dit s'il reste quelque chose à deviner.
+func (s *Server) entries(body importInput) ([]roster.Entry, bool, error) {
+	if len(body.People) > 0 {
+		entrees := make([]roster.Entry, 0, len(body.People))
+		for _, personne := range body.People {
+			entrees = append(entrees, roster.Entry{
+				FullName: personne.FullName, Username: personne.Username,
+			})
 		}
-		if len(liste.Entries) == 0 {
-			return classroom.Import{}, vide, valid.Errorf(
-				"Aucun étudiant dans « %s ».", body.Path)
-		}
-		entrees = liste.Entries
+		return entrees, false, nil
 	}
 
-	plan, err := classroom.PlanImport(arrivee, body.Prefix, body.Name, entrees,
-		s.profiles(org, body.Prefix, repos), repos)
-	return plan, arrivee, err
+	liste := roster.Roster{}
+	switch {
+	case len(body.Content) > 0:
+		liste = roster.ParseBytes(body.Content)
+	case strings.TrimSpace(body.Path) != "":
+		lue, err := roster.Load(body.Path)
+		if err != nil {
+			return nil, false, err
+		}
+		liste = lue
+	default:
+		return nil, false, valid.Errorf("Aucune liste d'étudiants n'a été fournie.")
+	}
+	if len(liste.Entries) == 0 {
+		return nil, false, valid.Errorf("Aucun étudiant dans la liste fournie.")
+	}
+	return liste.Entries, true, nil
 }
 
 // handleImportPreview montre le renommage sans rien écrire.

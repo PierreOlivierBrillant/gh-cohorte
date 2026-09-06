@@ -294,9 +294,17 @@ const etat = {
 // ------------------------------------------------------- opérations et journal
 
 let operationCourante = null;
+// Un écran qui a son propre journal le dit ici, et l'opération s'y écrit aussi.
+// C'est le cas de la reprise de dépôts : sa dernière étape est ce journal, et
+// l'envoyer dans le panneau global seul obligerait à quitter l'écran des yeux.
+let miroirOperation = null;
 
 function ouvrirOperation(fiche) {
   operationCourante = fiche;
+  if (miroirOperation) {
+    vider(miroirOperation.journal);
+    miroirOperation.barre.value = 0;
+  }
   $('operation').hidden = false;
   $('operation-titre').textContent = fiche.label;
   $('operation-etat').textContent = fiche.status;
@@ -306,16 +314,21 @@ function ouvrirOperation(fiche) {
 }
 
 function journaliser(texte, ton = '') {
-  const journal = $('operation-journal');
-  journal.append(el('div', { classe: ton, texte }));
-  journal.scrollTop = journal.scrollHeight;
+  for (const journal of [$('operation-journal'),
+    miroirOperation && miroirOperation.journal]) {
+    if (!journal) continue;
+    journal.append(el('div', { classe: ton, texte }));
+    journal.scrollTop = journal.scrollHeight;
+  }
 }
 
 function appliquerEvenement(evenement) {
   switch (evenement.kind) {
     case 'avancement':
       if (evenement.total > 0) {
-        $('operation-barre').value = Math.round((evenement.done / evenement.total) * 100);
+        const part = Math.round((evenement.done / evenement.total) * 100);
+        $('operation-barre').value = part;
+        if (miroirOperation) miroirOperation.barre.value = part;
         $('operation-etat').textContent = `${evenement.done} / ${evenement.total}`;
       }
       break;
@@ -329,8 +342,12 @@ function appliquerEvenement(evenement) {
       const fin = evenement.data || {};
       $('operation-etat').textContent = fin.status || 'terminé';
       $('operation-annuler').hidden = true;
-      if (fin.failure) journaliser(fin.failure, 'err');
-      else $('operation-barre').value = 100;
+      if (fin.failure) {
+        journaliser(fin.failure, 'err');
+      } else {
+        $('operation-barre').value = 100;
+        if (miroirOperation) miroirOperation.barre.value = 100;
+      }
       // Une opération arrêtée faute de portée ne se rejoue pas toute seule :
       // une partie a pu aboutir, et c'est à la personne de dire ce qu'elle
       // relance. Le jeton, lui, peut être refait tout de suite.
@@ -356,7 +373,8 @@ function tonDuResultat(donnees) {
 
 // suivre branche le panneau de progression sur une opération et attend sa fin ;
 // la promesse rend son bilan, ou rien si elle a échoué.
-function suivre(fiche) {
+function suivre(fiche, miroir = null) {
+  miroirOperation = miroir;
   ouvrirOperation(fiche);
   return new Promise((resolve) => {
     let seq = 0;
@@ -369,6 +387,7 @@ function suivre(fiche) {
         appliquerEvenement(item);
         if (item.kind === 'fin') {
           source.close();
+          miroirOperation = null;
           resolve((item.data && item.data.result) || null);
         }
       };
@@ -378,6 +397,7 @@ function suivre(fiche) {
         // tranche, et la lecture reprend au dernier événement reçu.
         const fin = await api('GET', `/api/jobs/${encode(fiche.id)}`).catch(() => null);
         if (!fin || fin.status !== 'en cours') {
+          miroirOperation = null;
           resolve((fin && fin.result) || null);
           return;
         }
@@ -863,8 +883,8 @@ function dessinerSessions(conteneur) {
     conteneur.append(el('div', { classe: 'boite-vide' },
       el('p', { texte: 'Aucun groupe déclaré pour le moment.' }),
       el('p', { classe: 'note',
-        texte: 'Adoptez ci-dessous un groupe repéré dans les dépôts, ou déclarez-en un de ' +
-          'toutes pièces.' })));
+        texte: 'Déclarez-en un de toutes pièces, ou reprenez des dépôts qu\'une autre ' +
+          'convention a nommés.' })));
   }
 
   const triees = [...parSession.values()].sort((a, b) =>
@@ -1584,15 +1604,13 @@ $('detail-cloner').addEventListener('click', async () => {
   if (!choisis.length) { message('Aucun dépôt sélectionné.', 'alerte'); return; }
 
   const parent = etat.reglages.clone_dir || '.';
-  const destination = el('input', {
-    type: 'text', classe: 'champ',
-    value: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.id}`,
+  const { zone, champ: destination } = zoneDepot({
+    dossier: true, titre: 'Choisir où cloner',
+    valeur: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.id}`,
   });
   const confirme = await demander(`Cloner ${choisis.length} dépôt(s)`, el('div', {},
     el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Dossier de destination' }),
-      el('span', { classe: 'ligne-champ' }, destination, boutonParcourir(destination, {
-        dossier: true, titre: 'Choisir où cloner' }))),
+      el('span', { classe: 'etiquette', texte: 'Dossier de destination' }), zone),
     el('p', { classe: 'note', texte: `${etat.contexte.jobs} clonage(s) en parallèle` +
       (etat.contexte.depth ? `, profondeur ${etat.contexte.depth}` : '') })), 'Cloner');
   if (!confirme) return;
@@ -1613,15 +1631,13 @@ $('detail-cloner').addEventListener('click', async () => {
 
 $('detail-pull').addEventListener('click', async () => {
   const parent = etat.reglages.clone_dir || '.';
-  const dossier = el('input', {
-    type: 'text', classe: 'champ',
-    value: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.id}`,
+  const { zone, champ: dossier } = zoneDepot({
+    dossier: true, titre: 'Choisir le dossier des clones',
+    valeur: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.id}`,
   });
   const trouve = await demander('Mettre à jour des clones', el('div', {},
     el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Dossier contenant les clones' }),
-      el('span', { classe: 'ligne-champ' }, dossier, boutonParcourir(dossier, {
-        dossier: true, titre: 'Choisir le dossier des clones' })))),
+      el('span', { classe: 'etiquette', texte: 'Dossier contenant les clones' }), zone)),
     'Chercher');
   if (!trouve) return;
 
@@ -2375,18 +2391,14 @@ async function renommerEtudiant(ligne) {
 }
 
 $('etudiants-importer').addEventListener('click', async () => {
-  const chemin = el('input', {
-    type: 'text', classe: 'champ',
-    value: etat.groupe.roster_path || '',
-    placeholder: 'cohorte.csv',
+  const { zone: bloc, champ: chemin } = zoneDepot({
+    titre: 'Choisir la liste des étudiants', valeur: etat.groupe.roster_path || '',
   });
   const zone = el('textarea', { classe: 'champ', rows: '5',
     placeholder: 'Jean-Luc Picard, jlpicard' });
   const confirme = await demander('Remplacer la liste des étudiants', el('div', {},
     el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Fichier CSV de la machine' }),
-      el('span', { classe: 'ligne-champ' }, chemin, boutonParcourir(chemin, {
-        titre: 'Choisir la liste des étudiants' }))),
+      el('span', { classe: 'etiquette', texte: 'Fichier CSV' }), bloc),
     el('label', { classe: 'champ-bloc' },
       el('span', { classe: 'etiquette', texte: '…ou une liste collée' }), zone),
     el('p', { classe: 'note',
@@ -2397,6 +2409,11 @@ $('etudiants-importer').addEventListener('click', async () => {
   if (zone.value.trim()) {
     const liste = await tenter(() =>
       api('POST', '/api/roster/parse', { text: zone.value }), 'Liste');
+    if (!liste) return;
+    corps = { people: liste.people };
+  } else if (bloc.dataset.contenu) {
+    const liste = await tenter(() =>
+      api('POST', '/api/roster/parse', { content: bloc.dataset.contenu }), 'Liste');
     if (!liste) return;
     corps = { people: liste.people };
   } else if (chemin.value.trim()) {
@@ -2905,6 +2922,40 @@ $('cache-vider').addEventListener('click', async () => {
 
 let importPlan = null;
 let importTravail = '';
+// Les noms de la liste, tous, et le compte auquel chacun est associé. C'est
+// cette association-là qu'on corrige à l'écran : le reste en découle.
+let importNoms = [];
+let importChoix = new Map();
+let importAttente = null;
+
+// --- l'accordéon
+
+// Une seule étape ouverte à la fois : la page garde la même hauteur, que le
+// groupe compte cinq personnes ou cinquante.
+function ouvrirEtape(nom) {
+  for (const etape of document.querySelectorAll('#import-stepper .etape')) {
+    etape.classList.toggle('ouverte', etape.dataset.etape === nom);
+  }
+}
+
+function etape(nom) {
+  return document.querySelector(`#import-stepper .etape[data-etape="${nom}"]`);
+}
+
+// marquerEtape écrit ce qu'une étape a retenu, et la dit faite si elle l'est.
+function marquerEtape(nom, resume) {
+  $('resume-' + nom).textContent = resume;
+  etape(nom).classList.toggle('faite', !!resume);
+}
+
+for (const tete of document.querySelectorAll('#import-stepper .etape-tete')) {
+  tete.addEventListener('click', () => {
+    const bloc = tete.closest('.etape');
+    ouvrirEtape(bloc.classList.contains('ouverte') ? '' : bloc.dataset.etape);
+  });
+}
+
+// --- 1. le travail
 
 async function preparerImport() {
   const org = etat.organisation;
@@ -2918,7 +2969,12 @@ async function preparerImport() {
   vider(conteneur);
   importTravail = '';
   importPlan = null;
-  $('import-plan').hidden = true;
+  importNoms = [];
+  importChoix = new Map();
+  for (const nom of ['travail', 'liste', 'place', 'verifier', 'journal']) {
+    marquerEtape(nom, '');
+  }
+  ouvrirEtape('travail');
 
   $('import-resume').textContent = travaux.length
     ? `${vue.repos.length} dépôt(s) ne suivent pas la nomenclature. Choisissez le travail à reprendre.`
@@ -2926,80 +2982,41 @@ async function preparerImport() {
       + "il n'y a rien à reprendre d'un bloc.";
 
   for (const travail of travaux) {
-    const choix = el('label', { classe: 'case' },
+    conteneur.append(el('label', { classe: 'case' },
       el('input', {
         type: 'radio', name: 'import-travail', value: travail.prefix,
         onchange: () => {
           importTravail = travail.prefix;
           if (!$('import-nom').value.trim()) $('import-nom').value = travail.prefix;
+          marquerEtape('travail', `${travail.prefix} · ${travail.count} dépôt(s)`);
+          ouvrirEtape($('import-liste').value.trim() ? 'place' : 'liste');
         },
       }),
       el('span', {}, el('code', { texte: travail.prefix }),
-        el('span', { classe: 'jeton', texte: `${travail.count} dépôt(s)` })));
-    conteneur.append(choix);
+        el('span', { classe: 'jeton', texte: `${travail.count} dépôt(s)` }))));
   }
 }
 
-// tonDeScore traduit la sûreté d'un rapprochement en étiquette.
-function tonDeScore(trouve) {
-  if (trouve.ambiguous) return 'non';
-  if (!trouve.entry || !trouve.entry.FullName) return 'non';
-  return trouve.score >= 60 ? 'oui' : '';
-}
+// --- 2. la liste
 
-function dessinerImport(plan) {
-  importPlan = plan;
-  const avis = $('import-avis');
-  const detail = $('import-detail');
-  vider(avis);
-  vider(detail);
+$('import-liste').addEventListener('change', () => {
+  const valeur = $('import-liste').value.trim();
+  marquerEtape('liste', valeur);
+  // Une liste qui change annule les rapprochements déjà retenus : ils
+  // désignaient les noms de l'ancienne.
+  importNoms = [];
+  importChoix = new Map();
+  marquerEtape('verifier', '');
+  if (valeur && importTravail) ouvrirEtape('place');
+});
 
-  avis.append(el('div', { classe: 'avis',
-    texte: `${plan.moves.length} dépôt(s) seront renommés vers « ${plan.scope} ».` }));
-  if ((plan.unmatched || []).length) {
-    avis.append(el('div', { classe: 'avis alerte',
-      texte: `${plan.unmatched.length} compte(s) ne mènent à personne : leurs dépôts `
-        + 'garderont le nom qu\'ils portent (@' + plan.unmatched.join(', @') + ').' }));
-  }
-  if ((plan.absent || []).length) {
-    avis.append(el('div', { classe: 'avis alerte',
-      texte: `${plan.absent.length} étudiant(s) de la liste n'ont pas de dépôt pour ce `
-        + 'travail : ' + plan.absent.join(', ') + '.' }));
-  }
+// --- 3. la place, puis la vérification
 
-  detail.append(el('p', { classe: 'note', texte: 'Rapprochement des comptes' }));
-  detail.append(el('table', { classe: 'tableau' },
-    el('thead', {}, el('tr', {},
-      el('th', { texte: 'Compte' }), el('th', { texte: 'Étudiant' }),
-      el('th', { texte: 'Reconnu par' }))),
-    el('tbody', {}, (plan.pairings || []).map((trouve) => {
-      const nom = trouve.ambiguous
-        ? 'à trancher : ' + (trouve.rivals || []).join(', ')
-        : (trouve.entry && trouve.entry.FullName) || 'personne trouvée';
-      return el('tr', {},
-        el('td', {}, el('code', { texte: '@' + trouve.login })),
-        el('td', {}, el('span', { classe: 'jeton ' + tonDeScore(trouve), texte: nom })),
-        el('td', { classe: 'note', texte: trouve.reason || '' }));
-    }))));
-
-  detail.append(el('p', { classe: 'note', texte: 'Renommage' }));
-  detail.append(el('table', { classe: 'tableau' },
-    el('thead', {}, el('tr', {},
-      el('th', { texte: 'Dépôt' }), el('th', { texte: 'Deviendra' }))),
-    el('tbody', {}, (plan.moves || []).map((ligne) =>
-      el('tr', {},
-        el('td', {}, el('code', { texte: ligne.repo })),
-        el('td', {}, el('code', { texte: ligne.target })))))));
-
-  $('import-plan').hidden = false;
-}
-
-// corpsImport rassemble ce que les trois premières boîtes disent.
+// corpsImport rassemble ce que les trois premières étapes disent.
 function corpsImport() {
   const manque = [];
   if (!importTravail) manque.push('un travail');
-  const liste = $('import-liste').value.trim();
-  if (!liste) manque.push('la liste des étudiants');
+  if (!$('import-liste').value.trim()) manque.push('la liste des étudiants');
   const session = $('import-session').value.trim();
   const cours = $('import-cours').value.trim();
   const groupe = $('import-groupe').value.trim();
@@ -3009,22 +3026,186 @@ function corpsImport() {
     return null;
   }
   $('import-etat').textContent = '';
-  return {
+
+  const corps = {
     prefix: importTravail,
     name: $('import-nom').value.trim() || importTravail,
     scope: [session, cours, groupe].join('.'),
-    path: liste,
+    path: cheminDepot('import-liste'),
+    content: contenuDepot('import-liste') || null,
   };
+  // Dès qu'un rapprochement a été touché, c'est l'écran qui fait foi : le
+  // serveur ne redevine plus rien, y compris là où on a choisi « personne ».
+  if (importNoms.length) {
+    corps.people = importNoms.map((nom) => ({ full_name: nom, username: compteDe(nom) }));
+  }
+  return corps;
 }
 
-$('import-apercu').addEventListener('click', async () => {
+// compteDe rend le compte associé à un nom, ou rien.
+function compteDe(nom) {
+  for (const [login, retenu] of importChoix) if (retenu === nom) return login;
+  return '';
+}
+
+$('import-apercu').addEventListener('click', () => verifier(true));
+
+// verifier redemande le plan et redessine ce qui doit l'être. Le tableau des
+// rapprochements, lui, n'est refait qu'à la première lecture : le refaire
+// effacerait les choix en cours.
+async function verifier(complet) {
   const corps = corpsImport();
   if (!corps) return;
   const plan = await tenter(
     () => api('POST', `/api/orgs/${encode(etat.organisation)}/import/preview`, corps),
     'Reprise');
-  if (plan) dessinerImport(plan);
-});
+  if (!plan) return;
+  importPlan = plan;
+  if (complet) {
+    lireNoms(plan);
+    dessinerRapprochements(plan);
+  }
+  dessinerAvis(plan);
+  dessinerRenommages(plan);
+  compter();
+  marquerEtape('place', plan.scope);
+  if (complet) ouvrirEtape('verifier');
+}
+
+// lireNoms retient tout ce que la liste portait : ceux qu'un dépôt a trouvés,
+// et ceux qu'aucun ne concerne. Les deux ensemble font le groupe.
+function lireNoms(plan) {
+  const noms = new Set(plan.absent || []);
+  importChoix = new Map();
+  for (const trouve of plan.pairings || []) {
+    const nom = (trouve.entry && trouve.entry.full_name) || '';
+    if (!nom) continue;
+    noms.add(nom);
+    importChoix.set(trouve.login, nom);
+  }
+  importNoms = [...noms].sort((a, b) => a.localeCompare(b, 'fr'));
+}
+
+// aVerifier dit qu'un rapprochement mérite un coup d'œil : rien de trouvé, deux
+// personnes qui se valaient, ou une ressemblance trop mince pour faire une
+// preuve. Un choix rendu à la main, lui, n'est plus à vérifier — c'est la ligne
+// qui s'en souvient.
+function aVerifier(trouve) {
+  return trouve.ambiguous || !trouve.entry || !trouve.entry.full_name || trouve.score < 60;
+}
+
+function dessinerRapprochements(plan) {
+  const corps = $('import-rapprochements').querySelector('tbody');
+  vider(corps);
+  for (const trouve of plan.pairings || []) {
+    const raison = el('td', { classe: 'note',
+      texte: trouve.ambiguous
+        ? 'à trancher : ' + (trouve.rivals || []).join(', ')
+        : trouve.reason || '' });
+    const choix = el('select', { classe: 'champ choix-etudiant' });
+    choix.dataset.login = trouve.login;
+
+    const ligne = el('tr', {},
+      el('td', {}, el('code', { texte: '@' + trouve.login })),
+      el('td', {}, choix), raison);
+    ligne.dataset.verifier = aVerifier(trouve) ? '1' : '';
+
+    choix.addEventListener('change', () => {
+      importChoix.set(trouve.login, choix.value);
+      raison.textContent = choix.value ? 'choisi à la main' : 'laissé sans personne';
+      // Un choix rendu à la main est vérifié par définition.
+      ligne.dataset.verifier = '';
+      majOptions();
+      compter();
+      filtrer();
+      planifierVerification();
+    });
+    corps.append(ligne);
+  }
+  majOptions();
+  filtrer();
+}
+
+// majOptions refait les choix offerts : un nom déjà associé à un compte ne peut
+// plus l'être à un autre, et celui qu'on vient de libérer revient partout.
+function majOptions() {
+  const pris = new Set([...importChoix.values()].filter(Boolean));
+  for (const choix of $('import-rapprochements').querySelectorAll('select')) {
+    const retenu = importChoix.get(choix.dataset.login) || '';
+    vider(choix);
+    choix.append(el('option', { value: '', texte: '— personne —' }));
+    for (const nom of importNoms) {
+      if (nom !== retenu && pris.has(nom)) continue;
+      choix.append(el('option', { value: nom, texte: nom }));
+    }
+    choix.value = retenu;
+  }
+}
+
+// planifierVerification attend que la rafale de corrections retombe avant de
+// redemander le plan : dix menus corrigés d'affilée ne font qu'une requête.
+function planifierVerification() {
+  clearTimeout(importAttente);
+  importAttente = setTimeout(() => verifier(false), 400);
+}
+
+$('import-filtre').addEventListener('change', filtrer);
+
+function filtrer() {
+  const seulement = $('import-filtre').checked;
+  for (const ligne of $('import-rapprochements').querySelectorAll('tbody tr')) {
+    ligne.hidden = seulement && ligne.dataset.verifier !== '1';
+  }
+}
+
+function compter() {
+  const total = $('import-rapprochements').querySelectorAll('tbody tr').length;
+  const reste = [...$('import-rapprochements').querySelectorAll('tbody tr')]
+    .filter((ligne) => ligne.dataset.verifier === '1').length;
+  $('import-compte').textContent = reste
+    ? `${total} dépôt(s) · ${reste} à vérifier`
+    : `${total} dépôt(s) · tout est rapproché`;
+  marquerEtape('verifier', $('import-compte').textContent);
+}
+
+// quelquesNoms énumère sans laisser la liste enfler : un avis qui déroulerait
+// trente noms ferait grandir la page avec la cohorte, et c'est justement ce
+// qu'on veut éviter.
+function quelquesNoms(noms, prefixe = '') {
+  const montres = noms.slice(0, 4).map((nom) => prefixe + nom).join(', ');
+  const reste = noms.length - 4;
+  return reste > 0 ? `${montres}… et ${reste} autre(s)` : montres;
+}
+
+function dessinerAvis(plan) {
+  const avis = $('import-avis');
+  vider(avis);
+  avis.append(el('div', { classe: 'avis',
+    texte: `${plan.moves.length} dépôt(s) seront renommés vers « ${plan.scope} ».` }));
+  if ((plan.unmatched || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `${plan.unmatched.length} compte(s) ne mènent à personne : leurs dépôts `
+        + "garderont le nom qu'ils portent — "
+        + quelquesNoms(plan.unmatched, '@') + '.' }));
+  }
+  if ((plan.absent || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `${plan.absent.length} étudiant(s) de la liste n'ont pas de dépôt pour ce `
+        + 'travail — ' + quelquesNoms(plan.absent) + '.' }));
+  }
+}
+
+function dessinerRenommages(plan) {
+  const corps = $('import-renommages').querySelector('tbody');
+  vider(corps);
+  for (const ligne of plan.moves || []) {
+    corps.append(el('tr', {},
+      el('td', {}, el('code', { texte: ligne.repo })),
+      el('td', {}, el('code', { texte: ligne.target }))));
+  }
+}
+
+// --- 5. écrire
 
 $('import-appliquer').addEventListener('click', async () => {
   const corps = corpsImport();
@@ -3033,15 +3214,18 @@ $('import-appliquer').addEventListener('click', async () => {
     el('p', { texte: `${importPlan.moves.length} dépôt(s) seront renommés vers `
       + `« ${importPlan.scope} ». GitHub garde une redirection depuis chaque ancien nom.` }),
     el('p', { classe: 'note',
-      texte: 'Le groupe sera déclaré, et les noms montés au registre de l\'organisation.' })),
+      texte: "Le groupe sera déclaré, et les noms montés au registre de l'organisation." })),
     'Reprendre');
   if (!accord) return;
 
   const fiche = await tenter(
     () => api('POST', `/api/orgs/${encode(etat.organisation)}/import`, corps), 'Reprise');
   if (!fiche) return;
-  const bilan = await suivre(fiche);
+  ouvrirEtape('journal');
+  const bilan = await suivre(fiche,
+    { journal: $('import-journal'), barre: $('import-barre') });
   if (!bilan) return;
+  marquerEtape('journal', `${bilan.renamed} dépôt(s) repris`);
   message(`${bilan.renamed} dépôt(s) repris dans « ${bilan.scope} ».`);
   await ouvrirGroupe(bilan.scope, true);
 });
@@ -3634,20 +3818,107 @@ async function choisirChemin(champ, options = {}) {
   champ.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// boutonParcourir accompagne un champ créé à la volée, dans un dialogue.
-function boutonParcourir(champ, options) {
-  return el('button', {
-    classe: 'bouton', type: 'button', texte: 'Parcourir…',
-    onclick: () => choisirChemin(champ, options),
+// zoneDepot construit une zone de dépôt pour un dialogue, où il n'y a pas de
+// balisage à réutiliser. Elle rend le bloc à insérer et le champ qui porte la
+// valeur.
+function zoneDepot(options = {}) {
+  const champ = el('input', { type: 'hidden', value: options.valeur || '' });
+  const zone = el('div', { classe: 'depot', tabindex: '0', role: 'button' },
+    champ, el('span', { classe: 'depot-texte' }));
+  if (options.dossier) zone.dataset.dossier = '1';
+  zone.dataset.titre = options.titre || 'Choisir';
+  brancherDepot(zone);
+  return { zone, champ };
+}
+
+// ------------------------------------------------------------ zones de dépôt
+
+// Un chemin ne se tape pas : il se dépose, ou il se choisit. Le champ caché de
+// la zone garde la valeur — tout ce qui la lisait la lit encore —, et l'y
+// écrire rafraîchit l'affichage, d'où que l'écriture vienne.
+//
+// Un fichier déposé, lui, n'a pas de chemin : le navigateur ne le donne jamais.
+// Il a un contenu, et c'est le contenu qui part au serveur.
+const valeurBrute = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+
+function brancherDepot(zone) {
+  const champ = zone.querySelector('input');
+  const texte = zone.querySelector('.depot-texte');
+  const dossier = zone.dataset.dossier === '1';
+  const vide = dossier
+    ? 'Cliquez pour choisir un dossier.'
+    : 'Déposez le fichier ici, ou cliquez pour le choisir.';
+
+  const montrer = () => {
+    const valeur = valeurBrute.get.call(champ).trim();
+    zone.classList.toggle('vide', !valeur);
+    vider(texte);
+    if (valeur) texte.append(el('code', { texte: valeur }));
+    else texte.textContent = vide;
+  };
+  Object.defineProperty(champ, 'value', {
+    get() { return valeurBrute.get.call(this); },
+    set(valeur) { valeurBrute.set.call(this, valeur); montrer(); },
+  });
+  montrer();
+
+  const ouvrir = async () => {
+    const avant = champ.value;
+    await choisirChemin(champ, { dossier, titre: zone.dataset.titre });
+    // Un chemin choisi remplace ce qui avait été déposé : les deux ne peuvent
+    // pas désigner le même fichier.
+    if (champ.value !== avant) delete zone.dataset.contenu;
+  };
+  zone.addEventListener('click', ouvrir);
+  zone.addEventListener('keydown', (evenement) => {
+    if (evenement.key !== 'Enter' && evenement.key !== ' ') return;
+    evenement.preventDefault();
+    ouvrir();
+  });
+
+  // Un dossier déposé ne donne ni chemin ni contenu lisible : il ne reste que
+  // le clic.
+  if (dossier) return;
+  zone.addEventListener('dragover', (evenement) => {
+    evenement.preventDefault();
+    zone.classList.add('survol');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('survol'));
+  zone.addEventListener('drop', async (evenement) => {
+    evenement.preventDefault();
+    zone.classList.remove('survol');
+    const fichier = evenement.dataTransfer.files[0];
+    if (!fichier) return;
+    zone.dataset.contenu = await octets(fichier);
+    champ.value = fichier.name;
+    champ.dispatchEvent(new Event('change', { bubbles: true }));
   });
 }
 
-for (const bouton of document.querySelectorAll('[data-parcourir]')) {
-  bouton.addEventListener('click', () => choisirChemin($(bouton.dataset.parcourir), {
-    dossier: bouton.dataset.dossier === '1',
-    titre: bouton.dataset.titre,
-  }));
+// octets rend le contenu d'un fichier en base64 : la forme qu'un []byte prend
+// en JSON du côté de Go.
+function octets(fichier) {
+  return new Promise((resolve, reject) => {
+    const lecteur = new FileReader();
+    lecteur.onload = () => resolve(lecteur.result.split(',')[1] || '');
+    lecteur.onerror = () => reject(lecteur.error);
+    lecteur.readAsDataURL(fichier);
+  });
 }
+
+// contenuDepot rend les octets déposés dans la zone d'un champ, ou rien.
+function contenuDepot(id) {
+  const zone = $(id).closest('.depot');
+  return (zone && zone.dataset.contenu) || '';
+}
+
+// cheminDepot rend le chemin d'un champ, ou rien s'il tient un fichier déposé :
+// un tel fichier n'a pas de chemin, et son nom n'en fait pas un.
+function cheminDepot(id) {
+  return contenuDepot(id) ? '' : $(id).value.trim();
+}
+
+for (const zone of document.querySelectorAll('[data-depot]')) brancherDepot(zone);
 
 // explorer ouvre l'explorateur interne et renvoie le chemin retenu, ou null.
 function explorer(requete) {
@@ -3724,28 +3995,6 @@ function explorer(requete) {
     lister(requete.path);
   });
 }
-
-// ------------------------------------------------------- complétion de chemins
-
-// brancherCompletion propose les chemins de la machine au fil de la frappe,
-// comme le fait la tabulation au terminal. Le navigateur ne voit jamais le
-// disque : c'est le serveur local qui répond.
-function brancherCompletion(champ, liste, dossiersSeulement) {
-  let minuterie = null;
-  champ.addEventListener('input', () => {
-    clearTimeout(minuterie);
-    minuterie = setTimeout(async () => {
-      const reponse = await api('POST', '/api/paths/suggest',
-        { path: champ.value, dirs: dossiersSeulement }).catch(() => null);
-      if (!reponse) return;
-      vider(liste);
-      for (const chemin of reponse.suggestions) liste.append(el('option', { value: chemin }));
-    }, 250);
-  });
-}
-
-brancherCompletion($('nouveau-chemin'), $('suggestions-roster'), false);
-brancherCompletion($('reglage-starter'), $('suggestions-starter'), true);
 
 // -------------------------------------------------------------------- quitter
 

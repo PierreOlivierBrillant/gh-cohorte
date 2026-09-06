@@ -97,11 +97,11 @@ type Issue struct {
 // rapprochement qui le trouve ensuite dans les dépôts. Ce qui l'entoure sert
 // justement à ce rapprochement : rien n'y est retenu pour être affiché.
 type Entry struct {
-	FullName  string
-	Username  string
-	StudentID string
-	Permanent string
-	Group     string
+	FullName  string `json:"full_name"`
+	Username  string `json:"username"`
+	StudentID string `json:"student_id,omitempty"`
+	Permanent string `json:"permanent,omitempty"`
+	Group     string `json:"group,omitempty"`
 }
 
 // Person rend la personne que l'entrée décrit.
@@ -208,6 +208,10 @@ func at(cells []string, index int) string {
 	}
 	return cells[index]
 }
+
+// ParseBytes lit un contenu brut, quel que soit son encodage : c'est par ici
+// qu'entre un fichier déposé dans le navigateur, dont on n'a que les octets.
+func ParseBytes(content []byte) Roster { return Parse(decode(content)) }
 
 // Parse analyse un contenu CSV/TSV et renvoie les personnes valides et les erreurs.
 func Parse(text string) Roster {
@@ -332,7 +336,7 @@ func Load(path string) (Roster, error) {
 	}
 	// L'encodage n'est plus une condition : une liste sortie d'Omnivox arrive
 	// en Windows-1252, et la refuser obligerait à la convertir à la main.
-	return Parse(decode(content)), nil
+	return ParseBytes(content), nil
 }
 
 // Write écrit une liste de personnes au format CSV.

@@ -141,3 +141,50 @@ func TestImportRenommeLeTravailAuPassage(t *testing.T) {
 		t.Fatalf("dépôts = %v", noms)
 	}
 }
+
+// Une ressemblance devinée se tranche à la main, avant que rien ne soit écrit.
+// C'est le même jugement que l'interface web rend au même moment ; sans lui, le
+// terminal ne saurait que tout accepter ou tout refuser.
+func TestImportCorrigeUnRapprochementALaMain(t *testing.T) {
+	state := classroomOrg(t)
+	h := nouveau(t, state)
+	h.Options.ImportRequested = true
+	h.Options.Import = "tp1"
+	h.Options.Into = "a26.5n6.1030"
+	h.Options.Roster = listeOmnivox(t, t.TempDir(),
+		`="1680229";="1030";="Adam-Larocque";="Laurent";="ADAL20059908";`,
+		`="2143020";="1030";="Bourassa";="Félix";="BOUF68040412";`,
+		`="1983429";="1030";="Lyonnais";="Étienne";="LYOE78040203";`,
+		`="1990022";="1030";="Tremblay";="Sophie";="TRES33040506";`,
+	)
+
+	code, _ := h.script(
+		"oui",             // corriger un rapprochement
+		"lyonnais",        // le compte à reprendre
+		"Sophie Tremblay", // la personne qu'il désigne vraiment
+		"non",             // rien d'autre à corriger
+		"oui",             // renommer
+	)
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.depots()
+	if !slices.Contains(noms, "a26.5n6.1030.tp1.sophie-tremblay") {
+		t.Fatalf("la correction n'a pas été suivie : %v", noms)
+	}
+	if slices.Contains(noms, "a26.5n6.1030.tp1.etienne-lyonnais") {
+		t.Fatalf("le rapprochement deviné a été gardé : %v", noms)
+	}
+
+	// La personne libérée ne reste associée à personne : la proposer encore
+	// ferait croire qu'elle a un dépôt.
+	menu, trouve := h.dernierMenu("Étudiant pour @lyonnais")
+	if !trouve {
+		t.Fatalf("aucun menu de correction :\n%s", h.texte())
+	}
+	for _, option := range menu.Options {
+		if option.Label == "Félix Bourassa" {
+			t.Fatalf("une personne déjà prise a été proposée : %+v", menu.Options)
+		}
+	}
+}

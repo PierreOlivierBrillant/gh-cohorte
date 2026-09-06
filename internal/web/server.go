@@ -238,7 +238,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/clones/find", s.handleFindClones)
 	mux.HandleFunc("POST /api/clones/clone", s.handleClone)
 	mux.HandleFunc("POST /api/clones/pull", s.handlePull)
-	mux.HandleFunc("POST /api/paths/suggest", s.handleSuggestPath)
 	mux.HandleFunc("POST /api/paths/pick", s.handlePickPath)
 	mux.HandleFunc("POST /api/paths/browse", s.handleBrowsePath)
 

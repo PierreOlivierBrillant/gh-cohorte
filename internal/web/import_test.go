@@ -56,7 +56,7 @@ type planVue struct {
 	Pairings []struct {
 		Login string `json:"login"`
 		Entry struct {
-			FullName string `json:"FullName"`
+			FullName string `json:"full_name"`
 		} `json:"entry"`
 		Score  int    `json:"score"`
 		Reason string `json:"reason"`
