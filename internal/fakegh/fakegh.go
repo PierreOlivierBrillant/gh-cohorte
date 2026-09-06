@@ -273,6 +273,8 @@ var (
 	invitationsRe  = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/invitations$`)
 	invitationRe   = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/invitations/(\d+)$`)
 	blobsRe        = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/blobs$`)
+	blobRe         = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/blobs/([^/]+)$`)
+	contentsRe     = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/contents/(.+)$`)
 	treesRe        = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/trees$`)
 	commitsRe      = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/commits$`)
 	commitRe       = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/commits/([^/]+)$`)
@@ -430,6 +432,41 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 			})
 		}
 		s.send(writer, 200, payload)
+		return
+	}
+	if match := blobRe.FindStringSubmatch(path); match != nil {
+		raw, exists := state.Blobs[match[3]]
+		if !exists {
+			s.notFound(writer)
+			return
+		}
+		s.send(writer, 200, map[string]any{
+			"sha":      match[3],
+			"size":     len(raw),
+			"encoding": "base64",
+			"content":  base64.StdEncoding.EncodeToString(raw),
+		})
+		return
+	}
+	if match := contentsRe.FindStringSubmatch(path); match != nil {
+		full, fichier := match[1]+"/"+match[2], match[3]
+		if _, exists := state.Repos[full]; !exists {
+			s.notFound(writer)
+			return
+		}
+		entry, trouve := state.entryLocked(full, request.URL.Query().Get("ref"), fichier)
+		if !trouve {
+			s.notFound(writer)
+			return
+		}
+		raw := state.Blobs[entry.Blob]
+		s.send(writer, 200, map[string]any{
+			"name": fichier[strings.LastIndex(fichier, "/")+1:],
+			"path": fichier, "type": "file",
+			"sha": entry.Blob, "size": len(raw),
+			"encoding": "base64",
+			"content":  base64.StdEncoding.EncodeToString(raw),
+		})
 		return
 	}
 	if match := commitRe.FindStringSubmatch(path); match != nil {
@@ -642,11 +679,21 @@ func (s *Server) patch(writer http.ResponseWriter, request *http.Request, path s
 	if match := refUpdateRe.FindStringSubmatch(path); match != nil {
 		full := match[1] + "/" + match[2]
 		branch := match[3]
-		if _, exists := state.Refs[full+"@"+branch]; !exists {
+		actuel, exists := state.Refs[full+"@"+branch]
+		if !exists {
 			s.notFound(writer)
 			return
 		}
 		sha, _ := body["sha"].(string)
+		// Sans « force », GitHub n'accepte que ce qui descend du commit en
+		// place. C'est ce refus qui sert de verrou à l'outil : deux écritures
+		// parties du même commit ne peuvent pas s'écraser en silence.
+		force, _ := body["force"].(bool)
+		if !force && !state.descendsLocked(sha, actuel) {
+			s.send(writer, 422, map[string]string{
+				"message": "Update is not a fast forward"})
+			return
+		}
 		state.Refs[full+"@"+branch] = sha
 		state.touchLocked(full)
 		s.send(writer, 200, map[string]any{"object": map[string]any{"sha": sha}})
@@ -842,6 +889,48 @@ func (s *Server) filesLocked(fullName, branch string) map[string]string {
 		files[path] = string(s.State.Blobs[entry.Blob])
 	}
 	return files
+}
+
+// entryLocked retrouve un fichier dans l'arbre d'une référence. La référence
+// est une branche ou un commit — GitHub accepte les deux dans « ?ref= » —, et
+// son absence vaut la branche par défaut du dépôt.
+func (s *State) entryLocked(fullName, ref, file string) (treeEntry, bool) {
+	if ref == "" {
+		ref = s.Repos[fullName].DefaultBranch
+	}
+	commitSHA, found := s.Refs[fullName+"@"+ref]
+	if !found {
+		if _, connu := s.Commits[ref]; !connu {
+			return treeEntry{}, false
+		}
+		commitSHA = ref
+	}
+	entry, present := s.Trees[s.Commits[commitSHA].Tree][file]
+	return entry, present
+}
+
+// descendsLocked dit si un commit descend d'un autre, en remontant ses parents.
+// C'est ce que GitHub vérifie avant d'accepter une mise à jour de référence qui
+// ne force pas.
+func (s *State) descendsLocked(candidat, ancetre string) bool {
+	if ancetre == "" || candidat == ancetre {
+		return true
+	}
+	vus := map[string]bool{}
+	pile := []string{candidat}
+	for len(pile) > 0 {
+		sha := pile[len(pile)-1]
+		pile = pile[:len(pile)-1]
+		if sha == ancetre {
+			return true
+		}
+		if vus[sha] {
+			continue
+		}
+		vus[sha] = true
+		pile = append(pile, s.Commits[sha].Parents...)
+	}
+	return false
 }
 
 func (s *State) touchLocked(fullName string) {

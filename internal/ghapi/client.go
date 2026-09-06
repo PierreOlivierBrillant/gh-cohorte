@@ -814,6 +814,59 @@ func (c *Client) SetBranchHead(owner, repo, branch, commitSHA string, create boo
 	return err
 }
 
+// File est un fichier relu dans un dépôt.
+type File struct {
+	// SHA est celui du blob, non du commit : c'est lui qui dit si le contenu a
+	// changé depuis la dernière lecture.
+	SHA     string
+	Content []byte
+}
+
+// ReadFile relit un fichier d'un dépôt, à une référence donnée — une branche ou
+// un commit ; vide, c'est la branche par défaut. Un fichier absent rend nil
+// sans erreur : un dépôt qu'on n'a pas encore rempli n'est pas une panne.
+func (c *Client) ReadFile(owner, repo, file, ref string) (*File, error) {
+	path := repoPath(owner, repo) + "/contents/" + escapePath(file)
+	if ref != "" {
+		path += "?ref=" + url.QueryEscape(ref)
+	}
+	response, err := c.do(http.MethodGet, path, nil, http.StatusNotFound)
+	if err != nil {
+		return nil, err
+	}
+	if response.Status == http.StatusNotFound {
+		return nil, nil
+	}
+	var payload struct {
+		SHA      string `json:"sha"`
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+	}
+	if err := response.JSON(&payload); err != nil {
+		return nil, &Error{Message: "Contenu illisible : " + err.Error()}
+	}
+	if payload.Encoding != "base64" {
+		return nil, &Error{Message: "Contenu illisible : encodage « " + payload.Encoding + " »."}
+	}
+	// GitHub coupe le base64 en lignes ; le décodeur strict les refuserait.
+	raw, err := base64.StdEncoding.DecodeString(
+		strings.NewReplacer("\n", "", "\r", "").Replace(payload.Content))
+	if err != nil {
+		return nil, &Error{Message: "Contenu illisible : " + err.Error()}
+	}
+	return &File{SHA: payload.SHA, Content: raw}, nil
+}
+
+// escapePath échappe un chemin niveau par niveau : les barres obliques y
+// séparent des dossiers et doivent survivre à l'échappement.
+func escapePath(file string) string {
+	niveaux := strings.Split(file, "/")
+	for index, niveau := range niveaux {
+		niveaux[index] = url.PathEscape(niveau)
+	}
+	return strings.Join(niveaux, "/")
+}
+
 // PushFile est un fichier à déposer dans un dépôt.
 type PushFile struct {
 	Path    string
