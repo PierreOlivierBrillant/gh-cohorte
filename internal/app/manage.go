@@ -58,10 +58,6 @@ type manageSession struct {
 }
 
 func newManageSession(session *Session, initialPrefix string) *manageSession {
-	reportDir, err := roster.ExpandPath(session.Options.ReportDir)
-	if err != nil {
-		reportDir = session.Options.ReportDir
-	}
 	return &manageSession{
 		session:       session,
 		org:           session.Settings.Org,
@@ -69,8 +65,7 @@ func newManageSession(session *Session, initialPrefix string) *manageSession {
 		filter:        session.Options.Filter,
 		sortKey:       session.Options.Sort,
 		sortDesc:      session.Options.SortDesc,
-		resolver: identity.New(session.Client, session.Cache, reportDir,
-			session.Options.Jobs),
+		resolver:      identity.New(session.Client, session.Cache, session.Options.Jobs),
 	}
 }
 

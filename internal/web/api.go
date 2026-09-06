@@ -304,7 +304,7 @@ func (s *Server) resolver(org string) *identity.Resolver {
 	if existing, found := s.resolvers[org]; found {
 		return existing
 	}
-	fresh := identity.New(s.deps.Client, s.deps.Cache, s.reportDir(), s.deps.Jobs)
+	fresh := identity.New(s.deps.Client, s.deps.Cache, s.deps.Jobs)
 	s.resolvers[org] = fresh
 	return fresh
 }
