@@ -282,3 +282,30 @@ func TestEffacerLHistoriqueRefuseUnNomApprochant(t *testing.T) {
 	}
 	h.contient("intact")
 }
+
+// ------------------------------------------------------------- accès d'équipe
+
+// Donner accès à une équipe ouvre un accès — et le dit sans laisser croire que
+// cela en ferme d'autres.
+func TestDonnerAccesAUneEquipe(t *testing.T) {
+	state := fakegh.NewState()
+	h := nouveau(t, state)
+	h.Options.RegistryTeam = "enseignants"
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	if droit := state.TeamRepos["acme/enseignants"]["acme/"+registry.RepoName]; droit == "" {
+		t.Fatalf("aucun droit accordé : %+v", state.TeamRepos)
+	}
+	h.contient("ouvre un accès sans en fermer aucun")
+}
+
+// Une équipe inconnue se signale plutôt que de passer inaperçue.
+func TestUneEquipeInconnueSeSignale(t *testing.T) {
+	state := fakegh.NewState()
+	h := nouveau(t, state)
+	h.Options.RegistryTeam = "fantome"
+	if code := h.muet(); code == app.ExitOK {
+		t.Fatalf("code = %d — une équipe inconnue doit échouer\n%s", code, h.texte())
+	}
+}

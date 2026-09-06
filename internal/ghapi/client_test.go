@@ -536,3 +536,30 @@ func TestOrgMembership(t *testing.T) {
 		t.Errorf("OrgMembership = %q, %v", rôle, err)
 	}
 }
+
+// Les équipes de l'organisation servent à donner accès au registre : il porte
+// des noms d'étudiants, et l'équipe enseignante doit pouvoir le lire.
+func TestEquipesEtAccesAuDepot(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", ".cohorte", true)
+	c, serveur := client(t, state)
+
+	equipes, err := c.ListOrgTeams("acme")
+	if err != nil || len(equipes) != 2 {
+		t.Fatalf("ListOrgTeams = %+v, %v", equipes, err)
+	}
+	if equipes[0].Slug != "enseignants" {
+		t.Fatalf("équipes = %+v", equipes)
+	}
+
+	if err := c.GrantTeamRepo("acme", "enseignants", "acme", ".cohorte", "push"); err != nil {
+		t.Fatalf("GrantTeamRepo : %v", err)
+	}
+	if droit := serveur.State.TeamRepos["acme/enseignants"]["acme/.cohorte"]; droit != "push" {
+		t.Fatalf("droit accordé = %q", droit)
+	}
+	// Une équipe inconnue se signale plutôt que de passer inaperçue.
+	if err := c.GrantTeamRepo("acme", "fantome", "acme", ".cohorte", "push"); err == nil {
+		t.Error("une équipe inconnue doit produire une erreur")
+	}
+}

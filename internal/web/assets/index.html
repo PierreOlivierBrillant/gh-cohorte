@@ -719,6 +719,17 @@
           <input type="checkbox" id="registre-prefer-local">
           <span>En cas de désaccord, garder le nom de ce poste</span>
         </label>
+        <div id="registre-equipe-bloc" hidden>
+          <label class="champ-bloc etroit-champ">
+            <span class="etiquette">Donner accès à une équipe</span>
+            <span class="ligne-champ">
+              <select id="registre-equipe" class="champ"></select>
+              <button type="button" id="registre-donner" class="bouton">Donner accès</button>
+            </span>
+            <span class="aide">Cela ouvre un accès sans en fermer aucun : c'est la
+              permission de base de l'organisation qui restreint le reste.</span>
+          </label>
+        </div>
       </div>
       <div class="boite-pied">
         <button type="button" id="registre-apercu" class="bouton">Voir ce qui monterait</button>

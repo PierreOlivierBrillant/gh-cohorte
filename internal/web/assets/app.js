@@ -3051,6 +3051,14 @@ function dessinerRegistre(vue) {
   $('registre-publier').hidden = !aPublier;
   $('registre-prefer-local-bloc').hidden = desaccords.length === 0;
   $('registre-etat').textContent = aPublier ? '' : 'Rien à publier.';
+
+  // Les équipes ne s'offrent que si le compte en voit : celui qui n'est pas
+  // membre de l'organisation n'en voit aucune, et il n'y a rien à proposer.
+  const equipes = vue.teams || [];
+  const choix = $('registre-equipe');
+  vider(choix);
+  for (const nom of equipes) choix.append(el('option', { value: nom, texte: nom }));
+  $('registre-equipe-bloc').hidden = equipes.length === 0;
 }
 
 $('registre-apercu').addEventListener('click', async () => {
@@ -3080,6 +3088,15 @@ $('registre-publier').addEventListener('click', async () => {
 // Un étudiant retiré du registre reste dans l'historique : c'est ce que git
 // est. Réécrire la branche en un commit sans passé est ce qu'on peut promettre
 // de mieux — et pas davantage, ce que le dialogue dit sans détour.
+$('registre-donner').addEventListener('click', async () => {
+  const org = etat.organisation;
+  const equipe = $('registre-equipe').value;
+  if (!org || !equipe) return;
+  const fait = await tenter(() => api('POST', `/api/orgs/${encode(org)}/registry/team`,
+    { team: equipe }), 'Registre');
+  if (fait) message(fait.message, 'succes', 12000);
+});
+
 $('registre-oublier').addEventListener('click', async () => {
   const org = etat.organisation;
   if (!org) { message('Choisissez d\'abord une organisation.', 'erreur'); return; }

@@ -74,6 +74,10 @@ type State struct {
 	Repos                 map[string]*RepoState
 	Templates             map[string]bool
 
+	// Équipes par organisation, et droit qu'elles ont sur chaque dépôt.
+	Teams     map[string][]string          // organisation → équipes
+	TeamRepos map[string]map[string]string // « org/équipe » → dépôt → droit
+
 	Collaborators map[string]map[string]string // dépôt → compte → droit
 	Invitations   map[string][]invitation
 	Deleted       []string
@@ -127,6 +131,8 @@ func NewState() *State {
 		},
 		Repos:          map[string]*RepoState{},
 		Templates:      map[string]bool{"acme/modele-tp": true},
+		Teams:          map[string][]string{"acme": {"enseignants", "direction"}},
+		TeamRepos:      map[string]map[string]string{},
 		Collaborators:  map[string]map[string]string{},
 		Invitations:    map[string][]invitation{},
 		Blobs:          map[string][]byte{},
@@ -267,6 +273,8 @@ func (s *Server) URL() string { return s.Server.URL }
 
 var (
 	orgRe          = regexp.MustCompile(`^/orgs/([^/]+)$`)
+	orgTeamsRe     = regexp.MustCompile(`^/orgs/([^/]+)/teams$`)
+	teamRepoRe     = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/repos/([^/]+)/([^/]+)$`)
 	orgReposRe     = regexp.MustCompile(`^/orgs/([^/]+)/repos$`)
 	membershipRe   = regexp.MustCompile(`^/orgs/([^/]+)/memberships/([^/]+)$`)
 	userRe         = regexp.MustCompile(`^/users/([^/]+)$`)
@@ -394,6 +402,19 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		s.send(writer, 200, map[string]any{"login": match[1], "name": name})
 		return
 	}
+	if match := orgTeamsRe.FindStringSubmatch(path); match != nil {
+		if _, found := state.Orgs[match[1]]; !found {
+			s.notFound(writer)
+			return
+		}
+		payload := make([]map[string]any, 0)
+		for _, nom := range state.Teams[match[1]] {
+			payload = append(payload, map[string]any{
+				"name": nom, "slug": nom, "privacy": "closed"})
+		}
+		s.send(writer, 200, payload)
+		return
+	}
 	if match := orgReposRe.FindStringSubmatch(path); match != nil {
 		if _, found := state.Orgs[match[1]]; !found {
 			s.notFound(writer)
@@ -519,6 +540,19 @@ func (s *Server) post(writer http.ResponseWriter, request *http.Request, path st
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
 
+	if match := orgTeamsRe.FindStringSubmatch(path); match != nil {
+		if _, found := state.Orgs[match[1]]; !found {
+			s.notFound(writer)
+			return
+		}
+		payload := make([]map[string]any, 0)
+		for _, nom := range state.Teams[match[1]] {
+			payload = append(payload, map[string]any{
+				"name": nom, "slug": nom, "privacy": "closed"})
+		}
+		s.send(writer, 200, payload)
+		return
+	}
 	if match := orgReposRe.FindStringSubmatch(path); match != nil {
 		org := match[1]
 		name, _ := body["name"].(string)
@@ -639,6 +673,32 @@ func (s *Server) put(writer http.ResponseWriter, request *http.Request, path str
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
 
+	if match := teamRepoRe.FindStringSubmatch(path); match != nil {
+		org, equipe, depot := match[1], match[2], match[3]+"/"+match[4]
+		connue := false
+		for _, nom := range state.Teams[org] {
+			if nom == equipe {
+				connue = true
+				break
+			}
+		}
+		if !connue {
+			s.notFound(writer)
+			return
+		}
+		if _, existe := state.Repos[depot]; !existe {
+			s.notFound(writer)
+			return
+		}
+		droit, _ := body["permission"].(string)
+		cle := org + "/" + equipe
+		if state.TeamRepos[cle] == nil {
+			state.TeamRepos[cle] = map[string]string{}
+		}
+		state.TeamRepos[cle][depot] = droit
+		writer.WriteHeader(204)
+		return
+	}
 	if match := collaboratorRe.FindStringSubmatch(path); match != nil {
 		full := match[1] + "/" + match[2]
 		login := match[3]

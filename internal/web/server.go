@@ -211,6 +211,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/orgs/{org}/registry", s.handleRegistryPreview)
 	mux.HandleFunc("POST /api/orgs/{org}/registry", s.handleRegistryPublish)
 	mux.HandleFunc("POST /api/orgs/{org}/registry/history", s.handleRegistryForgetHistory)
+	mux.HandleFunc("POST /api/orgs/{org}/registry/team", s.handleRegistryGrant)
 	mux.HandleFunc("GET /api/orgs/{org}/candidates", s.handleCandidates)
 	mux.HandleFunc("POST /api/orgs/{org}/match", s.handleMatchPattern)
 

@@ -291,6 +291,34 @@ func (s *Store) ForgetHistory() (string, error) {
 // GitHub ne montre ce réglage qu'aux propriétaires. Une chaîne vide veut donc
 // dire « on ne sait pas », et l'absence de réponse n'est pas un feu vert : elle
 // ne dit rien, et l'appelant doit le présenter ainsi.
+// Teams énumère les équipes de l'organisation, pour qu'on puisse en désigner
+// une. Un compte qui n'est pas membre n'en voit aucune : ce n'est pas une
+// panne, il n'y a simplement rien à proposer.
+func (s *Store) Teams() ([]ghapi.Team, error) {
+	return s.client.ListOrgTeams(s.org)
+}
+
+// Grant donne à une équipe un droit de lecture sur le registre.
+//
+// Cela ouvre un accès ; cela n'en ferme aucun. Ce qui restreint réellement le
+// registre, c'est la permission de base de l'organisation — d'où l'intérêt de
+// la mettre à « none » et de nommer ici l'équipe enseignante, plutôt que de
+// croire que désigner une équipe suffit. « Exposure » le dit à sa façon.
+func (s *Store) Grant(team string) error {
+	if strings.TrimSpace(team) == "" {
+		return valid.Errorf("Aucune équipe désignée.")
+	}
+	if err := s.ensureRepo(); err != nil {
+		return err
+	}
+	return s.client.GrantTeamRepo(s.org, team, s.org, RepoName, TeamPermission)
+}
+
+// TeamPermission est le droit accordé à l'équipe enseignante : lire et écrire.
+// Le registre se corrige à plusieurs, et le limiter à la lecture obligerait à
+// passer par une seule personne.
+const TeamPermission = "push"
+
 func (s *Store) Exposure() string {
 	// L'organisation est demandée sous la forme qui tolère un refus : ne pas
 	// pouvoir lire ce réglage n'est pas une panne, c'est une ignorance.

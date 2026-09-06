@@ -216,6 +216,9 @@ func (s *Session) run() (int, error) {
 		if s.Options.ForgetRegistryHistory {
 			return s.forgetRegistryHistory()
 		}
+		if s.Options.RegistryTeam != "" {
+			return s.grantRegistryTeam(s.Options.RegistryTeam)
+		}
 		return s.publishRegistry()
 	}
 	if mode == "etudiants" {
@@ -251,7 +254,8 @@ func (s *Session) chooseMode() (string, error) {
 	if s.Options.Web {
 		return "web", nil
 	}
-	if s.Options.PublishRegistry || s.Options.ForgetRegistryHistory {
+	if s.Options.PublishRegistry || s.Options.ForgetRegistryHistory ||
+		s.Options.RegistryTeam != "" {
 		return "registre", nil
 	}
 	if s.Options.StudentsRequested {

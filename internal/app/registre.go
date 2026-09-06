@@ -182,3 +182,54 @@ func (s *Session) forgetHistoryFromMenu() error {
 	_, err := s.forgetRegistryHistory()
 	return err
 }
+
+// ------------------------------------------------------------- accès d'équipe
+
+// grantRegistryTeam donne à une équipe de l'organisation accès au registre.
+func (s *Session) grantRegistryTeam(equipe string) (int, error) {
+	org := s.Settings.Org
+	if err := s.registryOf(org).Grant(equipe); err != nil {
+		return ExitFailure, err
+	}
+	s.Console.Success("L'équipe « %s » a désormais accès à %s/%s.",
+		equipe, org, registry.RepoName)
+	// Le dire est ce qui empêche de croire le contraire : accorder n'est pas
+	// restreindre.
+	s.Console.Note("Cela ouvre un accès sans en fermer aucun : c'est la permission de " +
+		"base de l'organisation qui restreint le reste.")
+	if avertissement := s.registryOf(org).Exposure(); avertissement != "" {
+		s.Console.Print(s.Console.Warn(avertissement))
+	}
+	return ExitOK, nil
+}
+
+// grantTeamFromMenu propose les équipes de l'organisation, puis en accorde une.
+func (s *Session) grantTeamFromMenu() error {
+	if err := s.authenticate(); err != nil {
+		return err
+	}
+	if err := s.chooseOrg(); err != nil {
+		return err
+	}
+	equipes, err := s.registryOf(s.Settings.Org).Teams()
+	if err != nil {
+		return err
+	}
+	if len(equipes) == 0 {
+		// Un compte qui n'est pas membre n'en voit aucune : ce n'est pas une
+		// panne, il n'y a rien à proposer.
+		s.Console.Note("Aucune équipe visible dans « %s ».", s.Settings.Org)
+		return nil
+	}
+	options := make([]ui.Option, 0, len(equipes)+1)
+	for _, equipe := range equipes {
+		options = append(options, ui.Option{Value: equipe.Slug, Label: equipe.Name})
+	}
+	options = append(options, ui.Option{Value: "revenir", Label: "Revenir"})
+	choix, err := s.Prompt.Choose("Équipe à qui donner accès", options, "revenir")
+	if err != nil || choix == "revenir" {
+		return err
+	}
+	_, err = s.grantRegistryTeam(choix)
+	return err
+}

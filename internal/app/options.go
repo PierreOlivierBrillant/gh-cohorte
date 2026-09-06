@@ -38,7 +38,10 @@ type Options struct {
 	// passé, puis quitte. Le nom du dépôt doit être retapé : aucune option,
 	// « --yes » compris, ne court-circuite cette confirmation.
 	ForgetRegistryHistory bool
-	Roster                string
+	// RegistryTeam donne à une équipe de l'organisation accès au registre,
+	// puis quitte.
+	RegistryTeam string
+	Roster       string
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
@@ -115,6 +118,7 @@ Drapeaux :
   --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
   --publish-registry       verser au registre de l'organisation les noms de ce poste
   --prefer-local           en cas de désaccord, garder le nom de ce poste
+  --registry-team EQUIPE   donner à une équipe accès au registre
   --forget-registry-history  réécrire le registre sans son historique
   --session COURT          ne lister que les étudiants d'une session (« a26 »)
   --course SIGLE           ne lister que les étudiants d'un cours (« 5n6 »)
@@ -193,6 +197,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"garder les noms de ce poste en cas de désaccord")
 	set.BoolVar(&options.ForgetRegistryHistory, "forget-registry-history", false,
 		"réécrire le registre sans son historique")
+	set.StringVar(&options.RegistryTeam, "registry-team", "",
+		"donner à une équipe accès au registre")
 	session := set.String("session", "", "ne lister qu'une session")
 	sigle := set.String("course", "", "ne lister qu'un cours")
 	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")

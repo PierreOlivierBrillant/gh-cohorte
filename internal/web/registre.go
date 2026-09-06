@@ -25,6 +25,50 @@ type publicationRendu struct {
 	Exposure     string               `json:"exposure,omitempty"`
 	Notice       string               `json:"notice,omitempty"`
 	RegistrySize int                  `json:"registry_size"`
+	// Teams énumère les équipes de l'organisation, pour qu'on puisse donner
+	// accès au registre à celle qui enseigne.
+	Teams []string `json:"teams,omitempty"`
+}
+
+// teamsOf énumère les équipes de l'organisation. N'en voir aucune n'est pas une
+// panne : un compte qui n'est pas membre n'en voit pas, et il n'y a alors rien
+// à proposer.
+func (s *Server) teamsOf(org string) []string {
+	equipes, err := s.registryOf(org).Teams()
+	if err != nil {
+		return nil
+	}
+	noms := make([]string, 0, len(equipes))
+	for _, equipe := range equipes {
+		noms = append(noms, equipe.Slug)
+	}
+	return noms
+}
+
+// handleRegistryGrant donne à une équipe accès au registre.
+func (s *Server) handleRegistryGrant(writer http.ResponseWriter, request *http.Request) {
+	org, err := valid.Login(request.PathValue("org"), "Organisation")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body struct {
+		Team string `json:"team"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	if err := s.registryOf(org).Grant(strings.TrimSpace(body.Team)); err != nil {
+		fail(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"team": body.Team,
+		"message": "L'équipe « " + body.Team + " » a désormais accès à « " +
+			registry.RepoName + " ». Cela ouvre un accès sans en fermer aucun : " +
+			"c'est la permission de base de l'organisation qui restreint le reste.",
+	})
 }
 
 // handleRegistryForgetHistory réécrit la branche du registre en un commit sans
@@ -83,7 +127,7 @@ func (s *Server) handleRegistryPreview(writer http.ResponseWriter, request *http
 		// L'avertissement sur la permission de base se donne ici : c'est le
 		// moment où l'on s'apprête à déposer des noms dans l'organisation.
 		Exposure: s.registryOf(org).Exposure(), Notice: avis,
-		RegistrySize: set.Len(),
+		RegistrySize: set.Len(), Teams: s.teamsOf(org),
 	})
 }
 

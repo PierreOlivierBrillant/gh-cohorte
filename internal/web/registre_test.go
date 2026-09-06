@@ -180,10 +180,11 @@ type publicationVue struct {
 		} `json:"ambiguous"`
 		Nameless []string `json:"nameless"`
 	} `json:"plan"`
-	Total        int    `json:"total"`
-	Published    int    `json:"published"`
-	Exposure     string `json:"exposure"`
-	RegistrySize int    `json:"registry_size"`
+	Total        int      `json:"total"`
+	Published    int      `json:"published"`
+	Exposure     string   `json:"exposure"`
+	RegistrySize int      `json:"registry_size"`
+	Teams        []string `json:"teams"`
 }
 
 // L'aperçu montre ce que publier ferait, sans rien écrire.
@@ -324,5 +325,33 @@ func TestEffacerLHistoriqueGardeLeContenu(t *testing.T) {
 		if !strings.Contains(contenu, attendu) {
 			t.Fatalf("« %s » a disparu du registre :\n%s", attendu, contenu)
 		}
+	}
+}
+
+// ------------------------------------------------------------- accès d'équipe
+
+// L'aperçu propose les équipes de l'organisation, et en accorder une ouvre un
+// accès — ce que le message dit sans laisser croire qu'il en ferme d'autres.
+func TestDonnerAccesAUneEquipeDepuisLInterface(t *testing.T) {
+	state := fakegh.NewState()
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01", "Émilie Côté", "emilie-cote"))
+
+	var apercu publicationVue
+	h.json(http.MethodGet, "/api/orgs/acme/registry", nil, &apercu)
+	if len(apercu.Teams) != 2 || apercu.Teams[0] != "enseignants" {
+		t.Fatalf("équipes proposées = %v", apercu.Teams)
+	}
+
+	var bilan struct {
+		Team    string `json:"team"`
+		Message string `json:"message"`
+	}
+	h.json(http.MethodPost, "/api/orgs/acme/registry/team",
+		map[string]any{"team": "enseignants"}, &bilan)
+	if droit := state.TeamRepos["acme/enseignants"]["acme/"+registry.RepoName]; droit == "" {
+		t.Fatalf("aucun droit accordé : %+v", state.TeamRepos)
+	}
+	if !strings.Contains(bilan.Message, "sans en fermer aucun") {
+		t.Errorf("message = %q", bilan.Message)
 	}
 }

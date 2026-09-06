@@ -679,6 +679,43 @@ func (c *Client) ListOrgMemberships(onPage func(total int)) ([]Membership, error
 	return all, err
 }
 
+// Team est une équipe de l'organisation.
+type Team struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	// Privacy vaut « secret » ou « closed » ; les équipes secrètes ne sont
+	// visibles que de leurs membres.
+	Privacy string `json:"privacy"`
+}
+
+// ListOrgTeams énumère les équipes de l'organisation. La portée « read:org »
+// est nécessaire, et un compte qui n'est pas membre n'en voit aucune.
+func (c *Client) ListOrgTeams(org string) ([]Team, error) {
+	var all []Team
+	err := c.paginate("orgs/"+url.PathEscape(org)+"/teams", nil, func(content []byte) (int, error) {
+		var page []Team
+		if err := json.Unmarshal(content, &page); err != nil {
+			return 0, err
+		}
+		all = append(all, page...)
+		return len(page), nil
+	})
+	return all, err
+}
+
+// GrantTeamRepo donne à une équipe un droit sur un dépôt de l'organisation.
+//
+// Cela ouvre un accès, cela n'en ferme aucun : ce qui restreint réellement un
+// dépôt, c'est la permission de base de l'organisation. Le dire au bon endroit
+// est la seule façon de ne pas laisser croire le contraire.
+func (c *Client) GrantTeamRepo(org, team, owner, repo, permission string) error {
+	_, err := c.do(http.MethodPut,
+		"orgs/"+url.PathEscape(org)+"/teams/"+url.PathEscape(team)+
+			"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo),
+		map[string]any{"permission": permission})
+	return err
+}
+
 // ListCollaborators renvoie les collaborateurs directs du dépôt. Sans
 // « affiliation=direct », la réponse inclurait tous les administrateurs de
 // l'organisation et deviendrait inexploitable.
