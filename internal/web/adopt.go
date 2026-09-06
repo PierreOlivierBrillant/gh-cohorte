@@ -185,22 +185,25 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		" vers « " + arrivee.Label() + " »"
 	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []Renamed
 		for index, ligne := range renommages {
 			if job.Canceled() {
 				break
 			}
-			if _, err := s.deps.Client.RenameRepo(depart.Org, ligne.Repo, ligne.Target); err != nil {
+			apres, err := s.deps.Client.RenameRepo(depart.Org, ligne.Repo, ligne.Target)
+			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, Renamed{Before: ligne.Repo, After: apres})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
 			job.Progress(index+1, len(renommages), ligne.Repo)
 		}
-		s.forget(depart.Org)
+		s.renamed(depart.Org, suivis)
 		bilan["renamed"], bilan["failed"] = renommes, echecs
 		return bilan, nil
 	})

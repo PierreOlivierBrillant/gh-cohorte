@@ -1,14 +1,18 @@
 package ghapi_test
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 )
 
 // client monte un faux GitHub et le client qui l'interroge.
@@ -265,6 +269,171 @@ func TestPaginationDesDepots(t *testing.T) {
 	if len(progression) != 4 {
 		t.Errorf("pages parcourues = %v", progression)
 	}
+}
+
+// noms rend les noms des dépôts dans l'ordre où ils ont été listés.
+func noms(depots []groups.RepoInfo) []string {
+	liste := make([]string, 0, len(depots))
+	for _, depot := range depots {
+		liste = append(liste, depot.Name)
+	}
+	return liste
+}
+
+// attendus compose les noms que le faux serveur rend, dans son ordre à lui.
+func attendus(nombre int) []string {
+	liste := make([]string, 0, nombre)
+	for index := 0; index < nombre; index++ {
+		liste = append(liste, fmt.Sprintf("tp1-%03d", index))
+	}
+	return liste
+}
+
+// peuple ajoute des dépôts nommés de façon à ce que l'ordre alphabétique du
+// faux serveur soit aussi leur ordre de création.
+func peuple(state *fakegh.State, nombre int) {
+	for index := 0; index < nombre; index++ {
+		state.AddRepo("acme", fmt.Sprintf("tp1-%03d", index), true)
+	}
+}
+
+// Les pages se chargent de front, mais rien ne doit sortir de l'ordre : c'est
+// ce qui permet à l'appelant d'accumuler sans verrou, et ce qui garde le même
+// ordre de départ d'une exécution à l'autre.
+func TestPaginationParalleleGardeLOrdre(t *testing.T) {
+	state := fakegh.NewState()
+	state.PerPage = 10 // 25 pages, soit plusieurs volées
+	peuple(state, 250)
+	c, serveur := client(t, state)
+
+	depots, err := c.ListOrgRepos("acme", nil)
+	if err != nil {
+		t.Fatalf("ListOrgRepos : %v", err)
+	}
+	if obtenu, voulu := noms(depots), attendus(250); !slices.Equal(obtenu, voulu) {
+		t.Fatalf("ordre rompu : %v", premiereDifference(obtenu, voulu))
+	}
+	// Chaque page une fois, jamais deux : la première en série, les autres de front.
+	if appels := serveur.State.CallCount("GET /orgs/acme/repos"); appels != 25 {
+		t.Errorf("%d requête(s) de page, 25 attendues", appels)
+	}
+}
+
+// Compter les requêtes ne dit pas si elles ont été menées de front. La barrière
+// le dit : elle retient chaque page jusqu'à ce qu'un certain nombre soit en
+// vol, ce qui ne peut arriver que si le client en a plusieurs ensemble.
+func TestPaginationChargeLesPagesDeFront(t *testing.T) {
+	const front = 4
+
+	state := fakegh.NewState()
+	state.PerPage = 10 // 20 pages, largement plus qu'une volée
+	peuple(state, 200)
+
+	barriere := nouvelleBarriere(front, 2*time.Second)
+	state.Hook = func(request *http.Request) {
+		// La première page est chargée seule, avant qu'on sache combien il y en
+		// a : la retenir bloquerait tout le reste.
+		if !strings.Contains(request.URL.Path, "/orgs/acme/repos") ||
+			request.URL.Query().Get("page") == "1" {
+			return
+		}
+		barriere.attendre()
+	}
+
+	c, _ := client(t, state)
+	if _, err := c.ListOrgRepos("acme", nil); err != nil {
+		t.Fatalf("ListOrgRepos : %v", err)
+	}
+	if !barriere.atteinte() {
+		t.Errorf("jamais %d pages en vol ensemble : elles sont restées en série", front)
+	}
+}
+
+// barriere retient les requêtes jusqu'à ce que « seuil » d'entre elles soient
+// en vol. Le délai la libère si le compte n'est jamais atteint : un client
+// resté en série doit échouer sur une assertion, pas se figer.
+type barriere struct {
+	seuil  int
+	delai  time.Duration
+	ouvrir sync.Once
+	ouvert chan struct{}
+
+	mutex   sync.Mutex
+	envol   int
+	franchi bool
+}
+
+func nouvelleBarriere(seuil int, delai time.Duration) *barriere {
+	return &barriere{seuil: seuil, delai: delai, ouvert: make(chan struct{})}
+}
+
+func (b *barriere) attendre() {
+	b.mutex.Lock()
+	b.envol++
+	assez := b.envol >= b.seuil
+	if assez {
+		b.franchi = true
+	}
+	b.mutex.Unlock()
+
+	if assez {
+		b.ouvrir.Do(func() { close(b.ouvert) })
+		return
+	}
+	select {
+	case <-b.ouvert:
+	case <-time.After(b.delai):
+		// Une seule attente perdue : la barrière s'ouvre pour toutes les autres.
+		b.ouvrir.Do(func() { close(b.ouvert) })
+	}
+}
+
+func (b *barriere) atteinte() bool {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	return b.franchi
+}
+
+// Un point d'API qui n'annonce pas de dernière page — pagination par curseur,
+// instance Enterprise — doit rester parcouru page après page.
+func TestPaginationSansDernierePageSuitNext(t *testing.T) {
+	state := fakegh.NewState()
+	state.PerPage = 10
+	state.NoLastLink = true
+	peuple(state, 95)
+	c, serveur := client(t, state)
+
+	var progression []int
+	depots, err := c.ListOrgRepos("acme", func(total int) {
+		progression = append(progression, total)
+	})
+	if err != nil {
+		t.Fatalf("ListOrgRepos : %v", err)
+	}
+	if obtenu, voulu := noms(depots), attendus(95); !slices.Equal(obtenu, voulu) {
+		t.Fatalf("ordre rompu : %v", premiereDifference(obtenu, voulu))
+	}
+	if len(progression) != 10 {
+		t.Errorf("pages parcourues = %v", progression)
+	}
+	if appels := serveur.State.CallCount("GET /orgs/acme/repos"); appels != 10 {
+		t.Errorf("%d requête(s) de page, 10 attendues", appels)
+	}
+}
+
+// premiereDifference dit où deux listes divergent, plutôt que de les afficher
+// en entier : deux cent cinquante noms ne se lisent pas dans un message d'échec.
+func premiereDifference(obtenu, voulu []string) string {
+	if len(obtenu) != len(voulu) {
+		return fmt.Sprintf("%d élément(s) au lieu de %d", len(obtenu), len(voulu))
+	}
+	for index := range obtenu {
+		if obtenu[index] != voulu[index] {
+			return fmt.Sprintf("rang %d : « %s » au lieu de « %s »",
+				index, obtenu[index], voulu[index])
+		}
+	}
+	return "aucune"
 }
 
 func TestPushFilesSurDepotVide(t *testing.T) {

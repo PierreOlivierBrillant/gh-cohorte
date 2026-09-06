@@ -465,42 +465,168 @@ func (c *Client) DeleteRepo(owner, repo string) error {
 
 // ------------------------------------------------------------------ inventaire
 
-var nextLinkRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
+var (
+	nextLinkRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
+	lastLinkRe = regexp.MustCompile(`<([^>]+)>;\s*rel="last"`)
+	pageNumRe  = regexp.MustCompile(`[?&]page=(\d+)`)
+)
 
-// paginate parcourt toutes les pages d'une collection en suivant l'en-tête Link.
+// PageSize est le nombre d'éléments demandés par page ; c'est le maximum que
+// GitHub accorde.
+const PageSize = 100
+
+// ParallelPages borne le nombre de pages chargées de front. Une volée suffit à
+// effacer l'attente ; en charger davantage n'apporterait qu'un pic de mémoire
+// et les limites secondaires de GitHub, dont l'attente coûte plus cher que le
+// parallélisme ne rapporte.
+const ParallelPages = 8
+
+// paginate parcourt toutes les pages d'une collection.
+//
+// GitHub annonce dès la première page combien il y en a — « Link: rel="last" ».
+// Les suivantes se chargent donc de front plutôt qu'à la file : une
+// organisation de plusieurs milliers de dépôts en compte des dizaines, et les
+// enchaîner une par une y coûtait une quinzaine de secondes.
+//
+// Elles restent lues dans l'ordre où GitHub les rend. C'est ce qui permet à
+// « collect » d'accumuler sans être sûr d'emploi depuis plusieurs goroutines,
+// et ce qui garde d'une exécution à l'autre le même ordre de départ.
+//
+// Un point d'API qui n'annonce pas de dernière page — une collection qui tient
+// sur une seule, une pagination par curseur — retombe sur le suivi de
+// « rel="next" », page après page.
 func (c *Client) paginate(path string, onPage func(total int), collect func([]byte) (int, error)) error {
 	separator := "?"
 	if strings.Contains(path, "?") {
 		separator = "&"
 	}
-	next := c.url(path + separator + "per_page=100")
-	total := 0
+	base := path + separator + "per_page=" + strconv.Itoa(PageSize)
+
+	content, link, err := c.fetchPage(c.url(base + "&page=1"))
+	if err != nil {
+		return err
+	}
+	total, err := absorb(collect, onPage, content, 0)
+	if err != nil {
+		return err
+	}
+	if last := lastPage(link); last > 1 {
+		return c.parallelPages(base, last, total, onPage, collect)
+	}
+	return c.followNext(nextLink(link), total, onPage, collect)
+}
+
+// fetchPage télécharge une page et rend son corps avec son en-tête « Link ».
+// L'adresse est prise telle quelle : celle qu'on compose comme celle que
+// GitHub annonce dans « Link », qui est absolue.
+func (c *Client) fetchPage(address string) ([]byte, string, error) {
+	response, err := c.client().Request(http.MethodGet, address, nil)
+	if err != nil {
+		return nil, "", convert(err)
+	}
+	content, readErr := io.ReadAll(response.Body)
+	c.rememberScopes(response.Header)
+	link := response.Header.Get("Link")
+	response.Body.Close()
+	if readErr != nil {
+		return nil, "", &Error{
+			Status: response.StatusCode, Message: "Réponse illisible : " + readErr.Error()}
+	}
+	return content, link, nil
+}
+
+// absorb confie une page à l'appelant et rend le total cumulé.
+func absorb(collect func([]byte) (int, error), onPage func(total int),
+	content []byte, total int) (int, error) {
+	count, err := collect(content)
+	if err != nil {
+		return total, &Error{Message: "Réponse inattendue de GitHub : " + err.Error()}
+	}
+	total += count
+	if onPage != nil {
+		onPage(total)
+	}
+	return total, nil
+}
+
+// followNext enchaîne les pages une par une, en suivant « rel="next" ».
+func (c *Client) followNext(next string, total int,
+	onPage func(total int), collect func([]byte) (int, error)) error {
 	for next != "" {
-		response, err := c.client().Request(http.MethodGet, next, nil)
+		content, link, err := c.fetchPage(next)
 		if err != nil {
-			return convert(err)
+			return err
 		}
-		content, readErr := io.ReadAll(response.Body)
-		c.rememberScopes(response.Header)
-		link := response.Header.Get("Link")
-		response.Body.Close()
-		if readErr != nil {
-			return &Error{Status: response.StatusCode, Message: "Réponse illisible : " + readErr.Error()}
+		if total, err = absorb(collect, onPage, content, total); err != nil {
+			return err
 		}
-		count, err := collect(content)
-		if err != nil {
-			return &Error{Message: "Réponse inattendue de GitHub : " + err.Error()}
+		next = nextLink(link)
+	}
+	return nil
+}
+
+// parallelPages charge les pages restantes par volées, et lit chaque volée
+// dans l'ordre avant d'entamer la suivante. Rien n'est retenu au-delà d'une
+// volée : la mémoire ne dépend pas du nombre de pages, seulement de leur
+// taille.
+func (c *Client) parallelPages(base string, last, total int,
+	onPage func(total int), collect func([]byte) (int, error)) error {
+	for first := 2; first <= last; first += ParallelPages {
+		volee := ParallelPages
+		if reste := last - first + 1; reste < volee {
+			volee = reste
 		}
-		total += count
-		if onPage != nil {
-			onPage(total)
+		contenus := make([][]byte, volee)
+		echecs := make([]error, volee)
+
+		var groupe sync.WaitGroup
+		for offset := 0; offset < volee; offset++ {
+			groupe.Add(1)
+			go func(offset int) {
+				defer groupe.Done()
+				contenus[offset], _, echecs[offset] = c.fetchPage(
+					c.url(base + "&page=" + strconv.Itoa(first+offset)))
+			}(offset)
 		}
-		next = ""
-		if match := nextLinkRe.FindStringSubmatch(link); match != nil {
-			next = match[1]
+		groupe.Wait()
+
+		for offset, content := range contenus {
+			if echecs[offset] != nil {
+				return echecs[offset]
+			}
+			var err error
+			if total, err = absorb(collect, onPage, content, total); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// nextLink extrait de l'en-tête « Link » l'adresse de la page suivante.
+func nextLink(header string) string {
+	if match := nextLinkRe.FindStringSubmatch(header); match != nil {
+		return match[1]
+	}
+	return ""
+}
+
+// lastPage lit le rang de la dernière page annoncé par l'en-tête « Link ».
+// Zéro dit que GitHub ne l'annonce pas, et qu'il faut suivre « rel="next" ».
+func lastPage(header string) int {
+	match := lastLinkRe.FindStringSubmatch(header)
+	if match == nil {
+		return 0
+	}
+	rang := pageNumRe.FindStringSubmatch(match[1])
+	if rang == nil {
+		return 0
+	}
+	number, err := strconv.Atoi(rang[1])
+	if err != nil {
+		return 0
+	}
+	return number
 }
 
 // ListOrgRepos liste tous les dépôts de l'organisation.

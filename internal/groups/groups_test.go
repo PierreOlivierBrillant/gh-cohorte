@@ -222,3 +222,23 @@ func TestParseSelectionListeVide(t *testing.T) {
 		t.Errorf("ParseSelection = %v, %v", indices, err)
 	}
 }
+
+// Les dépôts de service de l'organisation ne sont pas des dépôts d'étudiants :
+// « .github » porte les gabarits communs, et l'outil y rangera le sien.
+func TestDepotsDeServiceEcartes(t *testing.T) {
+	inventaire := []groups.RepoInfo{
+		{Name: ".github"},
+		{Name: "a26.5n6.01.tp1.emilie-cote"},
+		{Name: ".cohorte"},
+		{Name: "tp1-jlpicard"},
+	}
+	restants := groups.Ordinary(inventaire)
+	if len(restants) != 2 ||
+		restants[0].Name != "a26.5n6.01.tp1.emilie-cote" || restants[1].Name != "tp1-jlpicard" {
+		t.Fatalf("inventaire retenu = %+v", restants)
+	}
+	// Un point ailleurs qu'en tête sépare les niveaux : ce n'est pas un service.
+	if groups.Service("a26.5n6.01.tp1.emilie-cote") {
+		t.Error("un nom de la nomenclature n'est pas un dépôt de service")
+	}
+}

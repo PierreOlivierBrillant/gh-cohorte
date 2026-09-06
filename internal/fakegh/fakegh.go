@@ -56,6 +56,10 @@ type State struct {
 	Scopes         string
 	MembershipRole string
 	PerPage        int // taille de page forcée, pour éprouver la pagination
+	// NoLastLink retire « rel="last" » de l'en-tête Link, comme le font les
+	// points d'API qui paginent par curseur. Le client doit alors retomber sur
+	// le suivi de « rel="next" », page après page.
+	NoLastLink bool
 
 	Orgs map[string]string // login → nom affiché
 	// Rôle du compte connecté par organisation ; à défaut, MembershipRole vaut
@@ -81,6 +85,12 @@ type State struct {
 	Flaky  map[string]int
 
 	Calls []string
+
+	// Hook, quand il est posé, est appelé au début de chaque requête, hors
+	// verrou et depuis la goroutine qui la traite. C'est par là qu'un test
+	// observe — ou retient — les requêtes en vol : compter les requêtes ne dit
+	// pas si elles ont été menées de front, seule leur simultanéité le dit.
+	Hook func(request *http.Request)
 
 	nextInvitation int64
 }
@@ -278,6 +288,13 @@ func (s *Server) handle(writer http.ResponseWriter, request *http.Request) {
 
 	state.mutex.Lock()
 	state.Calls = append(state.Calls, key)
+	hook := state.Hook
+	state.mutex.Unlock()
+	if hook != nil {
+		hook(request)
+	}
+
+	state.mutex.Lock()
 	if remaining, found := state.Flaky[key]; found && remaining > 0 {
 		state.Flaky[key] = remaining - 1
 		state.mutex.Unlock()
@@ -756,16 +773,29 @@ func (s *Server) sendPage(writer http.ResponseWriter, request *http.Request, rep
 	for _, repo := range repos[start:end] {
 		payload = append(payload, s.repoPayload(repo))
 	}
+	// GitHub annonce à la fois la page suivante et la dernière ; c'est cette
+	// dernière qui permet au client de charger les pages de front. Les omettre
+	// laisserait le parcours parallèle hors des tests.
 	if end < len(repos) {
-		next := *request.URL
-		query := next.Query()
-		query.Set("page", strconv.Itoa(page+1))
-		query.Set("per_page", strconv.Itoa(perPage))
-		next.RawQuery = query.Encode()
-		writer.Header().Set("Link",
-			fmt.Sprintf("<%s%s>; rel=\"next\"", s.Server.URL, next.RequestURI()))
+		liens := []string{fmt.Sprintf("<%s>; rel=\"next\"", s.pageURL(request, page+1, perPage))}
+		if !s.State.NoLastLink {
+			dernier := (len(repos) + perPage - 1) / perPage
+			liens = append(liens,
+				fmt.Sprintf("<%s>; rel=\"last\"", s.pageURL(request, dernier, perPage)))
+		}
+		writer.Header().Set("Link", strings.Join(liens, ", "))
 	}
 	s.send(writer, 200, payload)
+}
+
+// pageURL compose l'adresse absolue d'une page, comme GitHub la met dans « Link ».
+func (s *Server) pageURL(request *http.Request, page, perPage int) string {
+	cible := *request.URL
+	query := cible.Query()
+	query.Set("page", strconv.Itoa(page))
+	query.Set("per_page", strconv.Itoa(perPage))
+	cible.RawQuery = query.Encode()
+	return s.Server.URL + cible.RequestURI()
 }
 
 func (s *Server) send(writer http.ResponseWriter, status int, payload any) {

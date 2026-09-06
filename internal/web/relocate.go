@@ -115,23 +115,26 @@ func (s *Server) handleRelocate(writer http.ResponseWriter, request *http.Reques
 		" vers « " + plan.arrivee.Label() + " »"
 	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []Renamed
 		for index, ligne := range plan.lignes {
 			if job.Canceled() {
 				break
 			}
-			if _, err := s.deps.Client.RenameRepo(
-				plan.depart.Org, ligne.Repo, ligne.Target); err != nil {
+			apres, err := s.deps.Client.RenameRepo(
+				plan.depart.Org, ligne.Repo, ligne.Target)
+			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, Renamed{Before: ligne.Repo, After: apres})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
 			job.Progress(index+1, len(plan.lignes), ligne.Repo)
 		}
-		s.forget(plan.depart.Org)
+		s.renamed(plan.depart.Org, suivis)
 
 		bilan := map[string]any{
 			"renamed": renommes, "failed": echecs,

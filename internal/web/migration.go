@@ -194,17 +194,19 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 	label := "Déplacement de « " + cours.Label() + " » vers " + cible.Scope()
 	job := s.jobs.Start("migration", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []Renamed
 		for index, ligne := range prets {
 			if job.Canceled() {
 				break
 			}
-			_, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target)
+			apres, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target)
 			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, Renamed{Before: ligne.Repo, After: apres})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
@@ -213,7 +215,7 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 		for _, ligne := range bloques {
 			job.Warn(ligne.Repo + " laissé en place : " + ligne.Problem)
 		}
-		s.forget(cours.Org)
+		s.renamed(cours.Org, suivis)
 
 		suit := bascule(len(bloques), echecs) && !job.Canceled()
 		if suit {

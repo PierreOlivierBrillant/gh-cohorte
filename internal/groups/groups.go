@@ -30,6 +30,30 @@ type RepoInfo struct {
 	PushedAt string `json:"pushed_at"`
 }
 
+// Service dit qu'un dépôt n'appartient à aucun groupe : c'est un dépôt de
+// service de l'organisation. GitHub en réserve un — « .github », qui porte les
+// gabarits communs — et l'outil y rangera le sien.
+//
+// Le point de tête suffit à les reconnaître, et il ne peut désigner qu'eux : la
+// slugification ne le produit jamais, et un nom de la nomenclature qui
+// commencerait par lui aurait un premier niveau vide.
+func Service(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), ".")
+}
+
+// Ordinary écarte d'un inventaire les dépôts de service. C'est fait une fois,
+// là où l'inventaire est chargé, pour que ni la détection des groupes, ni les
+// listes, ni les décomptes n'aient à s'en préoccuper.
+func Ordinary(repos []RepoInfo) []RepoInfo {
+	gardes := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if !Service(repo.Name) {
+			gardes = append(gardes, repo)
+		}
+	}
+	return gardes
+}
+
 // Repo est un dépôt appartenant à un groupe.
 type Repo struct {
 	Name     string

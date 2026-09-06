@@ -40,6 +40,9 @@ func (s *Session) orgRepos(org string, force bool) ([]groups.RepoInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Les dépôts de service sont écartés ici, une fois : rien de ce qui suit
+	// n'a alors à se demander si « .github » est un groupe.
+	repos = groups.Ordinary(repos)
 	s.Console.Printf("  %s dépôt(s) dans l'organisation.", s.Console.OK(itoa(len(repos))))
 	s.Cache.Set(key, repos)
 	return repos, nil

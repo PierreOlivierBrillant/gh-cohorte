@@ -422,6 +422,8 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 			job.Progress(index+1, len(remises), remise.Name)
 		}
 		if crees > 0 {
+			// Une création oblige à relire : le dépôt neuf n'est pas dans
+			// l'inventaire, et sa date de dernier envoi ne s'invente pas.
 			s.forget(cours.Org)
 		}
 		return map[string]any{
@@ -523,22 +525,25 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 	label := "Dépôts de @" + apres.Username + " au nom de " + apres.FullName
 	job := s.jobs.Start("renommage", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []Renamed
 		for index, ligne := range renommages {
 			if job.Canceled() {
 				break
 			}
-			if _, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target); err != nil {
+			apres, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target)
+			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, Renamed{Before: ligne.Repo, After: apres})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
 			job.Progress(index+1, len(renommages), ligne.Repo)
 		}
-		s.forget(cours.Org)
+		s.renamed(cours.Org, suivis)
 		bilan["renamed"], bilan["failed"] = renommes, echecs
 		return bilan, nil
 	})
@@ -938,6 +943,7 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 			return nil, err
 		}
 		if !body.DryRun && report.Count(runner.Created) > 0 {
+			// Voir « updateInventory » : une création se relit, un renommage se suit.
 			s.forget(cours.Org)
 		}
 
