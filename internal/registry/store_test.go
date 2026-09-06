@@ -424,19 +424,35 @@ func TestUnRegistreExistantMaisVideNeBloqueRien(t *testing.T) {
 	}
 }
 
-// Le même dépôt vide ne doit pas non plus faire échouer ce qui l'entoure :
-// donner accès à une équipe, ou constater qu'il n'y a pas d'historique.
-func TestUnRegistreVideNeCassePasLesOperationsVoisines(t *testing.T) {
+// Un dépôt vide ne doit pas non plus faire échouer ce qui l'entoure. Donner
+// accès à une équipe l'amorce au passage : c'est le même besoin, un dépôt que
+// GitHub tienne pour un dépôt git.
+func TestDonnerAccesAmorceUnDepotVide(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddRepo("acme", registry.RepoName, true)
 	store, _ := magasin(t, state)
 
 	if err := store.Grant("enseignants"); err != nil {
-		t.Fatalf("Grant sur un registre vide : %v", err)
+		t.Fatalf("Grant sur un dépôt vide : %v", err)
 	}
-	if _, err := store.ForgetHistory(); err == nil {
-		t.Error("un registre sans commit n'a pas d'historique : il faut le dire")
-	} else if strings.Contains(err.Error(), "409") {
+	if droit := state.TeamRepos["acme/enseignants"]["acme/"+registry.RepoName]; droit == "" {
+		t.Fatalf("aucun droit accordé : %+v", state.TeamRepos)
+	}
+	fichiers := state.Files("acme/"+registry.RepoName, registry.Branch)
+	if !strings.Contains(fichiers[registry.ReadmeFile], "gh cohorte") {
+		t.Fatalf("le dépôt n'a pas été amorcé : %v", sortedNoms(fichiers))
+	}
+}
+
+// Sur un dépôt qui n'existe pas du tout, il n'y a pas d'historique à effacer,
+// et le dire en français vaut mieux qu'un code HTTP.
+func TestEffacerLHistoriqueDUnDepotAbsentLeDit(t *testing.T) {
+	store, _ := magasin(t, nil)
+	_, err := store.ForgetHistory()
+	if err == nil {
+		t.Fatal("il n'y a rien à effacer : il faut le dire")
+	}
+	if strings.Contains(err.Error(), "409") || strings.Contains(err.Error(), "HTTP") {
 		t.Errorf("le refus doit être en français, pas un code HTTP : %v", err)
 	}
 }
@@ -549,12 +565,30 @@ func sortedNoms(fichiers map[string]string) []string {
 // premier commit évite cet état transitoire au lieu d'avoir à le traverser :
 // aucune requête ne part donc vers un dépôt vide.
 func TestLeDepotEstCreeDejaGarni(t *testing.T) {
+	verifierAucuneRequeteVersUnDepotVide(t, nil)
+}
+
+// Et le cas qui a mordu : le dépôt existe déjà, créé par une tentative
+// précédente, mais n'a jamais reçu de commit. « auto_init » ne s'applique qu'à
+// la création : ce dépôt-là doit être amorcé autrement.
+func TestUnDepotDejaCreeMaisVideSAmorce(t *testing.T) {
+	verifierAucuneRequeteVersUnDepotVide(t, func(state *fakegh.State) {
+		state.AddRepo("acme", registry.RepoName, true) // créé, aucun commit
+	})
+}
+
+// verifierAucuneRequeteVersUnDepotVide observe chaque requête adressée au
+// registre : aucune ne doit partir alors que le dépôt existe sans porter de
+// commit, car c'est là que GitHub répond « Git Repository is empty. ».
+func verifierAucuneRequeteVersUnDepotVide(t *testing.T, preparer func(*fakegh.State)) {
+	t.Helper()
 	state := fakegh.NewState()
+	if preparer != nil {
+		preparer(state)
+	}
 	serveur := fakegh.New(state)
 	t.Cleanup(serveur.Close)
 
-	// Toute requête adressée au registre est observée : si l'une d'elles part
-	// alors que le dépôt n'a pas de commit, le test doit le dire.
 	depot := "acme/" + registry.RepoName
 	var videAuPassage []string
 	var mutex sync.Mutex
@@ -567,6 +601,18 @@ func TestLeDepotEstCreeDejaGarni(t *testing.T) {
 		}
 		if _, existe := state.Repos[depot]; !existe {
 			return // le dépôt n'est pas encore né : c'est autre chose
+		}
+		// Deux requêtes ont le droit d'atteindre un dépôt vide, et elles
+		// seules. Relever la tête de la branche, dont c'est le travail même
+		// que d'apprendre qu'il n'y en a pas — GitHub y répond 409, et le
+		// client s'y attend. Et l'API des contenus, la seule qui sache écrire
+		// dans un dépôt que l'API Git refuse encore : c'est par elle que
+		// l'amorçage passe.
+		if strings.HasSuffix(request.URL.Path, "/git/ref/heads/"+registry.Branch) {
+			return
+		}
+		if request.Method == http.MethodPut && strings.Contains(request.URL.Path, "/contents/") {
+			return
 		}
 		mutex.Lock()
 		videAuPassage = append(videAuPassage, request.Method+" "+request.URL.Path)

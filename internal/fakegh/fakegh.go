@@ -689,6 +689,58 @@ func (s *Server) put(writer http.ResponseWriter, request *http.Request, path str
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
 
+	if match := contentsRe.FindStringSubmatch(path); match != nil {
+		full, fichier := match[1]+"/"+match[2], match[3]
+		depot, exists := state.Repos[full]
+		if !exists {
+			s.notFound(writer)
+			return
+		}
+		branche, _ := body["branch"].(string)
+		if branche == "" {
+			branche = depot.DefaultBranch
+		}
+		raw, err := base64.StdEncoding.DecodeString(fmt.Sprint(body["content"]))
+		if err != nil {
+			s.send(writer, 422, map[string]string{"message": "Invalid base64 content"})
+			return
+		}
+		message, _ := body["message"].(string)
+		fourni, _ := body["sha"].(string)
+
+		// L'arbre courant est repris : l'API des contenus écrit un fichier,
+		// elle n'efface pas les autres.
+		parent := state.Refs[full+"@"+branche]
+		arbre := map[string]treeEntry{}
+		for chemin, entree := range state.Trees[state.Commits[parent].Tree] {
+			arbre[chemin] = entree
+		}
+		if _, deja := arbre[fichier]; deja && fourni == "" {
+			s.send(writer, 422, map[string]string{
+				"message": fichier + " already exists; \"sha\" wasn't supplied."})
+			return
+		}
+
+		blob := digest("blob:" + fichier + ":" + string(raw))
+		state.Blobs[blob] = raw
+		arbre[fichier] = treeEntry{Mode: "100644", Blob: blob}
+		arbreSHA := digest("tree:" + full + ":" + fmt.Sprint(sortedKeys(arbre)) +
+			fmt.Sprint(len(state.Trees)))
+		state.Trees[arbreSHA] = arbre
+		var parents []string
+		if parent != "" {
+			parents = []string{parent}
+		}
+		commitSHA := digest("commit:" + full + ":" + arbreSHA + fmt.Sprint(parents) + ":" + message)
+		state.Commits[commitSHA] = commit{Tree: arbreSHA, Parents: parents, Message: message}
+		state.Refs[full+"@"+branche] = commitSHA
+		state.touchLocked(full)
+		s.send(writer, 201, map[string]any{
+			"content": map[string]any{"path": fichier, "sha": blob},
+			"commit":  map[string]any{"sha": commitSHA},
+		})
+		return
+	}
 	if match := teamRepoRe.FindStringSubmatch(path); match != nil {
 		org, equipe, depot := match[1], match[2], match[3]+"/"+match[4]
 		connue := false

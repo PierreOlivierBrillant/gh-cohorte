@@ -939,6 +939,38 @@ func (c *Client) ResetBranchHead(owner, repo, branch, commitSHA string) error {
 	return err
 }
 
+// PutFile crée un fichier par l'API des contenus et rend le SHA du commit.
+//
+// C'est la seule façon de déposer le premier commit d'un dépôt qui n'en a
+// aucun : GitHub ne tient pas encore un tel dépôt pour un dépôt git, et son API
+// Git y répond « Git Repository is empty. ».
+//
+// Un fichier déjà présent est refusé — le SHA du blob serait exigé —, et ce
+// refus vaut ici pour ce qu'il dit : quelqu'un est arrivé avant.
+func (c *Client) PutFile(owner, repo, file, branch, message string, content []byte) (string, error) {
+	body := map[string]any{
+		"message": message,
+		"content": base64.StdEncoding.EncodeToString(content),
+	}
+	if branch != "" {
+		body["branch"] = branch
+	}
+	response, err := c.do(http.MethodPut,
+		repoPath(owner, repo)+"/contents/"+escapePath(file), body)
+	if err != nil {
+		return "", notFastForward(err)
+	}
+	var payload struct {
+		Commit struct {
+			SHA string `json:"sha"`
+		} `json:"commit"`
+	}
+	if err := response.JSON(&payload); err != nil {
+		return "", &Error{Message: "Réponse illisible : " + err.Error()}
+	}
+	return payload.Commit.SHA, nil
+}
+
 // PushFile est un fichier à déposer dans un dépôt.
 type PushFile struct {
 	Path    string

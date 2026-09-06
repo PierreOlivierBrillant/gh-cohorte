@@ -189,13 +189,13 @@ func (s *Store) Apply(change Change) (*Set, error) {
 		if !bouge {
 			return snapshot.Set, nil
 		}
-		cree, err := s.ensureRepo()
+		agi, err := s.ensureRepo(snapshot.Head)
 		if err != nil {
 			return nil, err
 		}
-		if cree {
-			// Le dépôt vient de naître avec son premier commit : la tête
-			// relevée avant lui n'existait pas. On recommence, c'est tout.
+		if agi {
+			// Le dépôt vient de naître, ou d'être amorcé : la tête relevée
+			// avant ne vaut plus. On recommence, c'est tout.
 			continue
 		}
 		commit, err := s.commit(suivant, snapshot, change.message())
@@ -246,18 +246,23 @@ func (s *Store) commit(set *Set, snapshot Snapshot, message string) (string, err
 	return commit, err
 }
 
-// ensureRepo s'assure que le dépôt du registre existe et qu'il est privé. Le
-// booléen dit qu'il vient d'être créé.
+// ensureRepo s'assure que le dépôt du registre existe, qu'il est privé, et
+// qu'il porte au moins un commit. Le booléen dit qu'il a fallu agir : ce qu'on
+// avait relevé de la branche ne vaut alors plus, et l'appelant doit relire.
 //
-// Il naît avec son premier commit — « auto_init ». Un dépôt sans aucun commit
-// n'est pas un dépôt git pour GitHub, qui répond « Git Repository is empty. »
-// à qui vient y lire ; le faire naître garni évite cet état transitoire au lieu
-// d'avoir à le traverser.
+// Un dépôt sans aucun commit n'est pas encore un dépôt git pour GitHub, dont
+// l'API Git y répond « Git Repository is empty. ». Deux chemins y mènent, et
+// tous deux se rencontrent : un dépôt qu'on crée, et un dépôt déjà là mais
+// jamais rempli — par une écriture interrompue, ou fait à la main.
+//
+// Le premier naît garni : « auto_init » lui donne son commit initial. Le
+// second s'amorce par l'API des contenus, la seule qui sache écrire dans un
+// dépôt que l'API Git refuse encore.
 //
 // Le registre porte des noms d'étudiants. Il est créé privé, et l'outil refuse
 // d'y écrire s'il a été rendu public : mieux vaut une écriture qui échoue
 // bruyamment qu'une liste de noms exposée sans que personne s'en aperçoive.
-func (s *Store) ensureRepo() (bool, error) {
+func (s *Store) ensureRepo(head string) (bool, error) {
 	repo, err := s.client.GetRepo(s.org, RepoName)
 	if err != nil {
 		return false, s.step("ouverture", err)
@@ -275,7 +280,18 @@ func (s *Store) ensureRepo() (bool, error) {
 				"sera écrit tant qu'il le restera. Repassez-le en privé dans ses réglages "+
 				"GitHub.", s.org, RepoName)
 	}
-	return false, nil
+	if head != "" {
+		return false, nil
+	}
+	if _, err := s.client.PutFile(s.org, RepoName, ReadmeFile, Branch,
+		"Explique ce dépôt", Readme(s.org)); err != nil {
+		// Quelqu'un l'a amorcé pendant qu'on s'y préparait : relire suffit.
+		if errors.Is(err, ghapi.ErrNotFastForward) {
+			return true, nil
+		}
+		return false, s.step("amorçage", err)
+	}
+	return true, nil
 }
 
 // ForgetHistory réécrit la branche du registre en un seul commit, sans passé.
@@ -354,7 +370,13 @@ func (s *Store) Grant(team string) error {
 	if strings.TrimSpace(team) == "" {
 		return valid.Errorf("Aucune équipe désignée.")
 	}
-	if _, err := s.ensureRepo(); err != nil {
+	// Le registre n'est pas lu ici : seul l'état du dépôt compte, et un dépôt
+	// vide s'amorce avant qu'on n'y attache une équipe.
+	snapshot, err := s.load(false)
+	if err != nil {
+		return err
+	}
+	if _, err := s.ensureRepo(snapshot.Head); err != nil {
 		return err
 	}
 	return s.step("accès de l'équipe « "+team+" »",
