@@ -9,44 +9,24 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 )
 
-// adoption déclare un groupe lu par gabarit, comme l'adoption en produit : des
-// comptes GitHub, et pas un seul nom complet.
-func (h *harnais) adoption(gabarit string, comptes ...string) string {
-	h.t.Helper()
-	etudiants := make([]map[string]string, 0, len(comptes))
-	for _, compte := range comptes {
-		etudiants = append(etudiants, map[string]string{"username": compte, "full_name": ""})
-	}
-	var cree struct {
-		Scope string `json:"scope"`
-	}
-	h.json(http.MethodPost, "/api/classrooms", map[string]any{
-		"pattern": gabarit, "students": etudiants,
-	}, &cree)
-	if cree.Scope == "" {
-		h.t.Fatal("groupe sans place")
-	}
-	return cree.Scope
-}
-
-// Le cas qui motive la fonctionnalité : un préfixe fourre-tout rassemble les
-// travaux de deux groupes, aucun nom complet n'est connu, et il faut bien en
-// sortir un. Les dépôts arrivent à la bonne place en gardant leur compte.
+// Le cas qui motive la fonctionnalité : un groupe rassemble les travaux de deux
+// cohortes, aucun nom complet n'est connu, et il faut bien en sortir un. Les
+// dépôts arrivent à la bonne place en gardant leur compte.
 func TestTravailSortiDunPrefixeFourreTout(t *testing.T) {
 	state := fakegh.NewState()
 	for _, nom := range []string{
-		"travail-de-tp1-jlpicard", "travail-de-tp1-aminata-d",
-		"travail-de-tp2-emilie-cote",
+		"h25.5n6.02.tp1.jlpicard", "h25.5n6.02.tp1.aminata-d",
+		"h25.5n6.02.tp2.emilie-cote",
 	} {
 		state.AddRepo("acme", nom, true)
 	}
 	h := nouveau(t, state)
-	depart := h.adoption("travail-de-{assignment}-{student}",
+	depart := h.sansNoms("h25", "5n6", "02",
 		"jlpicard", "aminata-d", "emilie-cote")
 
 	bilan := h.travail(http.MethodPost,
 		"/api/classrooms/"+depart+"/assignments/move", map[string]any{
-			"assignments": []map[string]string{{"id": "tp1"}},
+			"assignments": []map[string]string{{"id": "h25.5n6.02.tp1"}},
 			"new_group":   map[string]string{"session": "a26", "course": "5n6", "group": "01"},
 		})
 	if bilan["status"] != "terminé" {
@@ -62,13 +42,13 @@ func TestTravailSortiDunPrefixeFourreTout(t *testing.T) {
 
 	noms := h.depots()
 	sort.Strings(noms)
-	attendu := "a26.5n6.01.tp1.aminata-d,a26.5n6.01.tp1.jlpicard,travail-de-tp2-emilie-cote"
+	attendu := "a26.5n6.01.tp1.aminata-d,a26.5n6.01.tp1.jlpicard,h25.5n6.02.tp2.emilie-cote"
 	if strings.Join(noms, ",") != attendu {
 		t.Fatalf("dépôts : %v", noms)
 	}
 
-	// Les fiches des deux personnes ont suivi, et elles ont quitté le
-	// fourre-tout : il ne leur reste rien là-bas.
+	// Les fiches des deux personnes ont suivi, et elles ont quitté le groupe
+	// de départ : il ne leur reste rien là-bas.
 	var arrivee, reste struct {
 		Students []struct {
 			Username string `json:"username"`
@@ -89,13 +69,14 @@ func TestTravailSortiDunPrefixeFourreTout(t *testing.T) {
 // le compte GitHub rattache encore le dépôt à son étudiant.
 func TestLeNomCompletSeCorrigeApresLeDeplacement(t *testing.T) {
 	state := fakegh.NewState()
-	state.AddRepo("acme", "travail-de-tp1-jlpicard", true)
+	state.AddRepo("acme", "h25.5n6.02.tp1.jlpicard", true)
 	h := nouveau(t, state)
-	depart := h.adoption("travail-de-{assignment}-{student}", "jlpicard")
+	depart := h.sansNoms("h25", "5n6", "02",
+		"jlpicard")
 
 	h.travail(http.MethodPost, "/api/classrooms/"+depart+"/assignments/move",
 		map[string]any{
-			"assignments": []map[string]string{{"id": "tp1"}},
+			"assignments": []map[string]string{{"id": "h25.5n6.02.tp1"}},
 			"new_group":   map[string]string{"session": "a26", "course": "5n6", "group": "01"},
 		})
 
@@ -116,9 +97,10 @@ func TestLeNomCompletSeCorrigeApresLeDeplacement(t *testing.T) {
 // vérifier que ce sont bien ces dépôts-là qu'on sort du fourre-tout.
 func TestApercuDuDeplacementNecritRien(t *testing.T) {
 	state := fakegh.NewState()
-	state.AddRepo("acme", "travail-de-tp1-jlpicard", true)
+	state.AddRepo("acme", "h25.5n6.02.tp1.jlpicard", true)
 	h := nouveau(t, state)
-	depart := h.adoption("travail-de-{assignment}-{student}", "jlpicard")
+	depart := h.sansNoms("h25", "5n6", "02",
+		"jlpicard")
 
 	var apercu struct {
 		Ready       int    `json:"ready"`
@@ -133,7 +115,7 @@ func TestApercuDuDeplacementNecritRien(t *testing.T) {
 	}
 	h.json(http.MethodPost, "/api/classrooms/"+depart+"/assignments/move/preview",
 		map[string]any{
-			"assignments": []map[string]string{{"id": "tp1", "name": "Travail de session"}},
+			"assignments": []map[string]string{{"id": "h25.5n6.02.tp1", "name": "Travail de session"}},
 			"new_group":   map[string]string{"session": "a26", "course": "5n6", "group": "01"},
 		}, &apercu)
 
@@ -147,32 +129,8 @@ func TestApercuDuDeplacementNecritRien(t *testing.T) {
 		t.Fatalf("fiches qui suivraient : %+v", apercu.Students)
 	}
 	if noms := h.depots(); len(noms) != 1 ||
-		noms[0] != "travail-de-tp1-jlpicard" {
+		noms[0] != "h25.5n6.02.tp1.jlpicard" {
 		t.Fatalf("un aperçu n'écrit rien : %v", noms)
-	}
-}
-
-func TestDeplacementDeTravailRefuseUneArriveeHeritee(t *testing.T) {
-	state := fakegh.NewState()
-	state.AddRepo("acme", "travail-de-tp1-jlpicard", true)
-	state.AddRepo("acme", "vieux-tp1-emilie-cote", true)
-	h := nouveau(t, state)
-	depart := h.adoption("travail-de-{assignment}-{student}", "jlpicard")
-	arrivee := h.heritage("vieux", "emilie-cote")
-
-	reponse, contenu := h.requete(http.MethodPost,
-		"/api/classrooms/"+depart+"/assignments/move",
-		map[string]any{
-			"assignments": []map[string]string{{"id": "tp1"}}, "target": arrivee,
-		})
-	if reponse.StatusCode != http.StatusBadRequest {
-		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
-	}
-	if !strings.Contains(string(contenu), "nomenclature dépassée") {
-		t.Fatalf("message : %s", contenu)
-	}
-	if noms := h.depots(); len(noms) != 2 {
-		t.Fatalf("rien ne devait bouger : %v", noms)
 	}
 }
 
@@ -180,19 +138,20 @@ func TestDeplacementDeTravailRefuseUneArriveeHeritee(t *testing.T) {
 func TestDeplacementDeTravailRefuseUneCollision(t *testing.T) {
 	state := fakegh.NewState()
 	for _, nom := range []string{
-		"travail-de-tp1-jlpicard", "travail-de-tp1-aminata-d",
+		"h25.5n6.02.tp1.jlpicard", "h25.5n6.02.tp1.aminata-d",
 		"a26.5n6.01.tp1.jlpicard",
 	} {
 		state.AddRepo("acme", nom, true)
 	}
 	h := nouveau(t, state)
-	depart := h.adoption("travail-de-{assignment}-{student}", "jlpicard", "aminata-d")
+	depart := h.sansNoms("h25", "5n6", "02",
+		"jlpicard", "aminata-d")
 	arrivee := h.groupe("a26", "5n6", "01")
 
 	reponse, contenu := h.requete(http.MethodPost,
 		"/api/classrooms/"+depart+"/assignments/move",
 		map[string]any{
-			"assignments": []map[string]string{{"id": "tp1"}}, "target": arrivee,
+			"assignments": []map[string]string{{"id": "h25.5n6.02.tp1"}}, "target": arrivee,
 		})
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
@@ -210,18 +169,19 @@ func TestDeplacementDeTravailRefuseUneCollision(t *testing.T) {
 func TestPlusieursTravauxDeplacesEnsemble(t *testing.T) {
 	state := fakegh.NewState()
 	for _, nom := range []string{
-		"travail-de-tp1-jlpicard", "travail-de-tp2-jlpicard",
-		"travail-de-tp3-emilie-cote",
+		"h25.5n6.02.tp1.jlpicard", "h25.5n6.02.tp2.jlpicard",
+		"h25.5n6.02.tp3.emilie-cote",
 	} {
 		state.AddRepo("acme", nom, true)
 	}
 	h := nouveau(t, state)
-	depart := h.adoption("travail-de-{assignment}-{student}", "jlpicard", "emilie-cote")
+	depart := h.sansNoms("h25", "5n6", "02",
+		"jlpicard", "emilie-cote")
 	arrivee := h.groupe("h27", "420", "02")
 
 	bilan := h.travail(http.MethodPost,
 		"/api/classrooms/"+depart+"/assignments/move", map[string]any{
-			"assignments": []map[string]string{{"id": "tp1"}, {"id": "tp2"}},
+			"assignments": []map[string]string{{"id": "h25.5n6.02.tp1"}, {"id": "h25.5n6.02.tp2"}},
 			"target":      arrivee,
 		})
 	if bilan["status"] != "terminé" {
@@ -234,7 +194,7 @@ func TestPlusieursTravauxDeplacesEnsemble(t *testing.T) {
 
 	noms := h.depots()
 	sort.Strings(noms)
-	attendu := "h27.420.02.tp1.jlpicard,h27.420.02.tp2.jlpicard,travail-de-tp3-emilie-cote"
+	attendu := "h25.5n6.02.tp3.emilie-cote,h27.420.02.tp1.jlpicard,h27.420.02.tp2.jlpicard"
 	if strings.Join(noms, ",") != attendu {
 		t.Fatalf("dépôts : %v", noms)
 	}

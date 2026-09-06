@@ -11,9 +11,7 @@ import (
 )
 
 // Déplacer un groupe, c'est renommer ses dépôts pour qu'ils tiennent à une
-// autre place : la nomenclature courante quand ils viennent d'une ancienne, ou
-// une autre session, un autre cours, un autre numéro de groupe. Le mécanisme
-// est le même dans les deux cas — c'est pourquoi il n'y en a qu'un.
+// autre place : une autre session, un autre cours, un autre numéro de groupe.
 //
 // GitHub garde une redirection depuis l'ancien nom : les clones et les liens
 // déjà distribués continuent de fonctionner.
@@ -70,8 +68,7 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 		return cours, vide, nil, err
 	}
 	cible.Session, cible.Course, cible.Group = session, course, group
-	cible.LegacyPrefix, cible.LegacyPattern = "", ""
-	if !cours.Legacy() && strings.EqualFold(cours.Scope(), cible.Scope()) {
+	if strings.EqualFold(cours.Scope(), cible.Scope()) {
 		return cours, vide, nil, valid.Errorf(
 			"« %s » est déjà à cette place.", cours.Label())
 	}
@@ -140,7 +137,7 @@ func (s *Server) handleMigrationPreview(writer http.ResponseWriter, request *htt
 		fail(writer, err)
 		return
 	}
-	cours, cible, lignes, err := s.migrationPlan(request, body)
+	_, cible, lignes, err := s.migrationPlan(request, body)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -154,7 +151,7 @@ func (s *Server) handleMigrationPreview(writer http.ResponseWriter, request *htt
 		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"prefix": cours.LegacyPrefix, "scope": cible.Scope(),
+		"scope":   cible.Scope(),
 		"session": cible.Session, "course": cible.Course, "group": cible.Group,
 		"rows": lignes, "ready": prets, "blocked": bloques,
 		"switch": bascule(bloques, 0),

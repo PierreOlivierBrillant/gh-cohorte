@@ -482,7 +482,6 @@ function cheminDeLaVue(nom) {
     case 'organisation': return '/organisation';
     case 'annuaire': return '/etudiants';
     case 'nouveau-groupe': return '/nouveau-groupe';
-    case 'adoption': return '/adoption';
     case 'reglages': return '/reglages';
     case 'travaux': return `/g/${groupe}`;
     case 'assistant': return `/g/${groupe}/nouveau-travail`;
@@ -514,7 +513,7 @@ function lireAdresse() {
       };
     case 'etudiants':
       return { vue: 'annuaire' };
-    case 'nouveau-groupe': case 'adoption': case 'reglages': case 'organisation':
+    case 'nouveau-groupe': case 'reglages': case 'organisation':
       return { vue: morceaux[0] };
     default:
       return { vue: 'parcours', session: '', cours: '' };
@@ -543,7 +542,6 @@ async function allerA(route) {
   if (!ongletDeLaVue[route.vue]) {
     // Une adresse peut ouvrir un écran directement : il faut alors le remplir
     // comme le ferait le bouton qui y mène.
-    if (route.vue === 'adoption') preparerAdoption();
     if (route.vue === 'nouveau-groupe') preparerNouveauGroupe();
     afficherVue(route.vue, true);
     return;
@@ -702,10 +700,6 @@ function ficheDeLEntete(nom) {
     return { fil: [racine, { texte: 'Nouveau groupe' }], titre: 'Nouveau groupe',
       sousTitre: 'Des étudiants, une place dans la hiérarchie.' };
   }
-  if (nom === 'adoption') {
-    return { fil: [racine, { texte: 'Adopter par gabarit' }], titre: 'Adopter des dépôts',
-      sousTitre: `Dépôts de ${etat.organisation} qu'aucune convention n'organise.` };
-  }
   if (nom === 'reglages') {
     return { fil: [racine, { texte: 'Réglages' }], titre: 'Réglages',
       sousTitre: "Ce que l'outil retient d'une session à l'autre, et où il l'écrit." };
@@ -801,7 +795,6 @@ async function chargerGroupes(force) {
   etat.sessions = donnees.sessions || [];
   dessinerParcours();
   // La détection relit tout l'inventaire : elle n'a lieu que là où elle sert.
-  if (!$('vue-parcours').hidden) await montrerCandidats(etat.organisation, force);
 }
 
 // nomDeSession retrouve le nom long d'une session.
@@ -828,7 +821,6 @@ function dessinerParcours() {
   // Le nom long d'une session arrive avec les groupes : l'en-tête, dessiné
   // avant eux, doit être repris une fois qu'ils sont là.
   if (!$('vue-parcours').hidden) dessinerEntete('parcours', null);
-  $('candidats-accueil').hidden = !!(session || cours);
   const conteneur = $('parcours-liste');
   vider(conteneur);
 
@@ -1026,93 +1018,6 @@ async function retenirOrganisation(org) {
     etat.reglages.org = org;
     await api('PUT', '/api/settings', etat.reglages).catch(() => {});
   }
-}
-
-// --- les groupes repérés dans les dépôts
-
-async function montrerCandidats(org, force) {
-  const conteneur = $('accueil-candidats');
-  vider(conteneur);
-  if (!org) return;
-  enAttente(conteneur, `Lecture des dépôts de ${org}…`);
-
-  const donnees = await tenter(() => api('GET',
-    `/api/orgs/${encode(org)}/candidates${force ? '?refresh=1' : ''}`), 'Inventaire');
-  if (!donnees) {
-    enEchec(conteneur, "L'inventaire des dépôts n'a pas pu être lu.");
-    return;
-  }
-  vider(conteneur);
-
-  const candidats = donnees.candidates || [];
-  if (candidats.length === 0) {
-    conteneur.append(el('div', { classe: 'boite-vide' },
-      el('p', { texte: `Aucun groupe repéré dans « ${org} ».` }),
-      el('p', { classe: 'note',
-        texte: `${donnees.total} dépôt(s) lus. Soit ils appartiennent déjà à un groupe ` +
-          'déclaré, soit leurs noms ne laissent pas deviner de découpe : ' +
-          '« Nouveau groupe » permet alors de la déclarer à la main.' })));
-    return;
-  }
-  for (const candidat of candidats) {
-    conteneur.append(el('button', {
-      classe: 'travail-ligne', type: 'button',
-      onclick: () => adopter(candidat, org),
-    },
-      el('span', { classe: 'travail-infos' },
-        el('span', { classe: 'titre',
-          texte: candidat.prefix || "dépôts sans préfixe commun" }),
-        el('span', { classe: 'detail',
-          texte: candidat.assignments.join(', ') || 'aucun travail' })),
-      el('span', { classe: 'espace' }),
-      candidat.legacy
-        ? el('span', { classe: 'jeton non', texte: 'nomenclature dépassée' })
-        : null,
-      el('span', { classe: 'jeton',
-        texte: `${candidat.students.length} ${candidat.legacy ? 'compte(s)' : 'étudiant(s)'}` }),
-      el('span', { classe: 'jeton', texte: `${candidat.repos} dépôt(s)` }),
-      el('span', { classe: 'jeton lien', texte: 'Adopter' })));
-  }
-}
-
-// adopter déclare un groupe à partir d'une place repérée : le nom est la seule
-// chose à décider, le reste vient des dépôts.
-async function adopter(candidat, org) {
-  // Sans préfixe commun, il n'y a rien à adopter tel quel : c'est le cas où
-  // un gabarit écrit à la main est le seul moyen de dire ce qu'on veut lire.
-  if (candidat.legacy && !candidat.prefix) {
-    ouvrirAdoption('{assignment}-{student}');
-    message('Ces dépôts ne partagent aucun préfixe : décrivez leurs noms.', 'alerte', 9000);
-    return;
-  }
-  const confirme = await demander(`Adopter « ${candidat.prefix || org} »`, el('div', {},
-    el('p', { classe: 'note',
-      texte: candidat.legacy
-        ? `${travaux(candidat.assignments.length)} et ${candidat.students.length} ` +
-          'compte(s) trouvés dans les dépôts existants. Les comptes deviennent la liste ' +
-          "des étudiants ; aucun dépôt n'est touché."
-        : `${travaux(candidat.assignments.length)} trouvés dans les dépôts existants. ` +
-          "Les noms lus dans les dépôts ne sont pas des comptes GitHub : importez la " +
-          "liste des étudiants une fois le groupe créé." })), 'Adopter');
-  if (!confirme) return;
-
-  // Un candidat hérité garde son préfixe en attendant sa migration ; un
-  // candidat de la nomenclature courante s'adopte par sa place.
-  const cree = await tenter(() => api('POST', '/api/classrooms', {
-    session: candidat.legacy ? '' : candidat.session,
-    course: candidat.legacy ? '' : candidat.course,
-    group: candidat.legacy ? '' : candidat.group,
-    prefix: candidat.legacy ? candidat.prefix : '',
-    pattern: '',
-    students: candidat.legacy
-      ? candidat.students.map((compte) => ({ username: compte, full_name: '' }))
-      : [],
-    roster_path: '',
-    defaults: {},
-  }), 'Groupe');
-  if (!cree) return;
-  message(`Groupe « ${cree.label} » adopté.`);
-  await ouvrirGroupe(cree.scope);
 }
 
 // --------------------------------------------------- déclaration d'un groupe
@@ -3251,131 +3156,6 @@ function dessinerChemins(chemins) {
       el('td', { classe: 'note', texte: item.state })));
   }
 }
-
-// ----------------------------------------------------- adoption par gabarit
-
-// Beaucoup d'organisations n'ont jamais suivi de convention. La détection par
-// préfixe ne devine rien de « kickmyb-equipe-3 » ou de « tp1-h23-4204n6-alice » :
-// il faut alors dire soi-même comment ces noms sont faits. Rien n'est renommé —
-// le groupe lit les dépôts tels qu'ils sont, et la migration vient après.
-
-const exemplesGabarit = [
-  '{assignment}-{student}',
-  'projet-{assignment}-{student}',
-  '{assignment}.{student}',
-  'kickmyb-{student}',
-];
-
-function ouvrirAdoption(gabarit) {
-  preparerAdoption(gabarit);
-  afficherVue('adoption');
-  $('adoption-gabarit').focus();
-}
-
-function preparerAdoption(gabarit) {
-  etat.adoption = { rows: [], students: [], pattern: '' };
-  $('adoption-gabarit').value = gabarit || '{assignment}-{student}';
-  $('adoption-suite').hidden = true;
-  $('adoption-table').hidden = true;
-  $('adoption-resume').textContent = '';
-  vider($('adoption-avis'));
-  vider($('adoption-exemple'));
-
-  const exemples = $('adoption-exemples');
-  vider(exemples);
-  exemples.append(el('span', { classe: 'note', texte: 'Exemples :' }));
-  for (const modele of exemplesGabarit) {
-    exemples.append(el('button', {
-      classe: 'bouton petit', type: 'button', texte: modele,
-      onclick: () => { $('adoption-gabarit').value = modele; essayerGabarit(); },
-    }));
-  }
-}
-
-$('adoption-ouvrir').addEventListener('click', () => ouvrirAdoption());
-$('adoption-essayer').addEventListener('click', () => essayerGabarit());
-$('adoption-gabarit').addEventListener('keydown', (evenement) => {
-  if (evenement.key === 'Enter') { evenement.preventDefault(); essayerGabarit(); }
-});
-
-async function essayerGabarit() {
-  const gabarit = $('adoption-gabarit').value.trim();
-  vider($('adoption-avis'));
-  $('adoption-suite').hidden = true;
-  if (!gabarit) { message('Écrivez un gabarit.', 'alerte'); return; }
-
-  const essai = await tenter(() => api('POST',
-    `/api/orgs/${encode(etat.organisation)}/match`, { pattern: gabarit }), 'Gabarit');
-  if (!essai) return;
-
-  etat.adoption = { rows: essai.rows, students: essai.students, pattern: essai.pattern };
-  $('adoption-resume').textContent =
-    `${essai.matched} dépôt(s) sur ${essai.total} · ${travaux(essai.assignments.length)} · ` +
-    `${essai.students.length} personne(s)`;
-
-  const corps = $('adoption-table').querySelector('tbody');
-  vider(corps);
-  for (const ligne of essai.rows.slice(0, 200)) {
-    corps.append(el('tr', {},
-      el('td', {}, el('code', { texte: ligne.repo })),
-      ligne.assignment
-        ? el('td', {}, el('code', { texte: ligne.assignment }))
-        : el('td', { classe: 'vide', texte: 'travail unique' }),
-      el('td', {}, el('code', { texte: ligne.student }))));
-  }
-  $('adoption-table').hidden = essai.rows.length === 0;
-
-  if (essai.rows.length === 0) {
-    $('adoption-avis').append(el('div', { classe: 'avis alerte',
-      texte: `Aucun des ${essai.total} dépôts ne correspond. Vérifiez le texte littéral du ` +
-        'gabarit : tout ce qui n’est pas un champ est pris à la lettre.' }));
-    return;
-  }
-  if (essai.rows.length > 200) {
-    $('adoption-avis').append(el('div', { classe: 'avis',
-      texte: `Les 200 premiers dépôts sont montrés ; les ${essai.matched} seront adoptés.` }));
-  }
-  montrerPersonnesLues(essai.students);
-  $('adoption-suite').hidden = false;
-}
-
-// montrerPersonnesLues met sous les yeux ce que le gabarit a tiré des noms de
-// dépôts : la question qui suit — comptes GitHub ou non — ne se tranche qu'en
-// regardant ces textes-là.
-function montrerPersonnesLues(personnes) {
-  const exemple = $('adoption-exemple');
-  vider(exemple);
-  if (!personnes || personnes.length === 0) return;
-  exemple.append(document.createTextNode('Ici : '));
-  personnes.slice(0, 3).forEach((personne, rang) => {
-    if (rang) exemple.append(document.createTextNode(', '));
-    exemple.append(el('code', { texte: personne }));
-  });
-  exemple.append(document.createTextNode(personnes.length > 3
-    ? `… (${personnes.length} en tout, colonne « Personne » ci-dessus).`
-    : ' (colonne « Personne » ci-dessus).'));
-}
-
-$('adoption-creer').addEventListener('click', async () => {
-  const adoption = etat.adoption || {};
-  if (!adoption.pattern || !(adoption.rows || []).length) {
-    message("Essayez d'abord le gabarit.", 'alerte');
-    return;
-  }
-  const comptes = document.querySelector('input[name="adoption-comptes"]:checked').value === 'comptes';
-  const cree = await tenter(() => api('POST', '/api/classrooms', {
-    session: '', course: '', group: '', prefix: '',
-    pattern: adoption.pattern,
-    students: comptes
-      ? adoption.students.map((compte) => ({ username: compte, full_name: '' }))
-      : [],
-    roster_path: '',
-    defaults: {},
-  }), 'Groupe');
-  if (!cree) return;
-  message(`Groupe « ${cree.label} » adopté : ${adoption.rows.length} dépôt(s).`);
-  await ouvrirGroupe(cree.scope);
-});
 
 // ------------------------------------------- déplacer des étudiants de groupe
 

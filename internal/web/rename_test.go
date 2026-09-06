@@ -136,23 +136,3 @@ func TestRenommageRefuseLeMemeNom(t *testing.T) {
 		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
 	}
 }
-
-// Un groupe resté à l'ancienne nomenclature ne sait pas nommer : le refus dit
-// par où passer plutôt que de laisser essayer.
-func TestRenommageRefuseUnGroupeHerite(t *testing.T) {
-	state := fakegh.NewState()
-	state.AddRepo("acme", "vieux-tp1-jlpicard", true)
-	h := nouveau(t, state)
-	place := h.heritage("vieux-tp1", "jlpicard")
-
-	reponse, contenu := h.requete(http.MethodPost,
-		"/api/classrooms/"+place+"/assignments/rename",
-		map[string]any{"id": "vieux-tp1", "name": "tp2"})
-	if reponse.StatusCode != http.StatusBadRequest ||
-		!strings.Contains(string(contenu), "nomenclature") {
-		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
-	}
-	if noms := h.depots(); noms[0] != "vieux-tp1-jlpicard" {
-		t.Fatalf("rien n'aurait dû être renommé : %v", noms)
-	}
-}

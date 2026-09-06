@@ -283,10 +283,10 @@ func (h *harnais) groupe(session, cours, section string, couples ...string) stri
 }
 
 // heritage déclare un groupe resté à l'ancienne nomenclature.
-func (h *harnais) heritage(prefixe string, comptes ...string) string {
+func (h *harnais) sansNoms(session, cours, section string, comptes ...string) string {
 	h.t.Helper()
-	// Un groupe adopté depuis des dépôts hérités ne connaît que les comptes :
-	// les noms complets restent à retrouver.
+	// Un groupe repris d'ailleurs ne connaît que les comptes : les noms
+	// complets restent à retrouver.
 	etudiants := make([]map[string]string, 0, len(comptes))
 	for _, compte := range comptes {
 		etudiants = append(etudiants, map[string]string{"username": compte, "full_name": ""})
@@ -295,7 +295,7 @@ func (h *harnais) heritage(prefixe string, comptes ...string) string {
 		Scope string `json:"scope"`
 	}
 	h.json(http.MethodPost, "/api/classrooms", map[string]any{
-		"prefix": prefixe, "students": etudiants,
+		"session": session, "course": cours, "group": section, "students": etudiants,
 	}, &cree)
 	if cree.Scope == "" {
 		h.t.Fatal("groupe sans place")
@@ -584,90 +584,6 @@ func TestPlusieursGroupesDansUnCours(t *testing.T) {
 		}
 		if fiche.Assignments[0].Repos != 1 || fiche.Assignments[0].Students != 1 {
 			t.Fatalf("comptage : %+v", fiche.Assignments[0])
-		}
-	}
-}
-
-func TestGroupeHeriteResteLisibleMaisPasDistribuable(t *testing.T) {
-	// La nomenclature déjà en place continue de s'afficher sans rien renommer.
-	state := fakegh.NewState()
-	for _, nom := range []string{
-		"a26-5n6-travailsession-jlpicard", "a26-5n6-travailsession-emilie-cote",
-	} {
-		state.AddRepo("acme", nom, true)
-	}
-	h := nouveau(t, state)
-	id := h.heritage("a26-5n6", "jlpicard", "emilie-cote")
-
-	var fiche struct {
-		Legacy      bool `json:"-"`
-		Assignments []struct {
-			Name  string `json:"name"`
-			ID    string `json:"id"`
-			Repos int    `json:"repos"`
-		} `json:"assignments"`
-		Prefix string `json:"prefix"`
-	}
-	h.json(http.MethodGet, "/api/classrooms/"+id, nil, &fiche)
-	if fiche.Prefix != "a26-5n6" {
-		t.Fatalf("préfixe hérité perdu : %+v", fiche)
-	}
-	if len(fiche.Assignments) != 1 || fiche.Assignments[0].ID != "a26-5n6-travailsession" ||
-		fiche.Assignments[0].Repos != 2 {
-		t.Fatalf("travaux du groupe hérité : %+v", fiche.Assignments)
-	}
-
-	// Mais on ne lui distribue plus : il faut d'abord le migrer.
-	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/assignments",
-		map[string]any{"name": "tp1"})
-	if reponse.StatusCode != http.StatusBadRequest {
-		t.Fatalf("statut %d, attendu 400", reponse.StatusCode)
-	}
-	if !strings.Contains(string(contenu), "nomenclature dépassée") {
-		t.Fatalf("message : %s", contenu)
-	}
-}
-
-func TestCandidatsProposesDepuisLesDepots(t *testing.T) {
-	state := fakegh.NewState()
-	for _, nom := range []string{
-		"a26.5n6.01.tp1.jean-luc-picard", "a26.5n6.01.tp1.emilie-cote",
-		"a26-4w6-tp1-jlpicard", "a26-4w6-tp1-emilie-cote",
-	} {
-		state.AddRepo("acme", nom, true)
-	}
-	h := nouveau(t, state)
-
-	var reponse struct {
-		Candidates []struct {
-			Prefix   string   `json:"prefix"`
-			Session  string   `json:"session"`
-			Course   string   `json:"course"`
-			Group    string   `json:"group"`
-			Legacy   bool     `json:"legacy"`
-			Students []string `json:"students"`
-		} `json:"candidates"`
-	}
-	h.json(http.MethodGet, "/api/orgs/acme/candidates", nil, &reponse)
-	trouves := map[string]bool{}
-	for _, candidat := range reponse.Candidates {
-		trouves[candidat.Prefix] = candidat.Legacy
-	}
-	// Une place de la nomenclature courante n'est pas une proposition : elle
-	// est déjà dans la hiérarchie, lue des dépôts.
-	if _, present := trouves["a26.5n6.01"]; present {
-		t.Fatalf("place courante proposée à l'adoption : %+v", reponse.Candidates)
-	}
-	if herite, present := trouves["a26-4w6"]; !present || !herite {
-		t.Fatalf("candidat hérité : %+v", reponse.Candidates)
-	}
-
-	// Une fois le préfixe hérité adopté, il n'est plus proposé non plus.
-	h.heritage("a26-4w6", "jlpicard", "emilie-cote")
-	h.json(http.MethodGet, "/api/orgs/acme/candidates", nil, &reponse)
-	for _, candidat := range reponse.Candidates {
-		if candidat.Prefix == "a26-4w6" {
-			t.Fatalf("le préfixe déjà couvert est encore proposé : %+v", reponse.Candidates)
 		}
 	}
 }
@@ -1466,7 +1382,7 @@ func TestReglagesInvalidesRefuses(t *testing.T) {
 func TestNomsCompletsRetrouves(t *testing.T) {
 	h := nouveau(t, nil)
 	// Les comptes sont connus, les noms complets non : c'est GitHub qui les donne.
-	id := h.heritage("a26-5n6", "jlpicard", "emilie-cote")
+	id := h.sansNoms("a26", "5n6", "01", "jlpicard", "emilie-cote")
 
 	var avant struct {
 		Students []struct {
@@ -1521,13 +1437,13 @@ func TestPageServie(t *testing.T) {
 func TestMigrationRenommeLesDepots(t *testing.T) {
 	state := fakegh.NewState()
 	for _, nom := range []string{
-		"a26-5n6-travailsession-jlpicard", "a26-5n6-travailsession-emilie-cote",
-		"a26-5n6-tp1-jlpicard",
+		"h25.5n6.02.travailsession.jlpicard", "h25.5n6.02.travailsession.emilie-cote",
+		"h25.5n6.02.tp1.jlpicard",
 	} {
 		state.AddRepo("acme", nom, true)
 	}
 	h := nouveau(t, state)
-	id := h.heritage("a26-5n6", "jlpicard", "emilie-cote")
+	id := h.sansNoms("h25", "5n6", "02", "jlpicard", "emilie-cote")
 
 	// Les noms complets sont nécessaires : c'est eux qui nomment les dépôts.
 	h.travail(http.MethodPost, "/api/classrooms/"+id+"/students/names", nil)
@@ -1552,7 +1468,7 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 	for _, ligne := range apercu.Rows {
 		cibles[ligne.Repo] = ligne.Target
 	}
-	if cibles["a26-5n6-tp1-jlpicard"] != "a26.5n6.01.tp1.jean-luc-picard" {
+	if cibles["h25.5n6.02.tp1.jlpicard"] != "a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("cibles : %v", cibles)
 	}
 
@@ -1605,12 +1521,12 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 
 func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 	state := fakegh.NewState()
-	state.AddRepo("acme", "a26-5n6-tp1-jlpicard", true)
+	state.AddRepo("acme", "h25.5n6.02.tp1.jlpicard", true)
 	// « visiteur » n'est pas dans la liste du groupe : son dépôt ne peut pas
 	// être renommé sans savoir de qui il s'agit.
-	state.AddRepo("acme", "a26-5n6-tp1-visiteur", true)
+	state.AddRepo("acme", "h25.5n6.02.tp1.visiteur", true)
 	h := nouveau(t, state)
-	id := h.heritage("a26-5n6", "jlpicard")
+	id := h.sansNoms("h25", "5n6", "02", "jlpicard")
 	h.travail(http.MethodPost, "/api/classrooms/"+id+"/students/names", nil)
 
 	reponse, contenu := h.requete(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
@@ -1619,7 +1535,7 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 		t.Fatalf("statut %d, attendu 400 — %s", reponse.StatusCode, contenu)
 	}
 	if noms := h.depots(); len(noms) != 2 ||
-		!strings.HasPrefix(noms[0], "a26-5n6-") {
+		!strings.HasPrefix(noms[0], "h25.5n6.02.") {
 		t.Fatalf("des dépôts ont été renommés : %v", noms)
 	}
 
@@ -1635,18 +1551,18 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 	}
 	noms := h.depots()
 	sort.Strings(noms)
-	if strings.Join(noms, ",") != "a26-5n6-tp1-visiteur,a26.5n6.01.tp1.jean-luc-picard" {
+	if strings.Join(noms, ",") != "a26.5n6.01.tp1.jean-luc-picard,h25.5n6.02.tp1.visiteur" {
 		t.Fatalf("dépôts : %v", noms)
 	}
 
 	// Le groupe est resté à sa place, avec sa liste : c'est de là qu'on reprend
 	// la migration une fois « visiteur » identifié.
 	var reste struct {
-		Prefix string `json:"prefix"`
-		Known  bool   `json:"known"`
+		Scope string `json:"scope"`
+		Known bool   `json:"known"`
 	}
 	h.json(http.MethodGet, "/api/classrooms/"+id+"?refresh=1", nil, &reste)
-	if !reste.Known || reste.Prefix != "a26-5n6" {
+	if !reste.Known || reste.Scope != "h25.5n6.02" {
 		t.Fatalf("groupe après migration partielle : %+v", reste)
 	}
 }
@@ -1654,9 +1570,9 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 func TestMigrationRefuseSansNomComplet(t *testing.T) {
 	state := fakegh.NewState()
 	// « aminata-d » a un profil GitHub sans nom complet.
-	state.AddRepo("acme", "a26-5n6-tp1-aminata-d", true)
+	state.AddRepo("acme", "h25.5n6.02.tp1.aminata-d", true)
 	h := nouveau(t, state)
-	id := h.heritage("a26-5n6", "aminata-d")
+	id := h.sansNoms("h25", "5n6", "02", "aminata-d")
 
 	var apercu struct {
 		Ready   int  `json:"ready"`

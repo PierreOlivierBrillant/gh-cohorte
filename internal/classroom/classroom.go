@@ -3,14 +3,10 @@
 //
 // GitHub reste la source de vérité. Un travail n'est pas une fiche enregistrée
 // quelque part : c'est l'ensemble des dépôts nommés
-// « session.cours.groupe.travail.étudiant », lus dans l'organisation. Le groupe ne retient que ce que les noms de dépôts
-// ne savent pas dire — qui sont les étudiants, et avec quels réglages leurs
-// dépôts sont créés. Un groupe se déclare donc sans rien écrire sur GitHub, et
-// se supprime sans rien y effacer.
-//
-// Les groupes déclarés avant cette nomenclature gardent leur
-// préfixe tout en tirets. Ils restent lisibles — leurs dépôts s'affichent — mais
-// on ne leur distribue plus : il faut d'abord les migrer.
+// « session.cours.groupe.travail.étudiant », lus dans l'organisation. Le groupe
+// ne retient que ce que les noms de dépôts ne savent pas dire — qui sont les
+// étudiants, et avec quels réglages leurs dépôts sont créés. Un groupe se
+// déclare donc sans rien écrire sur GitHub, et se supprime sans rien y effacer.
 package classroom
 
 import (
@@ -80,21 +76,14 @@ func (d Defaults) normalized() Defaults {
 // étudiants. Seul le nom court de la session entre dans les dépôts ; son nom
 // long vit dans le magasin, partagé par tous les groupes de la session.
 type Classroom struct {
-	Org     string `json:"org"`
-	Session string `json:"session"`
-	Course  string `json:"course"`
-	Group   string `json:"group"`
-	// LegacyPrefix est le préfixe tout en tirets d'un groupe déclaré avant cette
-	// nomenclature. Sa présence dit qu'il reste à migrer.
-	LegacyPrefix string `json:"prefix,omitempty"`
-	// LegacyPattern dit comment lire des dépôts que rien n'organise :
-	// « projet-{assignment}-{student} ». Adopter ainsi n'impose aucune
-	// convention aux noms déjà en place ; la migration les y amène ensuite.
-	LegacyPattern string          `json:"pattern,omitempty"`
-	Students      []roster.Person `json:"students"`
-	RosterPath    string          `json:"roster_path,omitempty"`
-	Defaults      Defaults        `json:"defaults"`
-	CreatedAt     string          `json:"created_at"`
+	Org        string          `json:"org"`
+	Session    string          `json:"session"`
+	Course     string          `json:"course"`
+	Group      string          `json:"group"`
+	Students   []roster.Person `json:"students"`
+	RosterPath string          `json:"roster_path,omitempty"`
+	Defaults   Defaults        `json:"defaults"`
+	CreatedAt  string          `json:"created_at"`
 
 	// derived retient les comptes que le registre a révélés plutôt que la
 	// liste locale. Il n'est pas écrit : ce qui a été déduit ne doit pas se
@@ -107,35 +96,6 @@ type Classroom struct {
 	aliases map[string]roster.Person
 }
 
-// Legacy dit si le groupe suit encore une nomenclature dépassée : un préfixe
-// hérité, ou un gabarit d'adoption.
-func (c Classroom) Legacy() bool {
-	return strings.TrimSpace(c.Session) == "" &&
-		(strings.TrimSpace(c.LegacyPrefix) != "" || strings.TrimSpace(c.LegacyPattern) != "")
-}
-
-// gabarit compile le gabarit d'adoption du groupe, s'il en a un.
-func (c Classroom) gabarit() (Pattern, bool) {
-	if strings.TrimSpace(c.LegacyPattern) == "" {
-		return Pattern{}, false
-	}
-	compile, err := ParsePattern(c.LegacyPattern)
-	if err != nil {
-		return Pattern{}, false
-	}
-	return compile, true
-}
-
-// separator est ce qui sépare le préfixe du travail. Deux nomenclatures ont
-// précédé la courante : celle tout en tirets, et celle à quatre niveaux, qui
-// séparait déjà par un point mais ne portait pas la session.
-func (c Classroom) separator() string {
-	if c.Legacy() && !strings.Contains(c.LegacyPrefix, naming.Separator) {
-		return groups.Separator
-	}
-	return naming.Separator
-}
-
 // Validate met le groupe en forme et refuse ce qui ne peut pas nommer un dépôt.
 func (c Classroom) Validate() (Classroom, error) {
 	org, err := valid.Login(c.Org, "Organisation")
@@ -144,46 +104,19 @@ func (c Classroom) Validate() (Classroom, error) {
 	}
 	c.Org = org
 
-	if c.Legacy() {
-		if strings.TrimSpace(c.LegacyPattern) != "" {
-			// Un gabarit d'adoption ne se slugifie pas : il décrit des noms
-			// déjà en place, qu'il faut reproduire à la lettre.
-			gabarit, err := ParsePattern(c.LegacyPattern)
-			if err != nil {
-				return c, err
-			}
-			c.LegacyPattern, c.LegacyPrefix = gabarit.String(), ""
-		} else {
-			// Le préfixe hérité peut porter des points — la nomenclature à
-			// quatre niveaux en avait déjà. Chaque niveau est validé à part,
-			// pour que le point survive à la slugification.
-			niveaux := strings.Split(c.LegacyPrefix, naming.Separator)
-			rendus := make([]string, 0, len(niveaux))
-			for _, niveau := range niveaux {
-				fragment, err := valid.SlugFragment(niveau, "Préfixe du groupe")
-				if err != nil {
-					return c, err
-				}
-				rendus = append(rendus, fragment)
-			}
-			c.LegacyPrefix = strings.Join(rendus, naming.Separator)
-		}
-	} else {
-		session, err := naming.Fragment(c.Session, "Session")
-		if err != nil {
-			return c, err
-		}
-		course, err := naming.Fragment(c.Course, "Cours")
-		if err != nil {
-			return c, err
-		}
-		group, err := naming.Fragment(c.Group, "Groupe")
-		if err != nil {
-			return c, err
-		}
-		c.Session, c.Course, c.Group = session, course, group
-		c.LegacyPrefix, c.LegacyPattern = "", ""
+	session, err := naming.Fragment(c.Session, "Session")
+	if err != nil {
+		return c, err
 	}
+	course, err := naming.Fragment(c.Course, "Cours")
+	if err != nil {
+		return c, err
+	}
+	group, err := naming.Fragment(c.Group, "Groupe")
+	if err != nil {
+		return c, err
+	}
+	c.Session, c.Course, c.Group = session, course, group
 
 	if strings.TrimSpace(c.Defaults.DescriptionPattern) != "" {
 		if _, err := plan.ValidatePattern(
@@ -198,18 +131,7 @@ func (c Classroom) Validate() (Classroom, error) {
 
 // Label nomme le groupe. Il n'y a rien à retenir pour cela : la place dit tout,
 // et elle est dans le nom de chacun de ses dépôts.
-func (c Classroom) Label() string {
-	if c.Legacy() {
-		if c.LegacyPrefix != "" {
-			return c.LegacyPrefix
-		}
-		if gabarit, ok := c.gabarit(); ok && gabarit.Prefix() != "" {
-			return gabarit.Prefix()
-		}
-		return c.LegacyPattern
-	}
-	return "Groupe " + c.Group
-}
+func (c Classroom) Label() string { return "Groupe " + c.Group }
 
 // SessionName rend le nom long de la session du groupe.
 func (c Classroom) SessionName() string { return naming.SessionLabel(c.Session) }
@@ -241,43 +163,22 @@ func SessionsOf(shorts []string) []Session {
 	return sessions
 }
 
-// Scope désigne ce que le groupe couvre : son préfixe pour la nomenclature
-// courante, et pour un groupe adopté, le gabarit lui-même — deux gabarits
-// différents ne regardent pas les mêmes dépôts, même s'ils commencent pareil.
+// Scope désigne ce que le groupe couvre : son préfixe dans les noms de dépôts.
 func (c Classroom) Scope() string {
-	if c.Legacy() {
-		if c.LegacyPattern != "" {
-			return c.LegacyPattern
-		}
-		return c.LegacyPrefix
-	}
 	return naming.Prefix(c.Session, c.Course, c.Group)
 }
 
 // AssignmentID compose l'identifiant complet d'un travail du groupe : c'est lui
 // qui précède le nom de l'étudiant dans le nom du dépôt.
 func (c Classroom) AssignmentID(name string) string {
-	name = strings.TrimSpace(name)
-	if c.Legacy() {
-		if c.LegacyPattern != "" {
-			// Le gabarit porte déjà tout ce qui entoure le travail : son nom
-			// suffit à le désigner.
-			return name
-		}
-		return strings.Trim(c.LegacyPrefix+c.separator()+name, c.separator())
-	}
-	return naming.AssignmentID(c.Session, c.Course, c.Group, name)
+	return naming.AssignmentID(c.Session, c.Course, c.Group, strings.TrimSpace(name))
 }
 
 // ShortName retire du travail ce qui désigne le groupe.
 func (c Classroom) ShortName(id string) string {
-	if c.Legacy() && c.LegacyPattern != "" {
-		return id
-	}
 	scope := c.Scope()
-	separator := c.separator()
 	if scope != "" && len(id) > len(scope)+1 &&
-		strings.EqualFold(id[:len(scope)+1], scope+separator) {
+		strings.EqualFold(id[:len(scope)+1], scope+naming.Separator) {
 		return id[len(scope)+1:]
 	}
 	return id
@@ -288,16 +189,12 @@ func (c Classroom) Owns(id string) bool {
 	if strings.TrimSpace(id) == "" {
 		return false
 	}
-	if c.Legacy() && c.LegacyPattern != "" {
-		return true
-	}
 	scope := c.Scope()
 	if scope == "" {
 		return false
 	}
-	separator := c.separator()
 	return len(id) > len(scope)+1 &&
-		strings.EqualFold(id[:len(scope)+1], scope+separator)
+		strings.EqualFold(id[:len(scope)+1], scope+naming.Separator)
 }
 
 // Settings compose les réglages d'un travail du groupe, prêts pour le plan.
@@ -544,9 +441,6 @@ type Assignment struct {
 // La nomenclature courante se relit sans rien deviner : un dépôt est du
 // groupe, ou il ne l'est pas.
 func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
-	if c.Legacy() {
-		return c.legacyAssignments(repos)
-	}
 	connus := c.fragments()
 	parNom := map[string]*Assignment{}
 
@@ -594,9 +488,6 @@ func sortAssignments(found []Assignment) {
 
 // Served renvoie les comptes du groupe qui ont déjà un dépôt pour ce travail.
 func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[string]bool {
-	if c.Legacy() {
-		return c.legacyServed(assignmentID, repos)
-	}
 	servis := map[string]bool{}
 	connus := c.fragments()
 	for _, repo := range repos {
@@ -617,9 +508,6 @@ func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[stri
 
 // Repos renvoie les dépôts d'un travail du groupe, du plus récent au plus ancien.
 func (c Classroom) Repos(assignmentID string, repos []groups.RepoInfo) []groups.Repo {
-	if c.Legacy() {
-		return c.legacyRepos(assignmentID, repos)
-	}
 	trouves := make([]groups.Repo, 0)
 	for _, repo := range repos {
 		parts, reconnu := naming.Parse(repo.Name)
@@ -649,9 +537,6 @@ func (c Classroom) Repos(assignmentID string, repos []groups.RepoInfo) []groups.
 // sait des personnes vient de la liste du groupe ; « Enrich » y verse d'abord
 // ce que le registre de l'organisation en dit.
 func (c Classroom) StudentOf(repoName string) (roster.Person, bool) {
-	if c.Legacy() {
-		return c.legacyStudentOf(repoName)
-	}
 	parts, reconnu := naming.Parse(repoName)
 	if !reconnu {
 		return roster.Person{}, false
@@ -663,9 +548,6 @@ func (c Classroom) StudentOf(repoName string) (roster.Person, bool) {
 // désigne une personne. Le booléen dit que le nom se lit ; il ne dit pas que
 // quelqu'un se cache derrière.
 func (c Classroom) Fragment(repoName string) (string, bool) {
-	if c.Legacy() {
-		return c.legacyFragment(repoName)
-	}
 	parts, reconnu := naming.Parse(repoName)
 	if !reconnu {
 		return "", false
@@ -674,82 +556,6 @@ func (c Classroom) Fragment(repoName string) (string, bool) {
 }
 
 // ----------------------------------------------------------------- candidats
-
-// Candidate est un groupe possible, deviné des dépôts déjà présents.
-type Candidate struct {
-	Session     string   `json:"session"`
-	Course      string   `json:"course"`
-	Group       string   `json:"group"`
-	Prefix      string   `json:"prefix"`
-	Assignments []string `json:"assignments"`
-	Repos       int      `json:"repos"`
-	Students    []string `json:"students"`
-	// Legacy dit que le candidat suit l'ancienne nomenclature : ses comptes
-	// sont des comptes GitHub, et il demande une migration avant distribution.
-	Legacy bool `json:"legacy"`
-}
-
-// Candidates propose les groupes lisibles dans les dépôts : d'abord ceux qui
-// suivent la nomenclature courante, puis les préfixes hérités.
-func Candidates(repos []groups.RepoInfo) []Candidate {
-	proposes := append(currentCandidates(repos), legacyCandidates(repos)...)
-	sort.SliceStable(proposes, func(i, j int) bool {
-		if proposes[i].Legacy != proposes[j].Legacy {
-			return !proposes[i].Legacy
-		}
-		if proposes[i].Repos != proposes[j].Repos {
-			return proposes[i].Repos > proposes[j].Repos
-		}
-		return proposes[i].Prefix < proposes[j].Prefix
-	})
-	return proposes
-}
-
-// currentCandidates lit les couples cours/groupe présents dans les dépôts.
-func currentCandidates(repos []groups.RepoInfo) []Candidate {
-	parPrefixe := map[string]*Candidate{}
-	travaux := map[string]map[string]bool{}
-	etudiants := map[string]map[string]bool{}
-
-	for _, repo := range repos {
-		parts, reconnu := naming.Parse(repo.Name)
-		if !reconnu {
-			continue
-		}
-		prefixe := naming.Prefix(parts.Session, parts.Course, parts.Group)
-		cle := strings.ToLower(prefixe)
-		candidat, deja := parPrefixe[cle]
-		if !deja {
-			candidat = &Candidate{
-				Session: parts.Session, Course: parts.Course, Group: parts.Group,
-				Prefix: prefixe,
-			}
-			parPrefixe[cle] = candidat
-			travaux[cle] = map[string]bool{}
-			etudiants[cle] = map[string]bool{}
-		}
-		candidat.Repos++
-		travaux[cle][parts.Assignment] = true
-		etudiants[cle][parts.Student] = true
-	}
-
-	proposes := make([]Candidate, 0, len(parPrefixe))
-	for cle, candidat := range parPrefixe {
-		candidat.Assignments = triees(travaux[cle])
-		candidat.Students = triees(etudiants[cle])
-		proposes = append(proposes, *candidat)
-	}
-	return proposes
-}
-
-func triees(ensemble map[string]bool) []string {
-	liste := make([]string, 0, len(ensemble))
-	for valeur := range ensemble {
-		liste = append(liste, valeur)
-	}
-	sort.Strings(liste)
-	return liste
-}
 
 // StudentsOf construit une liste d'étudiants à partir de comptes GitHub seuls :
 // les noms complets restent à retrouver.
@@ -848,16 +654,16 @@ func AtScope(org, scope string, defauts Defaults) (Classroom, error) {
 	if scope == "" {
 		return Classroom{}, valid.Errorf("Aucune place indiquée.")
 	}
-	cours := Classroom{Org: org, Defaults: defauts}
-	switch niveaux := strings.Split(scope, naming.Separator); {
-	case strings.ContainsAny(scope, "{}"):
-		// Un gabarit d'adoption se reconnaît à ses champs.
-		cours.LegacyPattern = scope
-	case len(niveaux) == naming.Levels-2 &&
-		niveaux[0] != "" && niveaux[1] != "" && niveaux[2] != "":
-		cours.Session, cours.Course, cours.Group = niveaux[0], niveaux[1], niveaux[2]
-	default:
-		cours.LegacyPrefix = scope
+	niveaux := strings.Split(scope, naming.Separator)
+	if len(niveaux) != naming.Levels-2 ||
+		niveaux[0] == "" || niveaux[1] == "" || niveaux[2] == "" {
+		return Classroom{}, valid.Errorf(
+			"« %s » n'est pas une place : trois niveaux sont attendus, "+
+				"« session%[2]scours%[2]sgroupe ».", scope, naming.Separator)
+	}
+	cours := Classroom{
+		Org: org, Defaults: defauts,
+		Session: niveaux[0], Course: niveaux[1], Group: niveaux[2],
 	}
 	return cours.Validate()
 }

@@ -84,7 +84,7 @@ func Open(path string) *Store {
 		// Les réglages sont remis en forme à la lecture, pas seulement à
 		// l'écriture : un gabarit dépassé doit être corrigé avant d'être montré.
 		item.Defaults = item.Defaults.normalized()
-		store.items = append(store.items, awaitingSession(item))
+		store.items = append(store.items, item)
 	}
 	store.items = sansMarques(store.items)
 	return store
@@ -120,20 +120,6 @@ func sansMarques(items []Classroom) []Classroom {
 		corriges = append(corriges, item)
 	}
 	return corriges
-}
-
-// awaitingSession ramène au rang de préfixe hérité un groupe déclaré sous la
-// nomenclature à quatre niveaux, avant que la session n'existe. Sans cela il
-// viserait « .cours.groupe » — une session vide —, et ses dépôts seraient
-// introuvables. Ainsi rangé, il s'affiche et se migre comme les autres.
-func awaitingSession(item Classroom) Classroom {
-	if strings.TrimSpace(item.Session) != "" || strings.TrimSpace(item.Course) == "" {
-		return item
-	}
-	item.LegacyPrefix = strings.Trim(
-		item.Course+naming.Separator+item.Group, naming.Separator)
-	item.Course, item.Group = "", ""
-	return item
 }
 
 // SessionName rend le nom long d'une session. Il se déduit de son nom court —

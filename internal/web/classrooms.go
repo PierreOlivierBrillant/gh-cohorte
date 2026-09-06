@@ -98,7 +98,6 @@ type classroomInput struct {
 func (s *Server) fromInput(body classroomInput) classroom.Classroom {
 	return classroom.Classroom{
 		Org: s.org(), Session: body.Session, Course: body.Course, Group: body.Group,
-		LegacyPrefix: body.Prefix, LegacyPattern: body.Pattern,
 		Students: body.Students, RosterPath: body.RosterPath,
 		Defaults: s.defaultsOr(body.Defaults),
 	}
@@ -592,12 +591,6 @@ func (s *Server) remises(cours classroom.Classroom, personne roster.Person,
 	if len(noms) == 0 {
 		return nil, nil
 	}
-	if cours.Legacy() {
-		return nil, valid.Errorf(
-			"« %s » suit une nomenclature dépassée : ses dépôts ne peuvent pas être nommés. "+
-				"Renommez-les d'abord, ou ajoutez la personne sans ses dépôts.", cours.Label())
-	}
-
 	// Le nom du dépôt vient du nom complet : sans lui, il n'y a rien à nommer.
 	// Le dire ici évite de laisser l'échec surgir du fond du plan.
 	if _, err := naming.Student(personne.FullName); err != nil {
@@ -833,12 +826,6 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (
 	if err != nil {
 		return cours, vide, nil, nil, err
 	}
-	if cours.Legacy() {
-		return cours, vide, nil, nil, valid.Errorf(
-			"« %s » suit une nomenclature dépassée. Renommez ses dépôts en "+
-				"« session%[2]scours%[2]sgroupe » avant de lui distribuer un travail.",
-			cours.Label(), naming.Separator)
-	}
 	// Le nom du dépôt contient désormais le nom de l'étudiant : sans lui, il n'y
 	// a pas de dépôt à nommer.
 	if incomplets := cours.MissingNames(); len(incomplets) > 0 {
@@ -1000,34 +987,3 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 }
 
 // ----------------------------------------------------------------- candidats
-
-// handleCandidates propose des groupes à partir des dépôts déjà présents, pour
-// qu'une organisation en cours d'année s'adopte sans rien renommer.
-func (s *Server) handleCandidates(writer http.ResponseWriter, request *http.Request) {
-	org, err := valid.Login(request.PathValue("org"), "Organisation")
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-	repos, source, err := s.repos(org, request.URL.Query().Get("refresh") == "1")
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-
-	// Les préfixes déjà couverts par un groupe ne sont plus à proposer.
-	pris := map[string]bool{}
-	for _, cours := range s.visibles(org, repos) {
-		pris[classroom.NormalizeScope(cours.Scope())] = true
-	}
-	proposes := make([]classroom.Candidate, 0)
-	for _, candidat := range classroom.Candidates(repos) {
-		if pris[classroom.NormalizeScope(candidat.Prefix)] {
-			continue
-		}
-		proposes = append(proposes, candidat)
-	}
-	writeJSON(writer, http.StatusOK, map[string]any{
-		"candidates": proposes, "total": len(repos), "source": source,
-	})
-}

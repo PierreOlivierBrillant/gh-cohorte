@@ -44,9 +44,6 @@ type Move struct {
 // courante ne sait pas nommer : le déplacement se fait alors sans les dépôts.
 func PlanMove(depart, arrivee Classroom, personnes []roster.Person,
 	repos []groups.RepoInfo) ([]Move, error) {
-	if err := peutNommer(arrivee, "déplacez sans les dépôts"); err != nil {
-		return nil, err
-	}
 	fragments := map[string]string{}
 	for _, personne := range personnes {
 		fragments[strings.ToLower(personne.Username)] = fragmentDe(personne)
@@ -62,24 +59,8 @@ func PlanMove(depart, arrivee Classroom, personnes []roster.Person,
 // retrouve dans le groupe tel qu'il est encore.
 func PlanRenameStudent(cours Classroom, avant, apres roster.Person,
 	repos []groups.RepoInfo) ([]Move, error) {
-	if err := peutNommer(cours,
-		"déplacez d'abord ses travaux à une place de la nomenclature courante"); err != nil {
-		return nil, err
-	}
 	return planRenames(cours, cours,
 		map[string]string{strings.ToLower(avant.Username): fragmentDe(apres)}, repos)
-}
-
-// peutNommer refuse une place qui ne sait pas nommer un dépôt. Le conseil
-// change selon ce qu'on essayait de faire : c'est la seule chose qui distingue
-// les deux refus.
-func peutNommer(place Classroom, issue string) error {
-	if !place.Legacy() {
-		return nil
-	}
-	return valid.Errorf(
-		"« %s » suit une nomenclature dépassée : ses dépôts ne peuvent pas être "+
-			"nommés. Renommez-les d'abord, ou %s.", place.Label(), issue)
 }
 
 // fragmentDe rend le fragment qui nomme une personne dans un dépôt. Il est vide
@@ -144,9 +125,6 @@ type Relocation struct {
 // le fragment qu'il porte, et arrive quand même à la bonne place.
 func PlanMoveAssignments(depart, arrivee Classroom, travaux []Relocation,
 	repos []groups.RepoInfo) ([]Move, error) {
-	if err := peutNommer(arrivee, "choisissez une autre place d'arrivée"); err != nil {
-		return nil, err
-	}
 	if len(travaux) == 0 {
 		return nil, valid.Errorf("Aucun travail à déplacer.")
 	}
@@ -183,9 +161,6 @@ func PlanMoveAssignments(depart, arrivee Classroom, travaux []Relocation,
 // de leur nom.
 func PlanRelocate(arrivee Classroom, travail string, depots []groups.Repo,
 	connus []roster.Person, repos []groups.RepoInfo) ([]Move, error) {
-	if err := peutNommer(arrivee, "choisissez une autre place d'arrivée"); err != nil {
-		return nil, err
-	}
 	if len(depots) == 0 {
 		return nil, valid.Errorf("Aucun dépôt à déplacer.")
 	}
@@ -350,10 +325,6 @@ func (c Classroom) With(people ...roster.Person) Classroom {
 // illisible le renommage qu'on montre avant d'écrire.
 func PlanRenameAssignment(cours Classroom, id, nom string,
 	repos []groups.RepoInfo) ([]Move, error) {
-	if err := peutNommer(cours,
-		"déplacez d'abord ce travail à une place de la nomenclature courante"); err != nil {
-		return nil, err
-	}
 	fragment, err := naming.Fragment(nom, "Travail")
 	if err != nil {
 		return nil, err

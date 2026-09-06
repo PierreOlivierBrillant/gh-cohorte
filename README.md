@@ -132,11 +132,10 @@ sous l'ancienne. Les noms déjà accumulés sur un poste s'y versent en une fois
 de sens que sur cette machine : les groupes déclarés ici, les réglages du
 dernier travail.
 
-Une organisation en cours d'année n'a rien à renommer : les dépôts nommés
-autrement sont repérés par préfixe ou décrits par un gabarit
-(`projet-{assignment}-{student}`), puis adoptés tels quels. Les renommer reste
-possible ensuite, avec un aperçu avant écriture ; GitHub garde une redirection
-depuis chaque ancien nom.
+Un groupe se déplace d'une place à l'autre — une autre session, un autre cours,
+un autre numéro — en renommant ses dépôts, avec un aperçu avant écriture.
+GitHub garde une redirection depuis chaque ancien nom : les clones et les liens
+déjà distribués continuent de fonctionner.
 
 ## Ce que fait l'outil
 

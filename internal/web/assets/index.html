@@ -88,19 +88,6 @@
   <section id="vue-parcours" class="vue" hidden>
     <div class="boite" id="parcours-liste"></div>
 
-    <div id="candidats-accueil" hidden>
-      <div class="barre-outils">
-        <div>
-          <h2>Groupes repérés dans l'organisation</h2>
-          <p class="note">Déduits des dépôts déjà présents. En adopter un reprend sa place et
-            les comptes qu'on y trouve — rien n'est renommé.</p>
-        </div>
-        <div class="actions">
-          <button type="button" id="adoption-ouvrir" class="bouton">Adopter par gabarit…</button>
-        </div>
-      </div>
-      <div class="boite" id="accueil-candidats"></div>
-    </div>
   </section>
 
   <!-- ------------------------------- annuaire : les étudiants de l'organisation -->
@@ -227,67 +214,6 @@
       <div class="boite-pied">
         <span class="espace"></span>
         <button type="button" id="nouveau-creer" class="bouton vert">Créer le groupe</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ----------------------------------------------- adoption par gabarit -->
-  <section id="vue-adoption" class="vue" hidden>
-    <div class="boite">
-      <div class="boite-entete"><strong>Lire les dépôts</strong></div>
-      <div class="boite-corps">
-        <p class="note">Toutes les organisations n'ont pas suivi de convention. Écrivez comment
-          leurs noms sont faits : le reste s'en déduit, et aucun dépôt n'est renommé.</p>
-        <label class="champ-bloc">
-          <span class="etiquette">Gabarit des noms de dépôts</span>
-          <span class="ligne-champ">
-            <input type="text" id="adoption-gabarit" class="champ"
-              placeholder="projet-{assignment}-{student}">
-            <button type="button" id="adoption-essayer" class="bouton">Essayer</button>
-          </span>
-          <span class="aide"><code>{assignment}</code> est le travail, <code>{student}</code> la
-            personne — son compte GitHub, ou son nom. Le reste est pris à la lettre. Sans
-            <code>{assignment}</code>, tous les dépôts trouvés forment un seul travail.</span>
-        </label>
-        <div class="actions" id="adoption-exemples"></div>
-        <div id="adoption-avis" class="avis-pile"></div>
-        <p class="note" id="adoption-resume"></p>
-        <table class="tableau" id="adoption-table" hidden>
-          <thead><tr><th>Dépôt</th><th>Travail</th><th>Personne</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="boite" id="adoption-suite" hidden>
-      <div class="boite-entete"><strong>Le groupe à déclarer</strong></div>
-      <div class="boite-corps">
-        <p class="note">Adopter ces dépôts, c'est les réunir sous un groupe qui saura les lire
-          avec ce gabarit. Sur GitHub, rien n'est créé, renommé ni supprimé : le groupe est une
-          fiche gardée sur cette machine, et l'oublier ne touche aucun dépôt.</p>
-        <fieldset class="groupe-radio">
-          <legend class="etiquette">Ce que le gabarit a lu à la place de <code>{student}</code></legend>
-          <p class="aide" id="adoption-exemple"></p>
-          <label class="case"><input type="radio" name="adoption-comptes" value="comptes" checked>
-            <span><strong>Des comptes GitHub</strong>
-            <span class="aide">Ces textes deviennent la liste des étudiants du groupe : chaque
-              dépôt est aussitôt rattaché à quelqu'un, et le bouton « Retrouver les noms
-              complets » ira chercher leurs vrais noms sur GitHub.</span></span></label>
-          <label class="case"><input type="radio" name="adoption-comptes" value="noms">
-            <span><strong>Autre chose : des noms, des équipes, des numéros</strong>
-            <span class="aide">Un nom écrit dans un dépôt ne dit pas à quel compte GitHub il
-              appartient : le groupe est alors déclaré sans liste d'étudiants. Ses travaux et ses
-              dépôts s'affichent quand même, mais tant qu'une liste « nom complet, compte
-              GitHub » n'est pas importée depuis « Étudiants », aucun dépôt n'est rattaché à
-              quelqu'un et aucun travail ne peut être distribué.</span></span></label>
-        </fieldset>
-        <p class="note">Rien n'est définitif : la liste s'importe ou se corrige plus tard. Le
-          gabarit, lui, sert tant que les dépôts gardent ces noms — « Réglages du groupe »
-          propose ensuite de les renommer vers la nomenclature courante.</p>
-      </div>
-      <div class="boite-pied">
-        <span class="espace"></span>
-        <button type="button" id="adoption-creer" class="bouton vert">Adopter ces dépôts</button>
       </div>
     </div>
   </section>

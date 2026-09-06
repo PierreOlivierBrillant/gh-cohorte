@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 )
 
@@ -149,51 +148,27 @@ func TestPlanDeRenommageGardeLeFragmentSansNomComplet(t *testing.T) {
 	}
 }
 
-// Un groupe resté à l'ancienne nomenclature ne sait pas nommer un dépôt : le
-// renommage se fait alors sans eux.
-func TestPlanDeRenommageRefuseUnGroupeHerite(t *testing.T) {
-	inventaire := depots("tp1-emilie-cote")
-	cours := heritage("tp1", "emilie-cote")
-	avant, _ := cours.Find("emilie-cote")
-
-	if _, err := classroom.PlanRenameStudent(cours, avant,
-		roster.Person{FullName: "Émilie Côté", Username: "emilie-cote"},
-		inventaire); err == nil {
-		t.Fatal("un groupe hérité aurait dû refuser le renommage de ses dépôts")
-	}
-}
-
 // ------------------------------------------------------ déplacer un travail
 
-// adopte déclare un groupe lu par gabarit, comme l'adoption en produit : des
-// comptes GitHub, aucun nom complet.
-func adopte(gabarit string, comptes ...string) classroom.Classroom {
-	cours := classroom.Classroom{
-		Org: "acme", LegacyPattern: gabarit,
-		Students: classroom.StudentsOf(comptes),
-		Defaults: classroom.DefaultsFrom(config.Default()),
-	}
-	valide, err := cours.Validate()
-	if err != nil {
-		panic(err)
-	}
-	return valide
+// sansNoms déclare un groupe dont on ne connaît que les comptes : c'est l'état
+// d'un groupe repris d'ailleurs, avant que les noms complets ne soient
+// retrouvés. Ses dépôts portent donc le compte au dernier niveau.
+func sansNoms(session, cours, section string, comptes ...string) classroom.Classroom {
+	return groupe(session, cours, section, classroom.StudentsOf(comptes))
 }
 
-// Le cas qui motive tout : un préfixe fourre-tout, aucun nom complet connu, et
-// un travail à en sortir. Les dépôts arrivent à la bonne place en gardant leur
-// dernier niveau.
+// Le cas qui motive tout : aucun nom complet connu, et un travail à sortir d'un
+// groupe. Les dépôts arrivent à la bonne place en gardant leur dernier niveau.
 func TestDeplacerUnTravailGardeLeFragmentInconnu(t *testing.T) {
 	inventaire := depots(
-		"travail-de-tp1-jlpicard", "travail-de-tp1-aminata-d",
-		"travail-de-tp2-emilie-cote",
+		"h25.5n6.02.tp1.jlpicard", "h25.5n6.02.tp1.aminata-d",
+		"h25.5n6.02.tp2.emilie-cote",
 	)
-	depart := adopte("travail-de-{assignment}-{student}",
-		"jlpicard", "aminata-d", "emilie-cote")
+	depart := sansNoms("h25", "5n6", "02", "jlpicard", "aminata-d", "emilie-cote")
 	arrivee := groupe("a26", "5n6", "01", nil)
 
 	lignes, err := classroom.PlanMoveAssignments(depart, arrivee,
-		[]classroom.Relocation{{ID: "tp1"}}, inventaire)
+		[]classroom.Relocation{{ID: "h25.5n6.02.tp1"}}, inventaire)
 	if err != nil {
 		t.Fatalf("plan refusé : %v", err)
 	}
@@ -202,8 +177,8 @@ func TestDeplacerUnTravailGardeLeFragmentInconnu(t *testing.T) {
 		cibles[ligne.Repo] = ligne.Target
 	}
 	if len(cibles) != 2 ||
-		cibles["travail-de-tp1-jlpicard"] != "a26.5n6.01.tp1.jlpicard" ||
-		cibles["travail-de-tp1-aminata-d"] != "a26.5n6.01.tp1.aminata-d" {
+		cibles["h25.5n6.02.tp1.jlpicard"] != "a26.5n6.01.tp1.jlpicard" ||
+		cibles["h25.5n6.02.tp1.aminata-d"] != "a26.5n6.01.tp1.aminata-d" {
 		t.Fatalf("cibles composées : %v", cibles)
 	}
 }
@@ -211,12 +186,12 @@ func TestDeplacerUnTravailGardeLeFragmentInconnu(t *testing.T) {
 // Le travail peut prendre un nom au passage : c'est le seul moment où corriger
 // « travail-de » ne coûte rien.
 func TestDeplacerUnTravailLeRenomme(t *testing.T) {
-	inventaire := depots("travail-de-jlpicard", "travail-de-emilie-cote")
-	depart := adopte("travail-de-{student}", "jlpicard", "emilie-cote")
+	inventaire := depots("h25.5n6.02.travail-de.jlpicard", "h25.5n6.02.travail-de.emilie-cote")
+	depart := sansNoms("h25", "5n6", "02", "jlpicard", "emilie-cote")
 	arrivee := groupe("h27", "420", "02", nil)
 
 	lignes, err := classroom.PlanMoveAssignments(depart, arrivee,
-		[]classroom.Relocation{{ID: depart.Label(), Name: "Travail de session"}},
+		[]classroom.Relocation{{ID: "h25.5n6.02.travail-de", Name: "Travail de session"}},
 		inventaire)
 	if err != nil {
 		t.Fatalf("plan refusé : %v", err)
@@ -234,8 +209,8 @@ func TestDeplacerUnTravailLeRenomme(t *testing.T) {
 // Quand le nom complet est connu, le déplacement en profite : le dépôt arrive
 // nommé comme la nomenclature le veut.
 func TestDeplacerUnTravailEcritLeNomConnu(t *testing.T) {
-	inventaire := depots("travail-de-tp1-jlpicard")
-	depart := adopte("travail-de-{assignment}-{student}", "jlpicard")
+	inventaire := depots("h25.5n6.02.tp1.jlpicard")
+	depart := sansNoms("h25", "5n6", "02", "jlpicard")
 	depart, err := depart.Rename("jlpicard",
 		roster.Person{FullName: "Jean-Luc Picard", Username: "jlpicard"})
 	if err != nil {
@@ -244,7 +219,7 @@ func TestDeplacerUnTravailEcritLeNomConnu(t *testing.T) {
 	arrivee := groupe("a26", "5n6", "01", nil)
 
 	lignes, err := classroom.PlanMoveAssignments(depart, arrivee,
-		[]classroom.Relocation{{ID: "tp1"}}, inventaire)
+		[]classroom.Relocation{{ID: "h25.5n6.02.tp1"}}, inventaire)
 	if err != nil {
 		t.Fatalf("plan refusé : %v", err)
 	}
@@ -257,25 +232,14 @@ func TestDeplacerUnTravailEcritLeNomConnu(t *testing.T) {
 }
 
 func TestDeplacerUnTravailRefuseUneCollision(t *testing.T) {
-	inventaire := depots("travail-de-tp1-jlpicard", "a26.5n6.01.tp1.jlpicard")
-	depart := adopte("travail-de-{assignment}-{student}", "jlpicard")
+	inventaire := depots("h25.5n6.02.tp1.jlpicard", "a26.5n6.01.tp1.jlpicard")
+	depart := sansNoms("h25", "5n6", "02", "jlpicard")
 	arrivee := groupe("a26", "5n6", "01", nil)
 
 	_, err := classroom.PlanMoveAssignments(depart, arrivee,
-		[]classroom.Relocation{{ID: "tp1"}}, inventaire)
+		[]classroom.Relocation{{ID: "h25.5n6.02.tp1"}}, inventaire)
 	if err == nil || !strings.Contains(err.Error(), "a26.5n6.01.tp1.jlpicard") {
 		t.Fatalf("collision attendue : %v", err)
-	}
-}
-
-func TestDeplacerUnTravailRefuseUneArriveeHeritee(t *testing.T) {
-	inventaire := depots("travail-de-tp1-jlpicard")
-	depart := adopte("travail-de-{assignment}-{student}", "jlpicard")
-
-	_, err := classroom.PlanMoveAssignments(depart, heritage("vieux", "jlpicard"),
-		[]classroom.Relocation{{ID: "tp1"}}, inventaire)
-	if err == nil || !strings.Contains(err.Error(), "nomenclature") {
-		t.Fatalf("arrivée héritée attendue : %v", err)
 	}
 }
 
@@ -283,14 +247,14 @@ func TestDeplacerUnTravailRefuseUneArriveeHeritee(t *testing.T) {
 // départ restent inscrites des deux côtés.
 func TestLesFichesSuiventLeTravailDeplace(t *testing.T) {
 	inventaire := depots(
-		"travail-de-tp1-jlpicard", "travail-de-tp1-aminata-d",
-		"travail-de-tp2-jlpicard",
+		"h25.5n6.02.tp1.jlpicard", "h25.5n6.02.tp1.aminata-d",
+		"h25.5n6.02.tp2.jlpicard",
 	)
-	depart := adopte("travail-de-{assignment}-{student}", "jlpicard", "aminata-d")
+	depart := sansNoms("h25", "5n6", "02", "jlpicard", "aminata-d")
 	arrivee := groupe("a26", "5n6", "01", nil)
 
 	lignes, err := classroom.PlanMoveAssignments(depart, arrivee,
-		[]classroom.Relocation{{ID: "tp1"}}, inventaire)
+		[]classroom.Relocation{{ID: "h25.5n6.02.tp1"}}, inventaire)
 	if err != nil {
 		t.Fatalf("plan refusé : %v", err)
 	}
@@ -416,18 +380,6 @@ func TestRenommerUnTravailInconnu(t *testing.T) {
 
 	_, err := classroom.PlanRenameAssignment(cours, "a26.5n6.01.tp9", "tp2", inventaire)
 	if err == nil || !strings.Contains(err.Error(), "Aucun dépôt") {
-		t.Fatalf("refus attendu : %v", err)
-	}
-}
-
-// Un groupe resté à l'ancienne nomenclature ne sait pas nommer : le renommage
-// est refusé avant toute écriture, et le refus dit par où passer.
-func TestRenommerUnTravailRefuseUnGroupeHerite(t *testing.T) {
-	inventaire := depots("vieux-tp1-jlpicard")
-	cours := heritage("vieux-tp1", "jlpicard")
-
-	_, err := classroom.PlanRenameAssignment(cours, "vieux-tp1", "tp2", inventaire)
-	if err == nil || !strings.Contains(err.Error(), "nomenclature") {
 		t.Fatalf("refus attendu : %v", err)
 	}
 }
