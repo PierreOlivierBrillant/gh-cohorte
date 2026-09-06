@@ -26,6 +26,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -69,10 +70,11 @@ type Server struct {
 	stop       chan struct{}
 	stopOnce   sync.Once
 
-	mutex     sync.Mutex
-	settings  config.Settings
-	inventory map[string][]groups.RepoInfo  // organisation → dépôts connus
-	resolvers map[string]*identity.Resolver // organisation → noms complets
+	mutex      sync.Mutex
+	settings   config.Settings
+	inventory  map[string][]groups.RepoInfo  // organisation → dépôts connus
+	resolvers  map[string]*identity.Resolver // organisation → noms complets
+	registries map[string]*registry.Store    // organisation → registre des étudiants
 }
 
 // New prépare le serveur et réserve son port sur la boucle locale.
@@ -106,6 +108,7 @@ func New(deps Deps) (*Server, error) {
 		settings:   deps.Settings,
 		inventory:  map[string][]groups.RepoInfo{},
 		resolvers:  map[string]*identity.Resolver{},
+		registries: map[string]*registry.Store{},
 	}
 	server.handler = server.guard(server.routes())
 	return server, nil

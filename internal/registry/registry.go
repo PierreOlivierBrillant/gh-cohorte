@@ -206,6 +206,17 @@ func (s *Set) Resolve(slug string) (Student, bool) {
 	return s.students[position], true
 }
 
+// Lookup répond à la question que « classroom » pose au registre : qui se
+// cache derrière le dernier niveau d'un nom de dépôt ? Une fiche sans nom
+// complet ne répond rien : elle n'apprendrait rien à qui la reçoit.
+func (s *Set) Lookup(fragment string) (roster.Person, bool) {
+	fiche, trouve := s.Resolve(fragment)
+	if !trouve || strings.TrimSpace(fiche.FullName) == "" {
+		return roster.Person{}, false
+	}
+	return fiche.Person(), true
+}
+
 // ---------------------------------------------------------------- changement
 
 // Change est ce qu'une écriture veut faire au registre.

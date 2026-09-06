@@ -146,7 +146,7 @@ func TestEtudiantDeplaceAvecSesDepots(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.emilie-cote," +
 		"a26.5n6.02.tp1.jean-luc-picard,a26.5n6.02.travailsession.jean-luc-picard"
@@ -187,7 +187,7 @@ func TestEtudiantDeplaceSansSesDepots(t *testing.T) {
 	if bilan.Count != 1 || bilan.Moved[0] != "jlpicard" || bilan.Renamed != 0 {
 		t.Fatalf("bilan : %+v", bilan)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("aucun dépôt ne devait bouger : %v", noms)
 	}
@@ -211,7 +211,7 @@ func TestDeplacementRefuseUnGroupeQuiNeSaitPasNommer(t *testing.T) {
 		t.Fatalf("message : %s", contenu)
 	}
 	// Rien n'a bougé : ni les dépôts, ni les listes.
-	if noms := h.State.RepoNames("acme"); len(noms) != 2 {
+	if noms := h.depots(); len(noms) != 2 {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }
@@ -242,7 +242,7 @@ func TestPlusieursEtudiantsDeplacesEnsemble(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.emilie-cote," +
 		"a26.5n6.02.tp1.aminata-diallo,a26.5n6.02.tp1.jean-luc-picard"
@@ -279,7 +279,7 @@ func TestDeplacementDeclareLeGroupeDArrivee(t *testing.T) {
 	if resultat["created"] != true || resultat["target_scope"] != "a26.5n6.03" {
 		t.Fatalf("bilan : %+v", resultat)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "a26.5n6.03.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)
 	}
@@ -340,7 +340,7 @@ func TestGroupeDeclareSeRenomme(t *testing.T) {
 	if resultat["renamed"] != float64(1) || resultat["switched"] != true {
 		t.Fatalf("bilan : %+v", resultat)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "h27.5n6.02.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)
 	}

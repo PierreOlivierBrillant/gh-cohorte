@@ -113,7 +113,12 @@ func (s *Server) handleCreateClassroom(writer http.ResponseWriter, request *http
 		fail(writer, err)
 		return
 	}
-	cree, err := s.classrooms.Save(s.fromInput(body))
+	depart := s.fromInput(body)
+	if err := s.apprendre(depart.Org, depart.Students...); err != nil {
+		fail(writer, err)
+		return
+	}
+	cree, err := s.classrooms.Save(depart)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -141,6 +146,7 @@ func (s *Server) handleClassroom(writer http.ResponseWriter, request *http.Reque
 		fail(writer, err)
 		return
 	}
+	cours = s.enrichi(cours, repos)
 	fiche := s.fiche(cours)
 	fiche.Assignments = cours.Assignments(repos)
 	fiche.Source = source
@@ -255,6 +261,7 @@ func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *ht
 		fail(writer, err)
 		return
 	}
+	cours = s.enrichi(cours, repos)
 
 	toutes := students.Build(cours, repos)
 	retenues := students.Apply(toutes, filtre, tri, decroissant)
@@ -327,6 +334,10 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	cours.Students = people
+	if err := s.apprendre(cours.Org, people...); err != nil {
+		fail(writer, err)
+		return
+	}
 
 	modifie, err := s.classrooms.Save(cours)
 	if err != nil {
@@ -380,6 +391,10 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 	// personne inscrite à moitié servie.
 	remises, err := s.remises(augmente, personne, body.Assignments)
 	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if err := s.apprendre(cours.Org, personne); err != nil {
 		fail(writer, err)
 		return
 	}
@@ -501,10 +516,19 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 			fail(writer, err)
 			return
 		}
+		cours = s.enrichi(cours, repos)
 		if renommages, err = classroom.PlanRenameStudent(cours, avant, apres, repos); err != nil {
 			fail(writer, err)
 			return
 		}
+	}
+
+	// Le registre retient le nouveau nom sans oublier l'ancien slug : les
+	// dépôts déjà créés restent rattachés à leur personne, qu'on les renomme
+	// ou non.
+	if err := s.apprendre(cours.Org, apres); err != nil {
+		fail(writer, err)
+		return
 	}
 
 	enregistre, err := s.classrooms.Save(modifie)
@@ -643,11 +667,18 @@ func (s *Server) handleResolveStudentNames(writer http.ResponseWriter, request *
 			job.Progress(done, total, "@"+login)
 		})
 		complets := 0
+		var retrouvees []roster.Person
 		for position, student := range cours.Students {
 			if nom := noms[student.Username]; nom != "" {
 				cours.Students[position].FullName = nom
+				retrouvees = append(retrouvees, cours.Students[position])
 				complets++
 			}
+		}
+		// Un nom retrouvé une fois vaut pour toute l'organisation : le mettre au
+		// registre évite de le rechercher groupe après groupe.
+		if err := s.apprendre(cours.Org, retrouvees...); err != nil {
+			return nil, err
 		}
 		modifie, err := s.classrooms.Save(cours)
 		if err != nil {
@@ -687,6 +718,7 @@ func (s *Server) assignmentOf(request *http.Request) (
 	if err != nil {
 		return cours, "", nil, err
 	}
+	cours = s.enrichi(cours, repos)
 	return cours, cours.AssignmentID(nom), repos, nil
 }
 
@@ -840,6 +872,7 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (
 	if err != nil {
 		return cours, vide, nil, nil, err
 	}
+	cours = s.enrichi(cours, repos)
 	servis := cours.Served(settings.Assignment, repos)
 
 	var aServir, dejaServis []roster.Person

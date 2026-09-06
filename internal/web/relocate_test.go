@@ -60,7 +60,7 @@ func TestTravailSortiDunPrefixeFourreTout(t *testing.T) {
 		t.Fatalf("le groupe d'arrivée aurait dû être déclaré : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.aminata-d,a26.5n6.01.tp1.jlpicard,travail-de-tp2-emilie-cote"
 	if strings.Join(noms, ",") != attendu {
@@ -106,7 +106,7 @@ func TestLeNomCompletSeCorrigeApresLeDeplacement(t *testing.T) {
 	if bilan["status"] != "terminé" {
 		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)
 	}
@@ -146,7 +146,7 @@ func TestApercuDuDeplacementNecritRien(t *testing.T) {
 	if len(apercu.Students) != 1 || apercu.Students[0] != "jlpicard" {
 		t.Fatalf("fiches qui suivraient : %+v", apercu.Students)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "travail-de-tp1-jlpicard" {
 		t.Fatalf("un aperçu n'écrit rien : %v", noms)
 	}
@@ -171,7 +171,7 @@ func TestDeplacementDeTravailRefuseUneArriveeHeritee(t *testing.T) {
 	if !strings.Contains(string(contenu), "nomenclature dépassée") {
 		t.Fatalf("message : %s", contenu)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 2 {
+	if noms := h.depots(); len(noms) != 2 {
 		t.Fatalf("rien ne devait bouger : %v", noms)
 	}
 }
@@ -200,7 +200,7 @@ func TestDeplacementDeTravailRefuseUneCollision(t *testing.T) {
 	if !strings.Contains(string(contenu), "a26.5n6.01.tp1.jlpicard") {
 		t.Fatalf("message : %s", contenu)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 3 {
+	if noms := h.depots(); len(noms) != 3 {
 		t.Fatalf("rien ne devait bouger : %v", noms)
 	}
 }
@@ -232,7 +232,7 @@ func TestPlusieursTravauxDeplacesEnsemble(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "h27.420.02.tp1.jlpicard,h27.420.02.tp2.jlpicard,travail-de-tp3-emilie-cote"
 	if strings.Join(noms, ",") != attendu {

@@ -221,6 +221,27 @@ func (c Classroom) legacyStudentOf(repoName string) (roster.Person, bool) {
 	return roster.Person{}, false
 }
 
+// legacyFragment rend le dernier niveau d'un nom de dépôt hérité.
+//
+// Un gabarit d'adoption le nomme explicitement, et la forme à quatre niveaux se
+// découpe sur le point. Le nom tout en tirets, lui, ne se découpe pas : rien
+// n'y dit où finit le travail et où commence la personne, et c'est justement ce
+// que la nomenclature courante est venue corriger. Un tel nom ne rend donc
+// aucun fragment, et le registre ne peut rien pour lui — il faut le migrer.
+func (c Classroom) legacyFragment(repoName string) (string, bool) {
+	if gabarit, ok := c.gabarit(); ok {
+		if _, student, reconnu := c.patternParts(gabarit, repoName); reconnu {
+			return student.Username, true
+		}
+		return "", false
+	}
+	if strings.Contains(c.LegacyPrefix, naming.Separator) {
+		_, etudiant, reconnu := c.dottedParts(repoName)
+		return etudiant, reconnu
+	}
+	return "", false
+}
+
 // legacyServed dit quels comptes du groupe ont déjà un dépôt pour ce travail.
 // Les deux nomenclatures ne nomment pas la même chose : l'une porte le compte
 // GitHub, l'autre le nom de l'étudiant.

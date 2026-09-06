@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
@@ -16,6 +17,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/orgs"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/picker"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -305,6 +307,41 @@ func (s *Server) resolver(org string) *identity.Resolver {
 	fresh := identity.New(s.deps.Client, s.deps.Cache, s.reportDir(), s.deps.Jobs)
 	s.resolvers[org] = fresh
 	return fresh
+}
+
+// ------------------------------------------------------------------ registre
+
+// registryOf retrouve, par organisation, le registre des étudiants.
+func (s *Server) registryOf(org string) *registry.Store {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if existing, found := s.registries[org]; found {
+		return existing
+	}
+	fresh := registry.New(s.deps.Client, org, s.deps.Cache)
+	s.registries[org] = fresh
+	return fresh
+}
+
+// names lit le registre de l'organisation, et rend avec lui ce qu'il faut en
+// dire à qui regarde.
+//
+// Un registre qu'on n'a pas pu lire ne prive de rien : les groupes s'affichent
+// quand même, les noms manquent. Mais cela se dit — une liste trouée qu'on
+// prend pour une liste entière est pire qu'une liste annoncée trouée.
+func (s *Server) names(org string) (*registry.Set, string) {
+	snapshot, err := s.registryOf(org).Load()
+	switch {
+	case err != nil:
+		return registry.Empty(), "Registre des étudiants illisible (" + err.Error() +
+			") : les noms complets manquent."
+	case snapshot.Stale:
+		return snapshot.Set, "GitHub est injoignable : le registre des étudiants " +
+			"affiché est celui de la dernière lecture."
+	case len(snapshot.Issues) > 0:
+		return snapshot.Set, "Registre des étudiants : " + strings.Join(snapshot.Issues, " ; ")
+	}
+	return snapshot.Set, ""
 }
 
 // urlOf reconstitue l'adresse d'un dépôt quand l'API ne l'a pas donnée.

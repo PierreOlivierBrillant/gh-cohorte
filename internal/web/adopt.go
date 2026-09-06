@@ -131,6 +131,9 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	repos, _, err := s.repos(depart.Org, false)
+	if err == nil {
+		depart = s.enrichi(depart, repos)
+	}
 	if err != nil {
 		fail(writer, err)
 		return

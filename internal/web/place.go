@@ -2,9 +2,12 @@ package web
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 )
 
 // Un groupe se désigne par sa place — « a26.5n6.1010 » —, et cette place est
@@ -34,8 +37,44 @@ func (s *Server) placeAt(scope string) (classroom.Classroom, error) {
 	return classroom.AtScope(org, scope, classroom.DefaultsFrom(s.Settings()))
 }
 
+// enrichi verse dans un groupe ce que le registre de l'organisation sait de ses
+// personnes. Il s'applique dès que l'inventaire est en main, avant tout ce qui
+// lit ou planifie sur des identités.
+//
+// Ce qui en vient n'est pas écrit sur le disque : le magasin retire à
+// l'enregistrement ce qui a été déduit plutôt que déclaré.
+func (s *Server) enrichi(cours classroom.Classroom, repos []groups.RepoInfo) classroom.Classroom {
+	set, _ := s.names(cours.Org)
+	return cours.Enrich(set, repos)
+}
+
+// apprendre confie au registre de l'organisation ce qu'on vient d'apprendre
+// des personnes : leur nom, et le slug que ce nom donnera à leurs dépôts.
+//
+// C'est fait avant d'écrire quoi que ce soit d'autre. Un registre qui refuse
+// arrête donc l'opération au lieu de la laisser à moitié faite — et surtout,
+// un nom qui n'aurait pas atteint le registre serait invisible pour tout le
+// monde sauf cette machine, ce qui est exactement ce qu'on veut cesser.
+//
+// L'écriture est idempotente : redire au registre ce qu'il sait déjà n'y écrit
+// rien, et le cas courant ne coûte donc qu'une lecture.
+func (s *Server) apprendre(org string, people ...roster.Person) error {
+	nommees := make([]roster.Person, 0, len(people))
+	for _, person := range people {
+		if strings.TrimSpace(person.Username) != "" {
+			nommees = append(nommees, person)
+		}
+	}
+	if len(nommees) == 0 {
+		return nil
+	}
+	_, err := s.registryOf(org).Apply(registry.Learn(nommees...))
+	return err
+}
+
 // visibles rassemble les groupes de l'organisation. Le magasin en décide : le
 // terminal doit voir les mêmes groupes que le navigateur.
 func (s *Server) visibles(org string, repos []groups.RepoInfo) []classroom.Classroom {
-	return s.classrooms.Visible(org, repos, classroom.DefaultsFrom(s.Settings()))
+	set, _ := s.names(org)
+	return s.classrooms.Visible(org, repos, classroom.DefaultsFrom(s.Settings()), set)
 }

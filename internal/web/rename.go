@@ -44,6 +44,9 @@ func (s *Server) renommage(request *http.Request, body renameInput) (
 		return cours, "", nil, err
 	}
 	repos, _, err := s.repos(cours.Org, false)
+	if err == nil {
+		cours = s.enrichi(cours, repos)
+	}
 	if err != nil {
 		return cours, "", nil, err
 	}

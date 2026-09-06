@@ -10,6 +10,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 )
@@ -33,6 +34,21 @@ type harnais struct {
 	Pauses    []time.Duration
 	scripte   *ui.Scripted
 	dernierRC int
+}
+
+// depots rend les dépôts d'étudiants de l'organisation, triés.
+//
+// Les dépôts de service en sont écartés : « .cohorte », que le registre des
+// étudiants amène dès qu'un nom est appris, n'est pas le dépôt de quelqu'un et
+// n'a rien à faire dans ce que ces tests comparent.
+func (h *harnais) depots() []string {
+	gardes := make([]string, 0)
+	for _, nom := range h.State.RepoNames("acme") {
+		if !groups.Service(nom) {
+			gardes = append(gardes, nom)
+		}
+	}
+	return gardes
 }
 
 func nouveau(t *testing.T, state *fakegh.State) *harnais {

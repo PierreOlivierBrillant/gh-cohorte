@@ -41,7 +41,7 @@ func TestTravailRenommeSurPlace(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.projet-final.emilie-cote," +
 		"a26.5n6.01.projet-final.jlpicard,a26.5n6.01.tp2.jlpicard"
@@ -61,7 +61,7 @@ func TestRenommerUnTravailNeTouchePasAuxEtudiants(t *testing.T) {
 	h.travail(http.MethodPost, "/api/classrooms/"+place+"/assignments/rename",
 		map[string]any{"id": "a26.5n6.01.tp1", "name": "tp2"})
 
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "a26.5n6.01.tp2.jlpicard" {
 		t.Fatalf("dépôts : %v", noms)
 	}
@@ -94,7 +94,7 @@ func TestApercuDuRenommageNecritRien(t *testing.T) {
 	if apercu.Rows[0].Target != "a26.5n6.01.projet-final.jlpicard" {
 		t.Fatalf("cible composée : %+v", apercu.Rows)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "a26.5n6.01.tp1.jlpicard" {
 		t.Fatalf("un aperçu n'écrit rien : %v", noms)
 	}
@@ -116,7 +116,7 @@ func TestRenommageRefuseUnNomDejaPris(t *testing.T) {
 		!strings.Contains(string(contenu), "existe déjà") {
 		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 2 {
+	if noms := h.depots(); len(noms) != 2 {
 		t.Fatalf("rien n'aurait dû être renommé : %v", noms)
 	}
 }
@@ -152,7 +152,7 @@ func TestRenommageRefuseUnGroupeHerite(t *testing.T) {
 		!strings.Contains(string(contenu), "nomenclature") {
 		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
 	}
-	if noms := h.State.RepoNames("acme"); noms[0] != "vieux-tp1-jlpicard" {
+	if noms := h.depots(); noms[0] != "vieux-tp1-jlpicard" {
 		t.Fatalf("rien n'aurait dû être renommé : %v", noms)
 	}
 }

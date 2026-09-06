@@ -53,6 +53,9 @@ func (s *Server) relocation(request *http.Request, body relocateInput) (relocate
 		return plan, err
 	}
 	repos, _, err := s.repos(depart.Org, false)
+	if err == nil {
+		depart = s.enrichi(depart, repos)
+	}
 	if err != nil {
 		return plan, err
 	}

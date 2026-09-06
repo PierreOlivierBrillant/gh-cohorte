@@ -98,6 +98,16 @@ type Classroom struct {
 	RosterPath    string          `json:"roster_path,omitempty"`
 	Defaults      Defaults        `json:"defaults"`
 	CreatedAt     string          `json:"created_at"`
+
+	// derived retient les comptes que le registre a révélés plutôt que la
+	// liste locale. Il n'est pas écrit : ce qui a été déduit ne doit pas se
+	// faire passer pour ce qui a été déclaré.
+	derived map[string]bool
+	// aliases retient les fragments que le registre sait rattacher à quelqu'un
+	// sans que le nom courant les produise — un nom corrigé depuis, un dépôt
+	// adopté sous un autre nom. Sans eux, corriger une faute de frappe
+	// détacherait de leur personne tous les dépôts déjà créés.
+	aliases map[string]roster.Person
 }
 
 // Legacy dit si le groupe suit encore une nomenclature dépassée : un préfixe
@@ -324,9 +334,101 @@ func (c Classroom) MissingNames() []roster.Person {
 	return incomplets
 }
 
+// Names répond à la seule question que le registre de l'organisation permet de
+// poser : qui se cache derrière le dernier niveau d'un nom de dépôt ?
+//
+// Le paquet ne connaît du registre que cette question. Il pourrait sinon en
+// dépendre entièrement — et donc du client GitHub et du cache —, alors qu'il
+// n'a besoin de rien d'autre.
+type Names interface {
+	Lookup(fragment string) (roster.Person, bool)
+}
+
+// Enrich verse dans le groupe ce que le registre de l'organisation sait de ses
+// personnes, et rend le groupe ainsi complété.
+//
+// Deux manques s'y comblent. Les noms d'abord : une liste peut ne porter qu'un
+// compte — c'est le cas de tout groupe adopté depuis des dépôts hérités —, et
+// le registre dit qui il désigne. Les inscriptions ensuite : un groupe qu'on
+// n'a pas déclaré sur cette machine, celui d'un collègue, n'a aucune liste ;
+// ses étudiants se lisent alors dans ses dépôts, chaque dernier niveau menant
+// au registre.
+//
+// Ce qui est ainsi déduit n'est pas écrit sur le disque : ce que la machine
+// déclare doit rester ce qu'on lui a dit, non ce qu'elle a conclu. Le magasin
+// s'en charge à l'enregistrement.
+func (c Classroom) Enrich(names Names, repos []groups.RepoInfo) Classroom {
+	if names == nil {
+		return c
+	}
+	complets := make([]roster.Person, 0, len(c.Students))
+	connus := map[string]bool{}
+	for _, student := range c.Students {
+		if strings.TrimSpace(student.FullName) == "" {
+			if trouve, ok := names.Lookup(student.Username); ok {
+				student.FullName = trouve.FullName
+			}
+		}
+		connus[strings.ToLower(student.Username)] = true
+		complets = append(complets, student)
+	}
+
+	deduits := map[string]bool{}
+	alias := map[string]roster.Person{}
+	for _, repo := range repos {
+		fragment, lisible := c.Fragment(repo.Name)
+		if !lisible || !c.Owns(repo.Name) {
+			continue
+		}
+		trouve, ok := names.Lookup(fragment)
+		if !ok {
+			continue
+		}
+		// Le fragment est retenu même quand la personne est déjà de la liste :
+		// c'est lui qui rattache un dépôt que le nom courant ne produit plus.
+		alias[strings.ToLower(fragment)] = trouve
+		if connus[strings.ToLower(trouve.Username)] {
+			continue
+		}
+		connus[strings.ToLower(trouve.Username)] = true
+		deduits[strings.ToLower(trouve.Username)] = true
+		complets = append(complets, trouve)
+	}
+
+	c.Students = complets
+	c.derived, c.aliases = deduits, alias
+	return c
+}
+
+// declared retire ce que le registre a révélé, pour ne garder que ce qui a été
+// déclaré ici. C'est cette liste-là qui s'écrit sur le disque.
+func (c Classroom) declared() Classroom {
+	if len(c.derived) == 0 {
+		return c
+	}
+	gardes := make([]roster.Person, 0, len(c.Students))
+	for _, student := range c.Students {
+		if !c.derived[strings.ToLower(student.Username)] {
+			gardes = append(gardes, student)
+		}
+	}
+	c.Students, c.derived = gardes, nil
+	return c
+}
+
 // fragments associe à chaque étudiant ce qui peut le nommer dans un dépôt.
+//
+// La liste du groupe passe la première : c'est elle qui dit qui est inscrit.
+// Le registre ne comble que ce qu'elle ne sait pas nommer — les slugs qu'un
+// nom corrigé depuis ne produit plus.
 func (c Classroom) fragments() known {
-	return knownBy(c.Students)
+	connus := knownBy(c.Students)
+	for fragment, person := range c.aliases {
+		if _, deja := connus[fragment]; !deja {
+			connus[fragment] = person
+		}
+	}
+	return connus
 }
 
 // known rassemble ce qui, au dernier niveau d'un nom de dépôt, désigne une
@@ -521,7 +623,9 @@ func (c Classroom) Repos(assignmentID string, repos []groups.RepoInfo) []groups.
 	return trouves
 }
 
-// StudentOf retrouve l'étudiant du groupe auquel un dépôt appartient.
+// StudentOf retrouve l'étudiant du groupe auquel un dépôt appartient. Ce qu'il
+// sait des personnes vient de la liste du groupe ; « Enrich » y verse d'abord
+// ce que le registre de l'organisation en dit.
 func (c Classroom) StudentOf(repoName string) (roster.Person, bool) {
 	if c.Legacy() {
 		return c.legacyStudentOf(repoName)
@@ -531,6 +635,20 @@ func (c Classroom) StudentOf(repoName string) (roster.Person, bool) {
 		return roster.Person{}, false
 	}
 	return c.fragments().personne(parts.Student)
+}
+
+// Fragment rend le dernier niveau d'un nom de dépôt du groupe : ce qui y
+// désigne une personne. Le booléen dit que le nom se lit ; il ne dit pas que
+// quelqu'un se cache derrière.
+func (c Classroom) Fragment(repoName string) (string, bool) {
+	if c.Legacy() {
+		return c.legacyFragment(repoName)
+	}
+	parts, reconnu := naming.Parse(repoName)
+	if !reconnu {
+		return "", false
+	}
+	return parts.Student, true
 }
 
 // ----------------------------------------------------------------- candidats

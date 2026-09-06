@@ -168,11 +168,13 @@ func (s *Store) List(org string) []Classroom {
 // Visible rassemble les groupes d'une organisation : ceux qu'on a déclarés, et
 // ceux que les dépôts dessinent sans qu'on ait rien eu à déclarer. Un groupe
 // existe parce que ses dépôts existent ; le fichier local n'ajoute que ce
-// qu'eux ne savent pas dire.
+// qu'eux ne savent pas dire, et le registre de l'organisation ce que ni les
+// uns ni l'autre ne disent — le nom derrière chaque compte.
 //
 // Les trois interfaces partent de cette liste : ce que l'une montre comme
 // groupe, les autres doivent le montrer aussi.
-func (s *Store) Visible(org string, repos []groups.RepoInfo, defauts Defaults) []Classroom {
+func (s *Store) Visible(org string, repos []groups.RepoInfo, defauts Defaults,
+	names Names) []Classroom {
 	declares := s.List(org)
 	vus := map[string]bool{}
 	for _, cours := range declares {
@@ -188,6 +190,11 @@ func (s *Store) Visible(org string, repos []groups.RepoInfo, defauts Defaults) [
 		}
 		vus[NormalizeScope(place)] = true
 		declares = append(declares, cours)
+	}
+	// Le registre est versé ici, une fois : ce que les trois interfaces voient
+	// d'un groupe ne doit pas dépendre de celle par laquelle on l'a ouvert.
+	for position, cours := range declares {
+		declares[position] = cours.Enrich(names, repos)
 	}
 	return declares
 }
@@ -210,7 +217,9 @@ func (s *Store) Find(org, scope string) (Classroom, bool) {
 // rien à créer ni à mettre à jour séparément — un groupe est à sa place, ou il
 // n'y est pas.
 func (s *Store) Save(classroom Classroom) (Classroom, error) {
-	valide, err := classroom.Validate()
+	// Ce que le registre a révélé n'est pas écrit ici : le fichier local dit
+	// ce qu'on a déclaré sur cette machine, pas ce qu'on en a déduit.
+	valide, err := classroom.declared().Validate()
 	if err != nil {
 		return classroom, err
 	}
@@ -231,7 +240,7 @@ func (s *Store) Save(classroom Classroom) (Classroom, error) {
 // Move suit un groupe qui change de place : ses dépôts viennent d'être
 // renommés, et ce qu'on retient de lui doit les suivre.
 func (s *Store) Move(org, scope string, cible Classroom) (Classroom, error) {
-	valide, err := cible.Validate()
+	valide, err := cible.declared().Validate()
 	if err != nil {
 		return cible, err
 	}

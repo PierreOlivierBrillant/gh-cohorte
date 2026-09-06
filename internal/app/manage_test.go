@@ -712,7 +712,7 @@ func TestTravailDeplaceVersUneAutrePlace(t *testing.T) {
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	for _, attendu := range []string{
 		"a26.5n6.01.tp1.aminata-d", "a26.5n6.01.tp1.emilie-cote",
@@ -736,7 +736,7 @@ func TestTravailNonDeplaceQuandOnRefuse(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("Annulé : rien n'a été renommé.")
-	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+	if noms := h.depots(); !slices.Contains(noms, "tp1-jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }
@@ -750,7 +750,7 @@ func TestTravailDeplaceEnLigneDeCommande(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	if !slices.Contains(noms, "a26.5n6.01.travail-session.jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}
@@ -766,7 +766,7 @@ func TestTravailDeplaceEnSimulation(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("a26.5n6.01.tp1.jlpicard", "Simulation")
-	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+	if noms := h.depots(); !slices.Contains(noms, "tp1-jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }
@@ -795,7 +795,7 @@ func TestTravailRenommeDansLAssistant(t *testing.T) {
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.projet-final.emilie-cote," +
 		"a26.5n6.01.projet-final.jlpicard,a26.5n6.01.tp2.jlpicard"
@@ -813,7 +813,7 @@ func TestTravailNonRenommeQuandOnRefuse(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("Annulé : rien n'a été renommé.")
-	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "a26.5n6.01.tp1.jlpicard") {
+	if noms := h.depots(); !slices.Contains(noms, "a26.5n6.01.tp1.jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }
@@ -826,7 +826,7 @@ func TestTravailRenommeEnLigneDeCommande(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if noms := h.State.RepoNames("acme"); !slices.Contains(noms,
+	if noms := h.depots(); !slices.Contains(noms,
 		"a26.5n6.01.projet-final.jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}
@@ -842,7 +842,7 @@ func TestTravailRenommeEnSimulation(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("a26.5n6.01.projet-final.jlpicard", "Simulation")
-	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "a26.5n6.01.tp1.jlpicard") {
+	if noms := h.depots(); !slices.Contains(noms, "a26.5n6.01.tp1.jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }
@@ -858,7 +858,7 @@ func TestTravailSansPlaceRefuseLeRenommage(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("Déplacez-le d'abord")
-	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+	if noms := h.depots(); !slices.Contains(noms, "tp1-jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }
@@ -871,7 +871,7 @@ func TestTravailRefuseUnePlaceHeritee(t *testing.T) {
 	if code := h.muet(); code != app.ExitValidation {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+	if noms := h.depots(); !slices.Contains(noms, "tp1-jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}
 }

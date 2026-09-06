@@ -17,9 +17,11 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/web"
 )
@@ -33,6 +35,8 @@ type harnais struct {
 	Serveur *web.Server
 	Client  *http.Client
 	Base    string
+	// Groupes est le fichier local des groupes de cette machine.
+	Groupes string
 }
 
 func nouveau(t *testing.T, state *fakegh.State) *harnais {
@@ -84,6 +88,7 @@ func nouveauAvec(t *testing.T, state *fakegh.State, ajuster func(*web.Deps)) *ha
 	if ajuster != nil {
 		ajuster(&deps)
 	}
+	fichierGroupes := classroom.PathNextTo(deps.ConfigFile)
 	serveur, err := web.New(deps)
 	if err != nil {
 		t.Fatalf("interface web : %v", err)
@@ -108,7 +113,7 @@ func nouveauAvec(t *testing.T, state *fakegh.State, ajuster func(*web.Deps)) *ha
 	}
 	h := &harnais{
 		t: t, State: state, Github: client, Serveur: serveur, Base: serveur.Address(),
-		Client: &http.Client{Jar: jar, Timeout: 20 * time.Second},
+		Client: &http.Client{Jar: jar, Timeout: 20 * time.Second}, Groupes: fichierGroupes,
 	}
 	// L'adresse remise dans le terminal ouvre la session et pose le témoin.
 	reponse, err := h.Client.Get(serveur.URL())
@@ -172,6 +177,57 @@ func (h *harnais) decoder(contenu []byte, cible any) {
 	if err := json.Unmarshal(contenu, cible); err != nil {
 		h.t.Fatalf("réponse illisible (%s) : %v", contenu, err)
 	}
+}
+
+// declares relit le fichier local des groupes : ce que cette machine a
+// vraiment déclaré, par opposition à ce que l'interface montre une fois le
+// registre versé dessus.
+func (h *harnais) declares(scope string) []string {
+	h.t.Helper()
+	contenu, err := os.ReadFile(h.Groupes)
+	if err != nil {
+		return nil
+	}
+	var lu struct {
+		Classrooms []struct {
+			Session  string `json:"session"`
+			Course   string `json:"course"`
+			Group    string `json:"group"`
+			Students []struct {
+				Username string `json:"username"`
+			} `json:"students"`
+		} `json:"classrooms"`
+	}
+	if err := json.Unmarshal(contenu, &lu); err != nil {
+		h.t.Fatalf("groupes.json illisible : %v", err)
+	}
+	for _, item := range lu.Classrooms {
+		if !strings.EqualFold(item.Session+"."+item.Course+"."+item.Group, scope) {
+			continue
+		}
+		comptes := make([]string, 0, len(item.Students))
+		for _, student := range item.Students {
+			comptes = append(comptes, student.Username)
+		}
+		sort.Strings(comptes)
+		return comptes
+	}
+	return nil
+}
+
+// depots rend les dépôts d'étudiants de l'organisation, triés.
+//
+// Les dépôts de service en sont écartés : « .cohorte », que le registre des
+// étudiants amène dès qu'un nom est appris, n'est pas le dépôt de quelqu'un et
+// n'a rien à faire dans ce que ces tests comparent.
+func (h *harnais) depots() []string {
+	gardes := make([]string, 0)
+	for _, nom := range h.State.RepoNames("acme") {
+		if !groups.Service(nom) {
+			gardes = append(gardes, nom)
+		}
+	}
+	return gardes
 }
 
 // groupe déclare un groupe de la nomenclature courante et rend sa place.
@@ -642,7 +698,7 @@ func TestHomonymesRefusesAvantTouteEcriture(t *testing.T) {
 	if !strings.Contains(string(contenu), "Jean Tremblay") {
 		t.Fatalf("message : %s", contenu)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Fatalf("des dépôts ont été créés : %v", noms)
 	}
 }
@@ -662,7 +718,7 @@ func TestDistributionAToutLeGroupe(t *testing.T) {
 	if resultat["created"] != float64(2) {
 		t.Fatalf("%v dépôt(s) créé(s), attendu 2", resultat["created"])
 	}
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.emilie-cote,a26.5n6.01.tp1.jean-luc-picard"
 	if strings.Join(noms, ",") != attendu {
@@ -679,7 +735,7 @@ func TestSimulationNeCreeRien(t *testing.T) {
 	if bilan["status"] != "terminé" {
 		t.Fatalf("travail %v", bilan["status"])
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Fatalf("la simulation a créé %v", noms)
 	}
 }
@@ -718,7 +774,7 @@ func TestDistributionRestreinteAQuelquesEtudiants(t *testing.T) {
 	if resultat["created"] != float64(1) {
 		t.Fatalf("%v dépôt(s) créé(s), attendu 1", resultat["created"])
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "a26.5n6.01.rattrapage.emilie-cote" {
 		t.Fatalf("dépôts créés : %v", noms)
 	}
@@ -735,7 +791,7 @@ func TestSelectionVideNeSertPersonne(t *testing.T) {
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d, attendu 400 — %s", reponse.StatusCode, contenu)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Fatalf("des dépôts ont été créés : %v", noms)
 	}
 }
@@ -1023,7 +1079,7 @@ func TestEtudiantAjouteRecoitLesTravauxCoches(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.emilie-cote,a26.5n6.01.tp1.jean-luc-picard," +
 		"a26.5n6.01.tp2.emilie-cote,a26.5n6.01.tp2.jean-luc-picard"
@@ -1079,7 +1135,7 @@ func TestEtudiantRenommeSeulEtSesDepotsAvecLui(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.emilie-cote-tremblay,a26.5n6.01.tp1.jean-luc-picard," +
 		"a26.5n6.01.tp2.emilie-cote-tremblay"
@@ -1129,7 +1185,7 @@ func TestCompteRenommeSansToucherAuxDepots(t *testing.T) {
 	if bilan.Student.Username != "aminata-d" || bilan.Renamed != 0 {
 		t.Fatalf("bilan : %+v", bilan)
 	}
-	if noms := h.State.RepoNames("acme"); strings.Join(noms, ",") != "a26.5n6.01.tp1.emilie-cote" {
+	if noms := h.depots(); strings.Join(noms, ",") != "a26.5n6.01.tp1.emilie-cote" {
 		t.Fatalf("dépôts : %v", noms)
 	}
 
@@ -1170,7 +1226,7 @@ func TestRenommageRefuseAvantDEcrireQuoiQueCeSoit(t *testing.T) {
 	}
 
 	// Ni les dépôts ni la liste n'ont bougé.
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.emilie-cote,a26.5n6.01.tp2.emilie-cote," +
 		"a26.5n6.01.tp2.jean-luc-picard"
@@ -1201,13 +1257,13 @@ func TestSuppressionExigeLeNomExact(t *testing.T) {
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d, attendu 400", reponse.StatusCode)
 	}
-	if len(h.State.RepoNames("acme")) != 1 {
+	if len(h.depots()) != 1 {
 		t.Fatal("le dépôt a été supprimé malgré une confirmation incorrecte")
 	}
 
 	h.json(http.MethodDelete, "/api/orgs/acme/repos/tp1-jlpicard",
 		map[string]string{"confirm": "tp1-jlpicard"}, nil)
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Fatalf("dépôts restants : %v", noms)
 	}
 }
@@ -1479,7 +1535,7 @@ func TestMigrationRenommeLesDepots(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.jean-luc-picard," +
 		"a26.5n6.01.travailsession.emilie-cote,a26.5n6.01.travailsession.jean-luc-picard"
@@ -1531,7 +1587,7 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d, attendu 400 — %s", reponse.StatusCode, contenu)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 2 ||
+	if noms := h.depots(); len(noms) != 2 ||
 		!strings.HasPrefix(noms[0], "a26-5n6-") {
 		t.Fatalf("des dépôts ont été renommés : %v", noms)
 	}
@@ -1546,7 +1602,7 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 		resultat["switched"] != false {
 		t.Fatalf("bilan : %+v", resultat)
 	}
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	if strings.Join(noms, ",") != "a26-5n6-tp1-visiteur,a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)

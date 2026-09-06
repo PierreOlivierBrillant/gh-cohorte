@@ -77,6 +77,9 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 	}
 
 	repos, _, err := s.repos(cours.Org, false)
+	if err == nil {
+		cours = s.enrichi(cours, repos)
+	}
 	if err != nil {
 		return cours, vide, nil, err
 	}
