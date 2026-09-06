@@ -53,6 +53,7 @@ func (s *Session) advancedMenu() error {
 			"vider", "Vider le cache local",
 			"emplacements", "Afficher les emplacements des fichiers",
 			"portees", "Portées du jeton GitHub",
+			"registre", "Effacer l'historique du registre des étudiants",
 			"reglages", "Oublier les réglages mémorisés",
 			"revenir", "Revenir au menu principal",
 		), "revenir")
@@ -70,6 +71,10 @@ func (s *Session) advancedMenu() error {
 			s.showLocations()
 		case "portees":
 			if err := s.manageScopes(); err != nil {
+				return err
+			}
+		case "registre":
+			if err := s.forgetHistoryFromMenu(); err != nil {
 				return err
 			}
 		case "reglages":

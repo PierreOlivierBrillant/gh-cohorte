@@ -34,7 +34,11 @@ type Options struct {
 	// PreferLocal fait gagner les noms de ce poste sur ceux du registre quand
 	// les deux diffèrent. Sans lui, le registre garde les siens.
 	PreferLocal bool
-	Roster      string
+	// ForgetRegistryHistory réécrit la branche du registre en un commit sans
+	// passé, puis quitte. Le nom du dépôt doit être retapé : aucune option,
+	// « --yes » compris, ne court-circuite cette confirmation.
+	ForgetRegistryHistory bool
+	Roster                string
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
@@ -111,6 +115,7 @@ Drapeaux :
   --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
   --publish-registry       verser au registre de l'organisation les noms de ce poste
   --prefer-local           en cas de désaccord, garder le nom de ce poste
+  --forget-registry-history  réécrire le registre sans son historique
   --session COURT          ne lister que les étudiants d'une session (« a26 »)
   --course SIGLE           ne lister que les étudiants d'un cours (« 5n6 »)
   --filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
@@ -186,6 +191,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"verser au registre les noms de ce poste")
 	set.BoolVar(&options.PreferLocal, "prefer-local", false,
 		"garder les noms de ce poste en cas de désaccord")
+	set.BoolVar(&options.ForgetRegistryHistory, "forget-registry-history", false,
+		"réécrire le registre sans son historique")
 	session := set.String("session", "", "ne lister qu'une session")
 	sigle := set.String("course", "", "ne lister qu'un cours")
 	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")

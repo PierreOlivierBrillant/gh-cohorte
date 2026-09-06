@@ -277,3 +277,52 @@ func TestLApercuAvertitSurLaPermissionDeBase(t *testing.T) {
 		t.Fatalf("avertissement = %q", vue.Exposure)
 	}
 }
+
+// ------------------------------------------------------------- effacement
+
+// Effacer l'historique exige de retaper le nom du dépôt, comme une suppression.
+func TestEffacerLHistoriqueExigeLeNomExact(t *testing.T) {
+	state := fakegh.NewState()
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01", "Émilie Côté", "emilie-cote"))
+	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{}, nil)
+
+	reponse, contenu := h.requete(http.MethodPost, "/api/orgs/acme/registry/history",
+		map[string]any{"confirm": ".cohorte"})
+	if reponse.StatusCode < 400 {
+		t.Fatalf("statut = %d — un nom approchant ne doit pas suffire", reponse.StatusCode)
+	}
+	if !strings.Contains(string(contenu), "acme/"+registry.RepoName) {
+		t.Fatalf("le refus doit dire quoi retaper : %s", contenu)
+	}
+}
+
+// Avec le nom exact, la branche repart d'un commit sans passé — et le contenu
+// est intact.
+func TestEffacerLHistoriqueGardeLeContenu(t *testing.T) {
+	state := fakegh.NewState()
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01",
+		"Émilie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard"))
+	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{}, nil)
+	avant := state.Refs["acme/"+registry.RepoName+"@"+registry.Branch]
+
+	var bilan struct {
+		Commit  string `json:"commit"`
+		Message string `json:"message"`
+	}
+	h.json(http.MethodPost, "/api/orgs/acme/registry/history",
+		map[string]any{"confirm": "acme/" + registry.RepoName}, &bilan)
+	if bilan.Commit == "" || bilan.Commit == avant {
+		t.Fatalf("bilan = %+v", bilan)
+	}
+	// Le message ne promet pas plus que ce qui est vrai.
+	if !strings.Contains(bilan.Message, "GitHub garde un temps") {
+		t.Errorf("message = %q", bilan.Message)
+	}
+
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	for _, attendu := range []string{"Émilie Côté", "Jean-Luc Picard"} {
+		if !strings.Contains(contenu, attendu) {
+			t.Fatalf("« %s » a disparu du registre :\n%s", attendu, contenu)
+		}
+	}
+}

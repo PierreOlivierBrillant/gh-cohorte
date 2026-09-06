@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -24,6 +25,46 @@ type publicationRendu struct {
 	Exposure     string               `json:"exposure,omitempty"`
 	Notice       string               `json:"notice,omitempty"`
 	RegistrySize int                  `json:"registry_size"`
+}
+
+// handleRegistryForgetHistory réécrit la branche du registre en un commit sans
+// passé.
+//
+// C'est irréversible, et c'est demandé pour l'être : quelqu'un veut qu'un nom
+// cesse d'être atteignable. Le nom complet du dépôt doit donc être retapé,
+// comme pour une suppression — aucune option ne court-circuite cette
+// confirmation.
+func (s *Server) handleRegistryForgetHistory(writer http.ResponseWriter, request *http.Request) {
+	org, err := valid.Login(request.PathValue("org"), "Organisation")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body struct {
+		Confirm string `json:"confirm"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	attendu := org + "/" + registry.RepoName
+	if strings.TrimSpace(body.Confirm) != attendu {
+		fail(writer, valid.Errorf(
+			"Confirmation incorrecte : retapez « %s » exactement.", attendu))
+		return
+	}
+
+	commit, err := s.registryOf(org).ForgetHistory()
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"commit": commit,
+		"message": "L'historique du registre est réécrit : plus rien de l'ancien n'est " +
+			"atteignable depuis « " + registry.Branch + " ». GitHub garde un temps les objets " +
+			"devenus inaccessibles, et un clone déjà fait garde ce qu'il avait.",
+	})
 }
 
 // handleRegistryPreview montre ce que publier ferait, sans rien écrire.

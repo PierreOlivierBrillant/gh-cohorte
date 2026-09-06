@@ -331,3 +331,62 @@ func TestUnJetonRefuseNeSeReplieePasSurLeDisque(t *testing.T) {
 		t.Fatal("un jeton refusé doit remonter, pas se replier sur le disque")
 	}
 }
+
+// L'historique du registre se réécrit en un commit sans passé : c'est ce qu'on
+// peut promettre de mieux à qui demande qu'un nom disparaisse.
+func TestLHistoireDuRegistreSeReecrit(t *testing.T) {
+	state := fakegh.NewState()
+	serveur := fakegh.New(state)
+	t.Cleanup(serveur.Close)
+	local := cache.NewIn(t.TempDir(), true)
+	store := registry.New(clientVers(t, serveur), "acme", local)
+
+	if _, err := store.Apply(registry.Learn(personne("Émilie Côté", "ecote"))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Apply(registry.Learn(personne("Jean-Luc Picard", "jlpicard"))); err != nil {
+		t.Fatal(err)
+	}
+	avant, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orphelin, err := store.ForgetHistory()
+	if err != nil {
+		t.Fatalf("ForgetHistory : %v", err)
+	}
+	if orphelin == avant.Head {
+		t.Fatal("la branche n'a pas bougé")
+	}
+
+	// Le contenu est intact ; c'est le passé qui a disparu.
+	apres, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if apres.Set.Len() != 2 || apres.Set.Name("ecote") != "Émilie Côté" {
+		t.Fatalf("registre = %+v", apres.Set.All())
+	}
+	if apres.Head != orphelin {
+		t.Fatalf("tête = %q, attendu %q", apres.Head, orphelin)
+	}
+
+	// Et l'on peut continuer à écrire par-dessus, comme avant.
+	suite, err := store.Apply(registry.Learn(personne("Aminata Diallo", "aminata-d")))
+	if err != nil {
+		t.Fatalf("écriture après effacement : %v", err)
+	}
+	if suite.Len() != 3 {
+		t.Fatalf("registre = %+v", suite.All())
+	}
+}
+
+// Sur un registre jamais écrit, il n'y a rien à effacer, et le dire vaut mieux
+// que de faire semblant.
+func TestEffacerUnHistoriqueInexistantLeDit(t *testing.T) {
+	store, _ := magasin(t, nil)
+	if _, err := store.ForgetHistory(); err == nil {
+		t.Fatal("effacer un historique inexistant doit se signaler")
+	}
+}

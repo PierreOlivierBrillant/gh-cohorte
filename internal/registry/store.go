@@ -236,6 +236,48 @@ func (s *Store) ensureRepo() error {
 	return nil
 }
 
+// ForgetHistory réécrit la branche du registre en un seul commit, sans passé.
+//
+// Un étudiant retiré du registre reste dans l'historique : c'est ce que git
+// est. Cette opération repart d'un commit orphelin portant l'état courant, et
+// la branche n'a plus rien derrière elle.
+//
+// Ce n'est pas un effacement au sens fort, et il ne faut pas le présenter
+// comme tel. Les objets devenus inaccessibles restent un temps chez GitHub
+// avant d'être ramassés, et un clone déjà fait garde tout ce qu'il avait. Ce
+// qui est vrai, et rien de plus : plus rien de l'ancien n'est atteignable
+// depuis la branche.
+func (s *Store) ForgetHistory() (string, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	head, err := s.client.BranchHead(s.org, RepoName, Branch)
+	if err != nil {
+		return "", err
+	}
+	if head == "" {
+		return "", valid.Errorf(
+			"Le registre de « %s » n'a rien écrit : il n'y a pas d'historique à effacer.", s.org)
+	}
+	tree, err := s.client.CommitTree(s.org, RepoName, head)
+	if err != nil {
+		return "", err
+	}
+	orphelin, err := s.client.CreateCommit(s.org, RepoName,
+		"Repart du registre courant, sans son historique", tree, nil)
+	if err != nil {
+		return "", err
+	}
+	if err := s.client.ResetBranchHead(s.org, RepoName, Branch, orphelin); err != nil {
+		return "", err
+	}
+	// Le sceau change : ce qu'on retenait du registre ne vaut plus.
+	if s.local != nil {
+		s.local.Forget(cache.RegistryKey(s.org))
+	}
+	return orphelin, nil
+}
+
 // ------------------------------------------------------------ confidentialité
 
 // Exposure dit qui, dans l'organisation, peut lire le registre sans qu'on le

@@ -606,7 +606,12 @@ func (s *Server) post(writer http.ResponseWriter, request *http.Request, path st
 				}
 			}
 		}
-		sha := digest("commit:" + match[1] + "/" + match[2] + ":" + tree + fmt.Sprint(parents))
+		// Le message entre dans l'empreinte, comme dans un vrai commit : deux
+		// commits de même arbre et mêmes parents ne sont pas le même commit.
+		// Sans cela, un commit orphelin repartant du même arbre que le premier
+		// aurait exactement son SHA.
+		sha := digest("commit:" + match[1] + "/" + match[2] + ":" + tree +
+			fmt.Sprint(parents) + ":" + message)
 		state.Commits[sha] = commit{Tree: tree, Parents: parents, Message: message}
 		s.send(writer, 201, map[string]any{"sha": sha})
 		return

@@ -251,3 +251,34 @@ func TestPublicationMontreUnDesaccordSansTrancherSeule(t *testing.T) {
 		t.Fatalf("le registre n'a pas gardé son nom :\n%s", contenu)
 	}
 }
+
+// ------------------------------------------------------------- effacement
+
+// Effacer l'historique demande de retaper le nom du dépôt. « --yes » n'y change
+// rien : le mode script ne peut pas le faire du tout.
+func TestEffacerLHistoriqueRefuseLeModeScript(t *testing.T) {
+	state := fakegh.NewState()
+	h := nouveau(t, state)
+	h.Options.ForgetRegistryHistory = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitValidation {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("retaper")
+}
+
+// Un nom approchant ne suffit pas.
+func TestEffacerLHistoriqueRefuseUnNomApprochant(t *testing.T) {
+	state := fakegh.NewState()
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Émilie Côté", Username: "emilie-cote"}},
+	})
+	h.Options.ForgetRegistryHistory = true
+	code, _ := h.script(".cohorte")
+	if code != app.ExitAborted {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("intact")
+}

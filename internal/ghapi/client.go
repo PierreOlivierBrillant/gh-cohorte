@@ -883,6 +883,19 @@ func escapePath(file string) string {
 	return strings.Join(niveaux, "/")
 }
 
+// ResetBranchHead fait pointer la branche sur un commit sans exiger d'avance
+// rapide.
+//
+// C'est la seule écriture qui abandonne le verrou : elle sert à réécrire une
+// branche, non à la faire avancer. Tout ce qui n'est pas atteignable depuis le
+// nouveau commit cesse de l'être.
+func (c *Client) ResetBranchHead(owner, repo, branch, commitSHA string) error {
+	_, err := c.do(http.MethodPatch,
+		repoPath(owner, repo)+"/git/refs/heads/"+url.PathEscape(branch),
+		map[string]any{"sha": commitSHA, "force": true})
+	return err
+}
+
 // PushFile est un fichier à déposer dans un dépôt.
 type PushFile struct {
 	Path    string

@@ -5,6 +5,8 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
 // Les noms accumulés sur ce poste ne montent pas d'eux-mêmes au registre : ils
@@ -122,4 +124,61 @@ func (s *Session) showPublication(plan registry.Publication, connues int) {
 			console.Warn(plural("%d compte(s) sans nom", len(plan.Nameless))),
 			console.Dim("@"+strings.Join(plan.Nameless, ", @")))
 	}
+}
+
+// ------------------------------------------------------------- effacement
+
+// forgetRegistryHistory réécrit la branche du registre en un commit sans passé.
+//
+// C'est irréversible, et c'est demandé pour l'être : quelqu'un veut qu'un nom
+// cesse d'être atteignable. Le nom complet du dépôt doit donc être retapé,
+// comme pour une suppression — et « --yes » n'y change rien.
+func (s *Session) forgetRegistryHistory() (int, error) {
+	org := s.Settings.Org
+	console := s.Console
+	console.Heading("Historique du registre de « " + org + " »")
+
+	cible := org + "/" + registry.RepoName
+	console.Print("  " + console.Err("⚠ Réécriture définitive de "+cible))
+	console.Note("   Le registre garde son contenu ; c'est son passé qui disparaît.")
+	console.Note("   GitHub garde un temps les objets devenus inaccessibles, et un clone")
+	console.Note("   déjà fait garde ce qu'il avait : rien de plus n'est promis ici.")
+
+	if !s.Interactive() {
+		return ExitValidation, valid.Errorf(
+			"Effacer l'historique demande de retaper « %s » : impossible en mode script.", cible)
+	}
+	tape, err := s.Prompt.Ask(ui.Question{
+		Title:      "Retapez « " + cible + " » pour confirmer",
+		AllowEmpty: true,
+	})
+	if err != nil {
+		return ExitAborted, err
+	}
+	if strings.TrimSpace(tape) != cible {
+		console.Warning("Annulé : l'historique est intact.")
+		return ExitAborted, nil
+	}
+
+	commit, err := s.registryOf(org).ForgetHistory()
+	if err != nil {
+		return ExitFailure, err
+	}
+	console.Success("Historique réécrit ; la branche « %s » repart de %s.",
+		registry.Branch, commit[:min(7, len(commit))])
+	return ExitOK, nil
+}
+
+// forgetHistoryFromMenu ouvre l'effacement depuis les options avancées, qui
+// s'atteignent sans jeton : l'organisation et l'authentification sont donc à
+// obtenir ici.
+func (s *Session) forgetHistoryFromMenu() error {
+	if err := s.authenticate(); err != nil {
+		return err
+	}
+	if err := s.chooseOrg(); err != nil {
+		return err
+	}
+	_, err := s.forgetRegistryHistory()
+	return err
 }

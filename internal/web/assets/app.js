@@ -3077,6 +3077,31 @@ $('registre-publier').addEventListener('click', async () => {
   dessinerRegistre(vue);
 });
 
+// Un étudiant retiré du registre reste dans l'historique : c'est ce que git
+// est. Réécrire la branche en un commit sans passé est ce qu'on peut promettre
+// de mieux — et pas davantage, ce que le dialogue dit sans détour.
+$('registre-oublier').addEventListener('click', async () => {
+  const org = etat.organisation;
+  if (!org) { message('Choisissez d\'abord une organisation.', 'erreur'); return; }
+  const cible = `${org}/.cohorte`;
+  const saisie = el('input', { type: 'text', classe: 'champ', placeholder: cible });
+  const accord = await demander('Effacer l\'historique du registre ?', el('div', {},
+    el('p', { classe: 'avis erreur',
+      texte: 'Le registre garde son contenu ; c\'est son passé qui disparaît, sans retour.' }),
+    el('p', { classe: 'note',
+      texte: 'GitHub garde un temps les objets devenus inaccessibles, et un clone déjà fait '
+        + 'garde ce qu\'il avait : rien de plus n\'est promis ici.' }),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: `Retapez « ${cible} » pour confirmer` }), saisie)),
+    'Effacer');
+  if (!accord) return;
+
+  const fait = await tenter(() => api('POST', `/api/orgs/${encode(org)}/registry/history`,
+    { confirm: saisie.value.trim() }), 'Registre');
+  if (!fait) return;
+  message(fait.message, 'succes', 12000);
+});
+
 // ------------------------------------------------------- portées du jeton
 
 // L'outil ne fabrique aucun jeton : il redemande à gh d'en obtenir un portant
