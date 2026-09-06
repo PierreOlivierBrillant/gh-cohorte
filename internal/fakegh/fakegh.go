@@ -67,9 +67,12 @@ type State struct {
 	OrgRoles map[string]string
 	// Droit accordé aux membres de créer des dépôts, quand il est connu.
 	MembersCanCreate map[string]bool
-	Users            map[string]string // login → nom complet (vide = profil sans nom)
-	Repos            map[string]*RepoState
-	Templates        map[string]bool
+	// Droit que tout membre détient d'office sur les dépôts, quand il est
+	// connu : GitHub ne le montre qu'aux propriétaires.
+	DefaultRepoPermission map[string]string
+	Users                 map[string]string // login → nom complet (vide = profil sans nom)
+	Repos                 map[string]*RepoState
+	Templates             map[string]bool
 
 	Collaborators map[string]map[string]string // dépôt → compte → droit
 	Invitations   map[string][]invitation
@@ -109,12 +112,13 @@ type treeEntry struct {
 // NewState prépare un état par défaut : une organisation « acme » et trois comptes.
 func NewState() *State {
 	return &State{
-		Viewer:           "prof",
-		Scopes:           "repo, read:org, delete_repo, workflow",
-		MembershipRole:   "admin",
-		Orgs:             map[string]string{"acme": "ACME Éducation"},
-		OrgRoles:         map[string]string{},
-		MembersCanCreate: map[string]bool{},
+		Viewer:                "prof",
+		Scopes:                "repo, read:org, delete_repo, workflow",
+		MembershipRole:        "admin",
+		Orgs:                  map[string]string{"acme": "ACME Éducation"},
+		OrgRoles:              map[string]string{},
+		MembersCanCreate:      map[string]bool{},
+		DefaultRepoPermission: map[string]string{},
 		Users: map[string]string{
 			"emilie-cote": "Émilie Côté",
 			"jlpicard":    "Jean-Luc Picard",
@@ -365,6 +369,9 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		// s'il est visible en renseignant, ou non, MembersCanCreate.
 		if permis, connu := state.MembersCanCreate[match[1]]; connu {
 			payload["members_can_create_repositories"] = permis
+		}
+		if droit, connu := state.DefaultRepoPermission[match[1]]; connu {
+			payload["default_repository_permission"] = droit
 		}
 		s.send(writer, 200, payload)
 		return

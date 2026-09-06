@@ -1,0 +1,268 @@
+package registry
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+)
+
+// Le registre s'écrit par échange conditionnel, jamais par fusion.
+//
+// Celui qui écrit lit la tête de la branche, fabrique un commit qui en descend,
+// puis demande à GitHub de faire avancer la référence sans forcer. GitHub
+// refuse alors tout ce qui n'est pas une avance rapide : si quelqu'un a écrit
+// entre-temps, le refus tombe, et l'écriture est refaite sur l'état frais.
+//
+// Ce qui est rejoué est le changement — « ces personnes sont connues » —, non
+// le registre qu'on avait en main. Le travail de l'autre est donc conservé
+// entier. Aucun clone, aucune branche, aucun « git merge » : il n'y a rien à
+// résoudre, donc rien qui puisse rester en conflit.
+
+// Attempts borne les reprises. Cinq suffisent très largement : il faudrait que
+// cinq écritures se glissent coup sur coup entre notre lecture et la nôtre.
+// Au-delà, ce n'est plus de la concurrence, c'est une panne.
+const Attempts = 5
+
+// Description est ce que le dépôt du registre annonce sur github.com.
+const Description = "Registre des étudiants — gh cohorte. Privé : contient des renseignements personnels."
+
+// Store lit et écrit le registre d'une organisation.
+type Store struct {
+	client *ghapi.Client
+	org    string
+	now    func() time.Time
+	// local retient ce qu'on a déjà lu, scellé par le commit d'où il vient.
+	// Il peut être nil : le registre se lit alors toujours depuis GitHub.
+	local *cache.Cache
+
+	// mutex sérialise les écritures de ce processus. L'interface web sert
+	// plusieurs onglets : deux d'entre eux ne doivent pas se disputer la tête
+	// de la branche avant même d'atteindre GitHub, où ils s'excluraient au prix
+	// d'un aller-retour.
+	mutex sync.Mutex
+}
+
+// New ouvre le registre d'une organisation. Le cache peut être nil.
+func New(client *ghapi.Client, org string, local *cache.Cache) *Store {
+	return &Store{client: client, org: org, now: time.Now, local: local}
+}
+
+// Org renvoie l'organisation dont c'est le registre.
+func (s *Store) Org() string { return s.org }
+
+// Snapshot est le registre tel qu'il était à un commit donné.
+type Snapshot struct {
+	Set *Set
+	// Head est le commit d'où il vient ; vide quand rien n'a encore été écrit.
+	// C'est lui qui dit si le registre a bougé depuis la dernière lecture.
+	Head string
+	// Issues énumère ce que la lecture a dû écarter. Le fichier se modifie à la
+	// main sur github.com : une fiche mal écrite doit se signaler, pas priver
+	// toute l'organisation de ses noms.
+	Issues []string
+	// Stale dit que GitHub n'a pas répondu et que ce registre vient du disque.
+	// L'appelant doit le montrer : afficher des noms périmés en silence serait
+	// pire que d'en afficher aucun.
+	Stale bool
+}
+
+// keptSet est ce que le cache local retient : le registre, et le commit qui le
+// scelle. Tant que la branche pointe sur ce commit, ce contenu vaut toujours.
+type keptSet struct {
+	Head     string    `json:"head"`
+	Students []Student `json:"students"`
+}
+
+// Load lit le registre.
+//
+// Un dépôt absent, ou un registre pas encore amorcé, donne un registre vide
+// sans erreur : une organisation où l'on n'a rien écrit n'est pas une panne.
+// Le fichier est lu au commit exact qu'on vient de relever, non à la branche :
+// entre les deux requêtes, quelqu'un peut avoir écrit, et la lecture doit
+// rester d'une seule pièce.
+func (s *Store) Load() (Snapshot, error) { return s.load(true) }
+
+// load lit le registre ; « offline » autorise le repli sur le disque.
+//
+// Une écriture ne s'en autorise jamais : elle a besoin de la tête réelle de la
+// branche, et écrire depuis une lecture périmée serait de toute façon refusé.
+func (s *Store) load(offline bool) (Snapshot, error) {
+	head, err := s.client.BranchHead(s.org, RepoName, Branch)
+	if err != nil {
+		// Seule une panne de liaison justifie le repli. Un refus de GitHub —
+		// jeton expiré, droit manquant — doit remonter tel quel : montrer des
+		// noms périmés au lieu de dire « votre jeton a expiré » égarerait.
+		if offline && ghapi.StatusOf(err) == 0 {
+			if garde, connu := s.kept(); connu {
+				garde.Stale = true
+				return garde, nil
+			}
+		}
+		return Snapshot{}, err
+	}
+	if head == "" {
+		return Snapshot{Set: Empty()}, nil
+	}
+	// Le commit relevé sert de sceau : tant qu'il n'a pas changé, ce qu'on a
+	// déjà lu vaut toujours, et le fichier n'est pas retéléchargé. Une lecture
+	// courante coûte donc une seule requête.
+	if garde, connu := s.kept(); connu && garde.Head == head {
+		return garde, nil
+	}
+	file, err := s.client.ReadFile(s.org, RepoName, StudentsFile, head)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if file == nil {
+		return Snapshot{Set: Empty(), Head: head}, nil
+	}
+	set, soucis := Decode(file.Content)
+	s.keep(head, set)
+	return Snapshot{Set: set, Head: head, Issues: soucis}, nil
+}
+
+// kept relit ce que le disque retient du registre.
+func (s *Store) kept() (Snapshot, bool) {
+	if s.local == nil {
+		return Snapshot{}, false
+	}
+	var garde keptSet
+	if !s.local.Get(cache.RegistryKey(s.org), cache.RegistryTTL, &garde) || garde.Head == "" {
+		return Snapshot{}, false
+	}
+	return Snapshot{Set: newSet(garde.Students), Head: garde.Head}, true
+}
+
+// keep scelle sur le disque ce qu'on vient de lire.
+func (s *Store) keep(head string, set *Set) {
+	if s.local == nil || head == "" {
+		return
+	}
+	s.local.Set(cache.RegistryKey(s.org), keptSet{Head: head, Students: set.All()})
+}
+
+// Apply applique un changement et rend le registre tel qu'il devient.
+//
+// Un changement qui ne change rien n'écrit rien : un commit sans effet salit
+// l'historique sans rien apprendre à personne.
+func (s *Store) Apply(change Change) (*Set, error) {
+	if change.Empty() {
+		snapshot, err := s.load(false)
+		return snapshot.Set, err
+	}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	var dernier error
+	for attempt := 1; attempt <= Attempts; attempt++ {
+		snapshot, err := s.load(false)
+		if err != nil {
+			return nil, err
+		}
+		suivant, bouge, err := snapshot.Set.With(change, s.today())
+		if err != nil {
+			return nil, err
+		}
+		if !bouge {
+			return snapshot.Set, nil
+		}
+		if err := s.ensureRepo(); err != nil {
+			return nil, err
+		}
+		commit, err := s.commit(suivant, snapshot.Head, change.message())
+		if err == nil {
+			s.keep(commit, suivant)
+			return suivant, nil
+		}
+		if !errors.Is(err, ghapi.ErrNotFastForward) {
+			return nil, err
+		}
+		dernier = err
+	}
+	return nil, valid.Errorf(
+		"Registre de « %s » : %d tentatives d'écriture refusées coup sur coup. "+
+			"Quelqu'un écrit sans arrêt, ou la branche « %s » a été forcée ailleurs (%v).",
+		s.org, Attempts, Branch, dernier)
+}
+
+// today rend la date du jour, telle que le registre l'écrit.
+func (s *Store) today() string { return s.now().Format("2006-01-02") }
+
+// commit écrit le registre dans un commit qui descend de « parent ». Un parent
+// vide crée la branche, et c'est le seul moment où l'on dépose ce qui explique
+// le dépôt : le réécrire à chaque fois ferait du bruit dans l'historique.
+func (s *Store) commit(set *Set, parent, message string) (string, error) {
+	payload, err := set.Encode()
+	if err != nil {
+		return "", err
+	}
+	fichiers := []ghapi.PushFile{{Path: StudentsFile, Mode: "100644", Content: payload}}
+	if parent == "" {
+		fichiers = append(fichiers, ghapi.PushFile{
+			Path: ReadmeFile, Mode: "100644", Content: Readme(s.org)})
+	}
+	return s.client.PushFilesOnto(s.org, RepoName, fichiers, message, Branch, parent)
+}
+
+// ensureRepo s'assure que le dépôt du registre existe et qu'il est privé.
+//
+// Le registre porte des noms d'étudiants. Il est créé privé, et l'outil refuse
+// d'y écrire s'il a été rendu public : mieux vaut une écriture qui échoue
+// bruyamment qu'une liste de noms exposée sans que personne s'en aperçoive.
+func (s *Store) ensureRepo() error {
+	repo, err := s.client.GetRepo(s.org, RepoName)
+	if err != nil {
+		return err
+	}
+	if repo == nil {
+		if _, err := s.client.CreateOrgRepo(
+			s.org, RepoName, true, Description, false); err != nil {
+			return err
+		}
+		return nil
+	}
+	if !repo.Private {
+		return valid.Errorf(
+			"Le dépôt « %s/%s » est public : il porte des noms d'étudiants et rien n'y "+
+				"sera écrit tant qu'il le restera. Repassez-le en privé dans ses réglages "+
+				"GitHub.", s.org, RepoName)
+	}
+	return nil
+}
+
+// ------------------------------------------------------------ confidentialité
+
+// Exposure dit qui, dans l'organisation, peut lire le registre sans qu'on le
+// lui ait donné.
+//
+// Les étudiants sont d'ordinaire collaborateurs externes de leur seul dépôt :
+// ils ne voient rien du registre. Mais une organisation peut accorder d'office
+// un droit de lecture à tous ses membres, et un département qui inscrit ses
+// étudiants comme membres leur ouvrirait alors la liste de leurs camarades.
+//
+// GitHub ne montre ce réglage qu'aux propriétaires. Une chaîne vide veut donc
+// dire « on ne sait pas », et l'absence de réponse n'est pas un feu vert : elle
+// ne dit rien, et l'appelant doit le présenter ainsi.
+func (s *Store) Exposure() string {
+	// L'organisation est demandée sous la forme qui tolère un refus : ne pas
+	// pouvoir lire ce réglage n'est pas une panne, c'est une ignorance.
+	org, err := s.client.GetRepoOwnerOrg(s.org)
+	if err != nil || org == nil {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(org.DefaultRepositoryPermission)) {
+	case "read", "write", "admin":
+		return fmt.Sprintf(
+			"Tout membre de « %s » a d'office un droit « %s » sur ses dépôts : si vos "+
+				"étudiants y sont membres, ils peuvent lire le registre. Restreignez "+
+				"« %s » à l'équipe enseignante, ou passez la permission de base à « none ».",
+			s.org, org.DefaultRepositoryPermission, RepoName)
+	}
+	return ""
+}

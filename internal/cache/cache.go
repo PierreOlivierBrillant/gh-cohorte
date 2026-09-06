@@ -17,7 +17,11 @@ const (
 	ReposTTL   = 6 * time.Hour
 	OrgsTTL    = 12 * time.Hour
 	ProfileTTL = 30 * 24 * time.Hour
-	fileName   = "cache.json"
+	// RegistryTTL est longue à dessein : ce n'est pas le temps qui dit si le
+	// registre a bougé, c'est le commit relevé sur sa branche. La péremption
+	// n'est là que pour ne pas garder indéfiniment ce qui ne sert plus.
+	RegistryTTL = 90 * 24 * time.Hour
+	fileName    = "cache.json"
 )
 
 // ReposKey est la clé de la liste des dépôts d'une organisation.
@@ -25,6 +29,9 @@ func ReposKey(org string) string { return "repos:" + strings.ToLower(org) }
 
 // OrgsKey est la clé des organisations accessibles à un compte.
 func OrgsKey(viewer string) string { return "orgs:" + strings.ToLower(viewer) }
+
+// RegistryKey est la clé du registre des étudiants d'une organisation.
+func RegistryKey(org string) string { return "registry:" + strings.ToLower(org) }
 
 // ProfileKey est la clé du nom complet associé à un compte GitHub.
 func ProfileKey(login string) string { return "profile:" + strings.ToLower(login) }

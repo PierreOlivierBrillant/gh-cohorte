@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -329,7 +328,7 @@ func TestPaginationChargeLesPagesDeFront(t *testing.T) {
 	state.PerPage = 10 // 20 pages, largement plus qu'une volée
 	peuple(state, 200)
 
-	barriere := nouvelleBarriere(front, 2*time.Second)
+	barriere := fakegh.NewBarrier(front, 2*time.Second)
 	state.Hook = func(request *http.Request) {
 		// La première page est chargée seule, avant qu'on sache combien il y en
 		// a : la retenir bloquerait tout le reste.
@@ -337,61 +336,16 @@ func TestPaginationChargeLesPagesDeFront(t *testing.T) {
 			request.URL.Query().Get("page") == "1" {
 			return
 		}
-		barriere.attendre()
+		barriere.Wait()
 	}
 
 	c, _ := client(t, state)
 	if _, err := c.ListOrgRepos("acme", nil); err != nil {
 		t.Fatalf("ListOrgRepos : %v", err)
 	}
-	if !barriere.atteinte() {
+	if !barriere.Reached() {
 		t.Errorf("jamais %d pages en vol ensemble : elles sont restées en série", front)
 	}
-}
-
-// barriere retient les requêtes jusqu'à ce que « seuil » d'entre elles soient
-// en vol. Le délai la libère si le compte n'est jamais atteint : un client
-// resté en série doit échouer sur une assertion, pas se figer.
-type barriere struct {
-	seuil  int
-	delai  time.Duration
-	ouvrir sync.Once
-	ouvert chan struct{}
-
-	mutex   sync.Mutex
-	envol   int
-	franchi bool
-}
-
-func nouvelleBarriere(seuil int, delai time.Duration) *barriere {
-	return &barriere{seuil: seuil, delai: delai, ouvert: make(chan struct{})}
-}
-
-func (b *barriere) attendre() {
-	b.mutex.Lock()
-	b.envol++
-	assez := b.envol >= b.seuil
-	if assez {
-		b.franchi = true
-	}
-	b.mutex.Unlock()
-
-	if assez {
-		b.ouvrir.Do(func() { close(b.ouvert) })
-		return
-	}
-	select {
-	case <-b.ouvert:
-	case <-time.After(b.delai):
-		// Une seule attente perdue : la barrière s'ouvre pour toutes les autres.
-		b.ouvrir.Do(func() { close(b.ouvert) })
-	}
-}
-
-func (b *barriere) atteinte() bool {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-	return b.franchi
 }
 
 // Un point d'API qui n'annonce pas de dernière page — pagination par curseur,

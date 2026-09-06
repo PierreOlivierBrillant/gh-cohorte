@@ -34,6 +34,23 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("HTTP %d — %s", e.Status, message)
 }
 
+// ErrNotFastForward dit que la branche a bougé depuis la lecture de sa tête :
+// quelqu'un d'autre y a écrit entre-temps. C'est un refus attendu, non une
+// panne — celui qui écrit relit et rejoue.
+var ErrNotFastForward = errors.New("la branche a bougé depuis sa lecture")
+
+// notFastForward reconnaît ce refus. GitHub le rend en 422, que la référence
+// soit mise à jour — « Update is not a fast forward » — ou créée par deux
+// personnes à la fois — « Reference already exists ». Les deux disent la même
+// chose : la branche n'est plus là où on l'avait laissée. L'erreur d'origine
+// est conservée, avec son statut et son message.
+func notFastForward(err error) error {
+	if err != nil && StatusOf(err) == http.StatusUnprocessableEntity {
+		return fmt.Errorf("%w : %w", ErrNotFastForward, err)
+	}
+	return err
+}
+
 // StatusOf renvoie le code HTTP d'une erreur GitHub, ou 0.
 func StatusOf(err error) int {
 	var target *Error

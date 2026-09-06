@@ -245,6 +245,11 @@ type Org struct {
 	Login                        string `json:"login"`
 	Name                         string `json:"name"`
 	MembersCanCreateRepositories *bool  `json:"members_can_create_repositories"`
+	// DefaultRepositoryPermission est le droit que tout membre de
+	// l'organisation détient d'office sur ses dépôts — « none », « read »,
+	// « write » ou « admin ». GitHub ne le montre qu'aux propriétaires : une
+	// chaîne vide veut dire « on ne sait pas », non « aucun ».
+	DefaultRepositoryPermission string `json:"default_repository_permission"`
 }
 
 // Membership décrit l'appartenance du compte connecté à une organisation.
@@ -818,11 +823,11 @@ func (c *Client) SetBranchHead(owner, repo, branch, commitSHA string, create boo
 	if create {
 		_, err := c.do(http.MethodPost, base,
 			map[string]any{"ref": "refs/heads/" + branch, "sha": commitSHA})
-		return err
+		return notFastForward(err)
 	}
 	_, err := c.do(http.MethodPatch, base+"/heads/"+url.PathEscape(branch),
 		map[string]any{"sha": commitSHA, "force": false})
-	return err
+	return notFastForward(err)
 }
 
 // File est un fichier relu dans un dépôt.
@@ -887,39 +892,57 @@ type PushFile struct {
 
 // PushFiles dépose tous les fichiers en un seul commit et renvoie leur nombre.
 func (c *Client) PushFiles(owner, repo string, files []PushFile, message, branch string) (int, error) {
-	entries := make([]TreeEntry, 0, len(files))
-	for _, file := range files {
-		sha, err := c.CreateBlob(owner, repo, file.Content)
-		if err != nil {
-			return 0, err
-		}
-		entries = append(entries, TreeEntry{Path: file.Path, Mode: file.Mode, Type: "blob", SHA: sha})
-	}
-
 	head, err := c.BranchHead(owner, repo, branch)
 	if err != nil {
 		return 0, err
 	}
+	if _, err := c.PushFilesOnto(owner, repo, files, message, branch, head); err != nil {
+		return 0, err
+	}
+	return len(files), nil
+}
+
+// PushFilesOnto dépose les fichiers dans un commit qui descend de « parent »,
+// puis ne fait avancer la branche que si elle en est toujours là ; un parent
+// vide la crée. Le SHA du commit est rendu.
+//
+// C'est un échange conditionnel. Celui qui écrit lit d'abord la tête, puis
+// l'annonce ici : GitHub refuse alors tout ce qui n'est pas une avance rapide,
+// et ce refus tient lieu de verrou entre deux personnes qui écrivent en même
+// temps. Relire la tête ici même le lèverait — le commit descendrait de ce que
+// l'autre vient d'écrire, et l'écraserait sans que rien ne le signale.
+func (c *Client) PushFilesOnto(owner, repo string, files []PushFile,
+	message, branch, parent string) (string, error) {
+	entries := make([]TreeEntry, 0, len(files))
+	for _, file := range files {
+		sha, err := c.CreateBlob(owner, repo, file.Content)
+		if err != nil {
+			return "", err
+		}
+		entries = append(entries, TreeEntry{Path: file.Path, Mode: file.Mode, Type: "blob", SHA: sha})
+	}
+
 	baseTree := ""
 	var parents []string
-	if head != "" {
-		if baseTree, err = c.CommitTree(owner, repo, head); err != nil {
-			return 0, err
+	if parent != "" {
+		var err error
+		if baseTree, err = c.CommitTree(owner, repo, parent); err != nil {
+			return "", err
 		}
-		parents = []string{head}
+		parents = []string{parent}
 	}
 	tree, err := c.CreateTree(owner, repo, entries, baseTree)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	commit, err := c.CreateCommit(owner, repo, message, tree, parents)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	if err := c.SetBranchHead(owner, repo, branch, commit, head == ""); err != nil {
-		return 0, err
+	if err := c.SetBranchHead(owner, repo, branch, commit, parent == ""); err != nil {
+		return "", err
 	}
-	return len(entries), nil
+	return commit, nil
 }
 
 func repoPath(owner, repo string) string {
