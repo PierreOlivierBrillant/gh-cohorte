@@ -177,8 +177,6 @@ func (s *Session) Run() int {
 }
 
 func (s *Session) run() (int, error) {
-	s.adoptLegacyCache()
-
 	if s.Options.ClearCache {
 		// Purge demandée en ligne de commande : ni jeton ni réseau nécessaires.
 		removed := s.Cache.Clear()
@@ -229,18 +227,6 @@ func (s *Session) run() (int, error) {
 		return s.manager.run()
 	}
 	return s.create()
-}
-
-// adoptLegacyCache reprend, une seule fois, le cache de la version précédente
-// de l'outil : les inventaires et les noms déjà connus restent valables.
-func (s *Session) adoptLegacyCache() {
-	legacy := cache.LegacyPath()
-	if legacy == "" {
-		return
-	}
-	if adopted := s.Cache.Adopt(legacy); adopted > 0 {
-		s.Console.Note("%d entrée(s) reprises du cache de « classroom » (%s).", adopted, legacy)
-	}
 }
 
 // chooseMode décide du mode : création, gestion d'un groupe, options avancées.

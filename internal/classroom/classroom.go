@@ -58,10 +58,7 @@ func DefaultsFrom(settings config.Settings) Defaults {
 // normalized comble les valeurs absentes par celles de l'outil.
 func (d Defaults) normalized() Defaults {
 	repli := config.Default()
-	// Un gabarit vide, ou celui d'avant la nomenclature à cinq niveaux — il
-	// écrivait le chemin complet du travail là où son nom suffit.
-	if strings.TrimSpace(d.DescriptionPattern) == "" ||
-		strings.TrimSpace(d.DescriptionPattern) == config.LegacyDescriptionPattern {
+	if strings.TrimSpace(d.DescriptionPattern) == "" {
 		d.DescriptionPattern = repli.DescriptionPattern
 	}
 	if strings.TrimSpace(d.Visibility) == "" {
