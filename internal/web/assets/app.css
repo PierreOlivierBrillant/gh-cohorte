@@ -344,6 +344,25 @@ main { padding: 1.5rem; max-width: 1100px; }
 
 .lien:hover { text-decoration: underline; }
 
+/* Un bouton réduit à son pictogramme. Le tracé fait 16 px, une ligne de texte
+   un peu plus : sans align-self, le bouton serait plus court que celui d'à
+   côté et leurs bordures ne s'aligneraient pas. */
+.icone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bouton.icone { padding: .25rem .4rem; }
+.actions .bouton.icone { align-self: stretch; }
+
+/* Un soulignement sous un tracé ne veut rien dire. Et une corbeille rouge à
+   chaque ligne crierait : elle reste discrète, et ne prend la couleur du
+   danger que sous le pointeur. */
+.lien.icone:hover { text-decoration: none; }
+.lien.icone.rouge { color: var(--texte-doux); }
+.lien.icone.rouge:hover { color: var(--erreur); }
+
 .champ {
   font: inherit;
   font-size: .875rem;
@@ -482,7 +501,6 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 /* Les actions d'une ligne restent côte à côte : la colonne s'élargit d'autant,
    plutôt que chaque ligne du tableau de doubler de hauteur. */
 .tableau td .actions { flex-wrap: nowrap; }
-.tableau td .lien + .lien { margin-left: .6rem; }
 
 /* ------------------------------------------------------------------- avis */
 

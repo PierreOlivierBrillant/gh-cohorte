@@ -76,6 +76,39 @@ function plageDeCases(conteneur) {
   return conteneur;
 }
 
+// Les tracés viennent des Octicons de GitHub, sur une grille de 16 : les mêmes
+// pictogrammes que le site où mènent tous les liens de la page.
+const TRACES = {
+  crayon: 'M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 ' +
+    '8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235' +
+    '-.547.445-.758l8.61-8.61Zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.' +
+    '558 1.953 1.953-.558a.253.253 0 0 0 .108-.064Zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3' +
+    '.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354Z',
+  corbeille: 'M11 1.75V3h2.25a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1 0-1.5H5V1.75C5 .784 5.784' +
+    ' 0 6.75 0h2.5C10.216 0 11 .784 11 1.75ZM4.496 6.675l.66 6.6a.25.25 0 0 0 .249.225h5.19a' +
+    '.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595' +
+    ' 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15ZM6.5 1.75V3h3V1.7' +
+    '5a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25Z',
+};
+
+// icone dessine un pictogramme. Un bouton qui n'a plus de texte n'a plus de nom
+// non plus : title et aria-label le lui rendent, et le tracé reste hors de
+// l'arbre d'accessibilité pour ne pas le dire deux fois.
+function icone(nom) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const dessin = document.createElementNS(NS, 'svg');
+  dessin.setAttribute('viewBox', '0 0 16 16');
+  dessin.setAttribute('width', '16');
+  dessin.setAttribute('height', '16');
+  dessin.setAttribute('fill', 'currentColor');
+  dessin.setAttribute('aria-hidden', 'true');
+  dessin.setAttribute('focusable', 'false');
+  const trace = document.createElementNS(NS, 'path');
+  trace.setAttribute('d', TRACES[nom]);
+  dessin.append(trace);
+  return dessin;
+}
+
 function message(texte, ton = 'succes', duree = 6000) {
   const avis = el('div', { classe: 'avis ' + ton, texte });
   $('messages').append(avis);
@@ -1385,9 +1418,13 @@ function dessinerTravail() {
       el('td', {}, el('span', { classe: 'jeton', texte: repo.visibility })),
       el('td', repo.pushed_at ? { texte: repo.pushed_at } : { classe: 'vide', texte: 'jamais' }),
       el('td', { texte: acces ? resumerAcces(acces) : '—' }),
-      el('td', { classe: 'etroit' },
+      el('td', { classe: 'etroit' }, el('span', { classe: 'actions' },
         el('button', { type: 'button', classe: 'lien', texte: 'Accès', onclick: () => panneauAcces(repo) }),
-        el('button', { type: 'button', classe: 'lien', texte: 'Supprimer', onclick: () => supprimerDepot(repo) })),
+        el('button', {
+          type: 'button', classe: 'lien icone rouge',
+          title: 'Supprimer…', 'aria-label': `Supprimer ${repo.name}`,
+          onclick: () => supprimerDepot(repo),
+        }, icone('corbeille')))),
     ));
   }
   barreTravail.maj();
@@ -2023,9 +2060,10 @@ async function chargerEtudiants(force) {
       el('td', ligne.pushed_at ? { texte: ligne.pushed_at } : { classe: 'vide', texte: 'jamais' }),
       el('td', {}, el('span', { classe: 'actions' },
         el('button', {
-          classe: 'bouton petit', type: 'button', texte: 'Renommer…',
+          classe: 'bouton petit icone', type: 'button',
+          title: 'Renommer…', 'aria-label': `Renommer ${ligne.full_name || '@' + ligne.username}`,
           onclick: () => renommerEtudiant(ligne),
-        }),
+        }, icone('crayon')),
         el('button', {
           classe: 'bouton petit', type: 'button', texte: 'Déplacer…',
           onclick: () => deplacerEtudiants([ligne]),
