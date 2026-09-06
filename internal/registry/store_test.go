@@ -390,3 +390,102 @@ func TestEffacerUnHistoriqueInexistantLeDit(t *testing.T) {
 		t.Fatal("effacer un historique inexistant doit se signaler")
 	}
 }
+
+// Un « .cohorte » créé mais jamais rempli — une écriture interrompue, ou un
+// dépôt fait à la main sur github.com — ne doit bloquer ni la lecture ni la
+// suite. C'est le piège du dépôt vide : GitHub y répond 409 « Git Repository is
+// empty. » là où l'on attendrait 404, et un 409 non prévu remonte jusqu'à
+// l'écran sous la forme « HTTP 409 — Git Repository is empty. ».
+func TestUnRegistreExistantMaisVideNeBloqueRien(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", registry.RepoName, true) // créé, aucun commit
+	store, _ := magasin(t, state)
+
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("lire un registre vide : %v", err)
+	}
+	if snapshot.Set.Len() != 0 || snapshot.Head != "" {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+
+	// Et l'on peut y écrire : c'est le premier commit du dépôt.
+	set, err := store.Apply(registry.Learn(personne("Émilie Côté", "ecote")))
+	if err != nil {
+		t.Fatalf("écrire dans un registre vide : %v", err)
+	}
+	if set.Name("ecote") != "Émilie Côté" {
+		t.Fatalf("registre = %+v", set.All())
+	}
+	relu, err := store.Load()
+	if err != nil || relu.Set.Name("ecote") != "Émilie Côté" {
+		t.Fatalf("relu = %+v, %v", relu, err)
+	}
+}
+
+// Le même dépôt vide ne doit pas non plus faire échouer ce qui l'entoure :
+// donner accès à une équipe, ou constater qu'il n'y a pas d'historique.
+func TestUnRegistreVideNeCassePasLesOperationsVoisines(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", registry.RepoName, true)
+	store, _ := magasin(t, state)
+
+	if err := store.Grant("enseignants"); err != nil {
+		t.Fatalf("Grant sur un registre vide : %v", err)
+	}
+	if _, err := store.ForgetHistory(); err == nil {
+		t.Error("un registre sans commit n'a pas d'historique : il faut le dire")
+	} else if strings.Contains(err.Error(), "409") {
+		t.Errorf("le refus doit être en français, pas un code HTTP : %v", err)
+	}
+}
+
+// Une erreur du registre doit dire de quel dépôt et de quelle étape elle vient.
+// « HTTP 409 — Git Repository is empty. » ne disait ni l'un ni l'autre, et cela
+// a coûté cher à diagnostiquer.
+func TestUneErreurDitCeQuOnFaisait(t *testing.T) {
+	state := fakegh.NewState()
+	state.FailOn["GET /repos/acme/.cohorte/git/ref/heads/main"] = fakegh.Failure{
+		Status: 500, Message: "Panne"}
+	store, _ := magasin(t, state)
+
+	_, err := store.Load()
+	if err == nil {
+		t.Fatal("la lecture devait échouer")
+	}
+	for _, attendu := range []string{"lecture de la branche", "acme/" + registry.RepoName} {
+		if !strings.Contains(err.Error(), attendu) {
+			t.Errorf("l'erreur ne dit pas « %s » : %v", attendu, err)
+		}
+	}
+	// Le statut et le type d'origine restent atteignables en aval : c'est ce
+	// qui permet encore de proposer un renouvellement de jeton.
+	if ghapi.StatusOf(err) != 500 {
+		t.Errorf("statut perdu : %d", ghapi.StatusOf(err))
+	}
+}
+
+// Le refus d'avance rapide, lui, n'est pas enrobé : la boucle d'écriture doit
+// continuer à le reconnaître pour rejouer.
+func TestLeRefusDAvanceRapideResteReconnaissable(t *testing.T) {
+	state := fakegh.NewState()
+	serveur := fakegh.New(state)
+	t.Cleanup(serveur.Close)
+	store := registry.New(clientVers(t, serveur), "acme", nil)
+
+	if _, err := store.Apply(registry.Learn(personne("Prof Une", "prof"))); err != nil {
+		t.Fatal(err)
+	}
+	// La mise à jour de la référence est refusée à chaque tentative : la boucle
+	// doit s'épuiser en le disant, non remonter un HTTP brut.
+	state.FailOn["PATCH /repos/acme/.cohorte/git/refs/heads/main"] = fakegh.Failure{
+		Status: 422, Message: "Update is not a fast forward"}
+
+	_, err := store.Apply(registry.Learn(personne("Émilie Côté", "ecote")))
+	if err == nil {
+		t.Fatal("l'écriture devait échouer")
+	}
+	if !strings.Contains(err.Error(), "tentatives d'écriture refusées") {
+		t.Fatalf("la boucle n'a pas reconnu le refus : %v", err)
+	}
+}

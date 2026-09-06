@@ -482,6 +482,13 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 			s.notFound(writer)
 			return
 		}
+		// GitHub ne répond pas 404 sur un dépôt sans aucun commit : il répond
+		// 409. Un fichier absent d'un dépôt garni, lui, donne bien 404. Les
+		// confondre rendrait le faux serveur plus indulgent que le vrai.
+		if !state.hasCommitsLocked(full) {
+			s.send(writer, 409, map[string]string{"message": "Git Repository is empty."})
+			return
+		}
 		entry, trouve := state.entryLocked(full, request.URL.Query().Get("ref"), fichier)
 		if !trouve {
 			s.notFound(writer)
@@ -961,6 +968,16 @@ func (s *Server) filesLocked(fullName, branch string) map[string]string {
 		files[path] = string(s.State.Blobs[entry.Blob])
 	}
 	return files
+}
+
+// hasCommitsLocked dit si le dépôt porte au moins une branche.
+func (s *State) hasCommitsLocked(fullName string) bool {
+	for cle := range s.Refs {
+		if strings.HasPrefix(cle, fullName+"@") {
+			return true
+		}
+	}
+	return false
 }
 
 // entryLocked retrouve un fichier dans l'arbre d'une référence. La référence

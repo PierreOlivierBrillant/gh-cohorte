@@ -125,16 +125,32 @@ func TestLeRejeuSurLaTeteFraichePasseEtConserveTout(t *testing.T) {
 	}
 }
 
-// Un fichier absent n'est pas une panne : c'est l'état d'un registre qu'on
-// n'a pas encore amorcé.
+// Un fichier absent n'est pas une panne : c'est l'état d'un registre qu'on n'a
+// pas encore amorcé.
+//
+// GitHub le dit de deux façons, et c'est là le piège : 404 quand le fichier
+// manque d'un dépôt garni, 409 « Git Repository is empty. » quand le dépôt n'a
+// aucun commit. Les deux répondent la même chose à qui demande un fichier.
 func TestFichierAbsentNestPasUneErreur(t *testing.T) {
 	state := fakegh.NewState()
-	state.AddRepo("acme", ".cohorte", true)
+	state.AddRepo("acme", ".cohorte", true) // créé, jamais rempli
+	state.AddRepo("acme", "garni", true)
+	state.SeedCommit("acme/garni", map[string]string{"README.md": "# ici\n"}, "main")
 	c, _ := client(t, state)
 
+	// Dépôt sans aucun commit : GitHub répond 409.
 	relu, err := c.ReadFile("acme", ".cohorte", "etudiants.json", "")
 	if err != nil || relu != nil {
-		t.Fatalf("ReadFile = %+v, %v", relu, err)
+		t.Fatalf("dépôt vide : ReadFile = %+v, %v", relu, err)
+	}
+	// Dépôt garni, fichier absent : GitHub répond 404.
+	relu, err = c.ReadFile("acme", "garni", "etudiants.json", "")
+	if err != nil || relu != nil {
+		t.Fatalf("fichier absent : ReadFile = %+v, %v", relu, err)
+	}
+	// Et ce qui est là se lit toujours.
+	if lu, err := c.ReadFile("acme", "garni", "README.md", ""); err != nil || lu == nil {
+		t.Fatalf("ReadFile(README.md) = %+v, %v", lu, err)
 	}
 	if _, err := c.ReadFile("acme", "absent", "etudiants.json", ""); err != nil {
 		t.Errorf("un dépôt absent doit se lire comme un fichier absent : %v", err)

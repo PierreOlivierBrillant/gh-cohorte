@@ -876,18 +876,24 @@ type File struct {
 }
 
 // ReadFile relit un fichier d'un dépôt, à une référence donnée — une branche ou
-// un commit ; vide, c'est la branche par défaut. Un fichier absent rend nil
-// sans erreur : un dépôt qu'on n'a pas encore rempli n'est pas une panne.
+// un commit ; vide, c'est la branche par défaut.
+//
+// Un fichier absent rend nil sans erreur : un dépôt qu'on n'a pas encore rempli
+// n'est pas une panne. GitHub le dit de deux façons — 404 quand le fichier
+// manque d'un dépôt garni, 409 « Git Repository is empty. » quand le dépôt n'a
+// aucun commit —, et les deux répondent la même chose à qui demande un
+// fichier : il n'y est pas.
 func (c *Client) ReadFile(owner, repo, file, ref string) (*File, error) {
 	path := repoPath(owner, repo) + "/contents/" + escapePath(file)
 	if ref != "" {
 		path += "?ref=" + url.QueryEscape(ref)
 	}
-	response, err := c.do(http.MethodGet, path, nil, http.StatusNotFound)
+	response, err := c.do(http.MethodGet, path, nil,
+		http.StatusNotFound, http.StatusConflict)
 	if err != nil {
 		return nil, err
 	}
-	if response.Status == http.StatusNotFound {
+	if response.Status != http.StatusOK {
 		return nil, nil
 	}
 	var payload struct {

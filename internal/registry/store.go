@@ -32,6 +32,19 @@ const Attempts = 5
 // Description est ce que le dépôt du registre annonce sur github.com.
 const Description = "Registre des étudiants — gh cohorte. Privé : contient des renseignements personnels."
 
+// step nomme l'étape qui a échoué, sans perdre l'erreur d'origine : son statut
+// HTTP et la portée qui lui manque servent encore en aval.
+//
+// « HTTP 409 — Git Repository is empty. » ne disait pas ce qu'on faisait au
+// moment où il est tombé, et cela a coûté cher à diagnostiquer. Une erreur du
+// registre doit dire de quel dépôt et de quelle étape elle vient.
+func (s *Store) step(quoi string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s de « %s/%s » : %w", quoi, s.org, RepoName, err)
+}
+
 // Store lit et écrit le registre d'une organisation.
 type Store struct {
 	client *ghapi.Client
@@ -104,7 +117,7 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 				return garde, nil
 			}
 		}
-		return Snapshot{}, err
+		return Snapshot{}, s.step("lecture de la branche", err)
 	}
 	if head == "" {
 		return Snapshot{Set: Empty()}, nil
@@ -117,7 +130,7 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 	}
 	file, err := s.client.ReadFile(s.org, RepoName, StudentsFile, head)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, s.step("lecture du fichier "+StudentsFile, err)
 	}
 	if file == nil {
 		return Snapshot{Set: Empty(), Head: head}, nil
@@ -207,7 +220,14 @@ func (s *Store) commit(set *Set, parent, message string) (string, error) {
 		fichiers = append(fichiers, ghapi.PushFile{
 			Path: ReadmeFile, Mode: "100644", Content: Readme(s.org)})
 	}
-	return s.client.PushFilesOnto(s.org, RepoName, fichiers, message, Branch, parent)
+	commit, err := s.client.PushFilesOnto(s.org, RepoName, fichiers, message, Branch, parent)
+	if err != nil && !errors.Is(err, ghapi.ErrNotFastForward) {
+		// Le refus d'avance rapide n'est pas une panne : il est attendu, et la
+		// boucle d'écriture le reconnaît. L'enrober le rendrait méconnaissable
+		// pour elle — et de toute façon, il n'a rien à expliquer.
+		return "", s.step("écriture", err)
+	}
+	return commit, err
 }
 
 // ensureRepo s'assure que le dépôt du registre existe et qu'il est privé.
@@ -218,12 +238,12 @@ func (s *Store) commit(set *Set, parent, message string) (string, error) {
 func (s *Store) ensureRepo() error {
 	repo, err := s.client.GetRepo(s.org, RepoName)
 	if err != nil {
-		return err
+		return s.step("ouverture", err)
 	}
 	if repo == nil {
 		if _, err := s.client.CreateOrgRepo(
 			s.org, RepoName, true, Description, false); err != nil {
-			return err
+			return s.step("création", err)
 		}
 		return nil
 	}
@@ -253,7 +273,7 @@ func (s *Store) ForgetHistory() (string, error) {
 
 	head, err := s.client.BranchHead(s.org, RepoName, Branch)
 	if err != nil {
-		return "", err
+		return "", s.step("lecture de la branche", err)
 	}
 	if head == "" {
 		return "", valid.Errorf(
@@ -261,15 +281,15 @@ func (s *Store) ForgetHistory() (string, error) {
 	}
 	tree, err := s.client.CommitTree(s.org, RepoName, head)
 	if err != nil {
-		return "", err
+		return "", s.step("lecture du commit en place", err)
 	}
 	orphelin, err := s.client.CreateCommit(s.org, RepoName,
 		"Repart du registre courant, sans son historique", tree, nil)
 	if err != nil {
-		return "", err
+		return "", s.step("écriture du commit orphelin", err)
 	}
 	if err := s.client.ResetBranchHead(s.org, RepoName, Branch, orphelin); err != nil {
-		return "", err
+		return "", s.step("réécriture de la branche", err)
 	}
 	// Le sceau change : ce qu'on retenait du registre ne vaut plus.
 	if s.local != nil {
@@ -295,7 +315,11 @@ func (s *Store) ForgetHistory() (string, error) {
 // une. Un compte qui n'est pas membre n'en voit aucune : ce n'est pas une
 // panne, il n'y a simplement rien à proposer.
 func (s *Store) Teams() ([]ghapi.Team, error) {
-	return s.client.ListOrgTeams(s.org)
+	equipes, err := s.client.ListOrgTeams(s.org)
+	if err != nil {
+		return nil, fmt.Errorf("lecture des équipes de « %s » : %w", s.org, err)
+	}
+	return equipes, nil
 }
 
 // Grant donne à une équipe un droit de lecture sur le registre.
@@ -311,7 +335,8 @@ func (s *Store) Grant(team string) error {
 	if err := s.ensureRepo(); err != nil {
 		return err
 	}
-	return s.client.GrantTeamRepo(s.org, team, s.org, RepoName, TeamPermission)
+	return s.step("accès de l'équipe « "+team+" »",
+		s.client.GrantTeamRepo(s.org, team, s.org, RepoName, TeamPermission))
 }
 
 // TeamPermission est le droit accordé à l'équipe enseignante : lire et écrire.
