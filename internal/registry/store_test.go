@@ -2,6 +2,7 @@ package registry_test
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -488,4 +489,54 @@ func TestLeRefusDAvanceRapideResteReconnaissable(t *testing.T) {
 	if !strings.Contains(err.Error(), "tentatives d'écriture refusées") {
 		t.Fatalf("la boucle n'a pas reconnu le refus : %v", err)
 	}
+}
+
+// Un dépôt qui a des commits mais pas encore de registre mérite son explication
+// autant qu'un dépôt neuf : la condition porte sur le fichier, non sur la tête.
+func TestUnDepotDejaGarniRecoitAussiSonExplication(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", registry.RepoName, true)
+	state.SeedCommit("acme/"+registry.RepoName,
+		map[string]string{"NOTES.md": "posé à la main\n"}, registry.Branch)
+	store, _ := magasin(t, state)
+
+	if _, err := store.Apply(registry.Learn(personne("Émilie Côté", "ecote"))); err != nil {
+		t.Fatal(err)
+	}
+	fichiers := state.Files("acme/"+registry.RepoName, registry.Branch)
+	if _, present := fichiers[registry.ReadmeFile]; !present {
+		t.Fatalf("le fichier d'explication manque : %v", sortedNoms(fichiers))
+	}
+	// Et ce qui était là n'a pas été effacé.
+	if fichiers["NOTES.md"] == "" {
+		t.Fatalf("un fichier posé à la main a disparu : %v", sortedNoms(fichiers))
+	}
+}
+
+// L'explication n'est écrite qu'une fois : la réécrire à chaque écriture ferait
+// du bruit dans l'historique.
+func TestLExplicationNEstEcriteQuUneFois(t *testing.T) {
+	state := fakegh.NewState()
+	store, _ := magasin(t, state)
+	if _, err := store.Apply(registry.Learn(personne("Émilie Côté", "ecote"))); err != nil {
+		t.Fatal(err)
+	}
+	blobs := state.CallCount("POST /repos/acme/.cohorte/git/blobs")
+	if _, err := store.Apply(registry.Learn(personne("Jean-Luc Picard", "jlpicard"))); err != nil {
+		t.Fatal(err)
+	}
+	// Une écriture suivante ne dépose qu'un blob : le registre, pas l'explication.
+	if apres := state.CallCount("POST /repos/acme/.cohorte/git/blobs"); apres-blobs != 1 {
+		t.Errorf("%d blob(s) déposé(s) pour une écriture ordinaire", apres-blobs)
+	}
+}
+
+// sortedNoms rend les noms de fichiers, triés, pour un message d'échec lisible.
+func sortedNoms(fichiers map[string]string) []string {
+	noms := make([]string, 0, len(fichiers))
+	for nom := range fichiers {
+		noms = append(noms, nom)
+	}
+	sort.Strings(noms)
+	return noms
 }

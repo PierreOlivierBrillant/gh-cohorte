@@ -79,6 +79,9 @@ type Snapshot struct {
 	// main sur github.com : une fiche mal écrite doit se signaler, pas priver
 	// toute l'organisation de ses noms.
 	Issues []string
+	// Seeded dit que le fichier du registre est déjà dans le dépôt. Sans lui,
+	// le prochain commit doit aussi y déposer de quoi l'expliquer.
+	Seeded bool
 	// Stale dit que GitHub n'a pas répondu et que ce registre vient du disque.
 	// L'appelant doit le montrer : afficher des noms périmés en silence serait
 	// pire que d'en afficher aucun.
@@ -126,6 +129,7 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 	// déjà lu vaut toujours, et le fichier n'est pas retéléchargé. Une lecture
 	// courante coûte donc une seule requête.
 	if garde, connu := s.kept(); connu && garde.Head == head {
+		garde.Seeded = true
 		return garde, nil
 	}
 	file, err := s.client.ReadFile(s.org, RepoName, StudentsFile, head)
@@ -137,7 +141,7 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 	}
 	set, soucis := Decode(file.Content)
 	s.keep(head, set)
-	return Snapshot{Set: set, Head: head, Issues: soucis}, nil
+	return Snapshot{Set: set, Head: head, Issues: soucis, Seeded: true}, nil
 }
 
 // kept relit ce que le disque retient du registre.
@@ -188,7 +192,7 @@ func (s *Store) Apply(change Change) (*Set, error) {
 		if err := s.ensureRepo(); err != nil {
 			return nil, err
 		}
-		commit, err := s.commit(suivant, snapshot.Head, change.message())
+		commit, err := s.commit(suivant, snapshot, change.message())
 		if err == nil {
 			s.keep(commit, suivant)
 			return suivant, nil
@@ -207,20 +211,26 @@ func (s *Store) Apply(change Change) (*Set, error) {
 // today rend la date du jour, telle que le registre l'écrit.
 func (s *Store) today() string { return s.now().Format("2006-01-02") }
 
-// commit écrit le registre dans un commit qui descend de « parent ». Un parent
-// vide crée la branche, et c'est le seul moment où l'on dépose ce qui explique
-// le dépôt : le réécrire à chaque fois ferait du bruit dans l'historique.
-func (s *Store) commit(set *Set, parent, message string) (string, error) {
+// commit écrit le registre dans un commit qui descend de la tête relevée. Une
+// tête vide crée la branche — c'est l'amorçage, et aussi le cas d'un
+// « .cohorte » créé sans jamais avoir été rempli.
+//
+// Ce qui explique le dépôt n'est déposé qu'une fois, avec le registre lui-même,
+// et la condition porte sur le fichier plutôt que sur la tête : un dépôt qui a
+// des commits mais pas encore de registre mérite son explication autant qu'un
+// dépôt neuf.
+func (s *Store) commit(set *Set, snapshot Snapshot, message string) (string, error) {
 	payload, err := set.Encode()
 	if err != nil {
 		return "", err
 	}
 	fichiers := []ghapi.PushFile{{Path: StudentsFile, Mode: "100644", Content: payload}}
-	if parent == "" {
+	if !snapshot.Seeded {
 		fichiers = append(fichiers, ghapi.PushFile{
 			Path: ReadmeFile, Mode: "100644", Content: Readme(s.org)})
 	}
-	commit, err := s.client.PushFilesOnto(s.org, RepoName, fichiers, message, Branch, parent)
+	commit, err := s.client.PushFilesOnto(
+		s.org, RepoName, fichiers, message, Branch, snapshot.Head)
 	if err != nil && !errors.Is(err, ghapi.ErrNotFastForward) {
 		// Le refus d'avance rapide n'est pas une panne : il est attendu, et la
 		// boucle d'écriture le reconnaît. L'enrober le rendrait méconnaissable
