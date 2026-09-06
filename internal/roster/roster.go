@@ -13,14 +13,41 @@ import (
 )
 
 // En-têtes reconnus, en français comme en anglais.
+//
+// « Nom » désigne le nom complet quand la liste n'a pas de colonne de prénom,
+// et le nom de famille quand elle en a une — c'est le cas d'une liste sortie
+// d'Omnivox, qui les sépare. La présence d'un prénom tranche donc la lecture
+// des noms, et rien d'autre n'a besoin d'être deviné.
 var nameHeaders = map[string]bool{
 	"nom": true, "nom complet": true, "nom_complet": true, "name": true,
 	"full_name": true, "fullname": true, "etudiant": true, "étudiant": true,
+	"nom de l'étudiant": true, "nom de l'etudiant": true, "last_name": true,
+}
+
+var firstHeaders = map[string]bool{
+	"prénom": true, "prenom": true, "prénom de l'étudiant": true,
+	"prenom de l'etudiant": true, "first_name": true, "first": true,
 }
 
 var loginHeaders = map[string]bool{
 	"github": true, "github_username": true, "username": true, "login": true,
 	"compte": true, "utilisateur": true, "handle": true,
+	"compte github": true, "nom d'utilisateur github": true,
+}
+
+var studentHeaders = map[string]bool{
+	"no étudiant": true, "no etudiant": true, "no. étudiant": true,
+	"numéro d'étudiant": true, "numero d'etudiant": true, "matricule": true,
+	"student_id": true, "no de l'étudiant": true,
+}
+
+var permanentHeaders = map[string]bool{
+	"code perm.": true, "code perm": true, "code permanent": true,
+	"permanent": true, "code_permanent": true,
+}
+
+var groupHeaders = map[string]bool{
+	"groupe": true, "no groupe": true, "numéro de groupe": true, "group": true,
 }
 
 // Séparateurs de colonnes reconnus.
@@ -62,14 +89,43 @@ type Issue struct {
 	Message string `json:"message"`
 }
 
-// Roster est le résultat d'un chargement : les personnes valides et les lignes rejetées.
+// Entry est une ligne d'une liste : une personne, et ce que la liste dit d'elle
+// en plus.
+//
+// Le compte GitHub peut manquer. Une liste sortie d'Omnivox ne le connaît pas —
+// elle porte un numéro d'étudiant, un nom, un code permanent —, et c'est le
+// rapprochement qui le trouve ensuite dans les dépôts. Ce qui l'entoure sert
+// justement à ce rapprochement : rien n'y est retenu pour être affiché.
+type Entry struct {
+	FullName  string
+	Username  string
+	StudentID string
+	Permanent string
+	Group     string
+}
+
+// Person rend la personne que l'entrée décrit.
+func (e Entry) Person() Person {
+	return Person{FullName: e.FullName, Username: e.Username}
+}
+
+// Roster est le résultat d'un chargement : les lignes lues et celles rejetées.
 type Roster struct {
+	// Entries porte tout ce que la liste disait, compte GitHub compris quand
+	// elle en avait un.
+	Entries []Entry
+	// People ne retient que les entrées qui ont un compte : c'est avec elles
+	// qu'on peut créer des dépôts sans rien avoir à rapprocher.
 	People []Person
 	Issues []Issue
 }
 
+// Named dit si la liste porte des comptes GitHub. Une liste qui n'en a aucun
+// n'est pas fautive : elle demande un rapprochement avant de servir.
+func (r Roster) Named() bool { return len(r.People) > 0 }
+
 // IsValid indique une liste exploitable sans aucun rejet.
-func (r Roster) IsValid() bool { return len(r.Issues) == 0 && len(r.People) > 0 }
+func (r Roster) IsValid() bool { return len(r.Issues) == 0 && len(r.Entries) > 0 }
 
 // sniffDelimiter devine le séparateur de colonnes, avec la virgule comme repli.
 func sniffDelimiter(text string) rune {
@@ -97,22 +153,60 @@ func normalizeHeader(value string) string {
 	return strings.ToLower(strings.TrimSpace(cleaned))
 }
 
-// detectColumns repère les colonnes « nom » et « github » dans une ligne d'en-tête.
-func detectColumns(row []string) (nameIndex, loginIndex int, found bool) {
-	nameIndex, loginIndex = -1, -1
+// columns dit où lire chaque renseignement dans une ligne. Une colonne absente
+// vaut -1 ; seul le nom est indispensable.
+type columns struct {
+	name, first, login, student, permanent, group int
+	// found dit que des en-têtes ont été reconnus. Sans eux, la lecture retombe
+	// sur deux colonnes dans l'ordre — nom, puis compte —, ce qu'une liste
+	// écrite à la main peut légitimement être.
+	found bool
+}
+
+// detectColumns repère dans une ligne d'en-tête ce qu'elle sait donner.
+func detectColumns(row []string) columns {
+	trouvees := columns{name: -1, first: -1, login: -1, student: -1, permanent: -1, group: -1}
+	place := func(cible *int, index int) {
+		if *cible < 0 {
+			*cible = index
+		}
+	}
 	for index, cell := range row {
-		header := normalizeHeader(cell)
-		if nameIndex < 0 && nameHeaders[header] {
-			nameIndex = index
-		}
-		if loginIndex < 0 && loginHeaders[header] {
-			loginIndex = index
+		header := normalizeHeader(unarmor(cell))
+		switch {
+		case nameHeaders[header]:
+			place(&trouvees.name, index)
+		case firstHeaders[header]:
+			place(&trouvees.first, index)
+		case loginHeaders[header]:
+			place(&trouvees.login, index)
+		case studentHeaders[header]:
+			place(&trouvees.student, index)
+		case permanentHeaders[header]:
+			place(&trouvees.permanent, index)
+		case groupHeaders[header]:
+			place(&trouvees.group, index)
 		}
 	}
-	if nameIndex < 0 || loginIndex < 0 {
-		return 0, 1, false
+	// Un nom seul ne suffit pas à reconnaître un en-tête : la première ligne
+	// d'une liste sans en-tête porterait un nom, elle aussi. Il faut qu'une
+	// autre colonne se soit fait reconnaître avec lui.
+	autre := trouvees.first >= 0 || trouvees.login >= 0 || trouvees.student >= 0 ||
+		trouvees.permanent >= 0 || trouvees.group >= 0
+	trouvees.found = trouvees.name >= 0 && autre
+	if !trouvees.found {
+		return columns{name: 0, first: -1, login: 1, student: -1, permanent: -1, group: -1}
 	}
-	return nameIndex, loginIndex, true
+	return trouvees
+}
+
+// at rend la cellule d'une colonne, vide si la colonne manque ou si la ligne
+// est trop courte.
+func at(cells []string, index int) string {
+	if index < 0 || index >= len(cells) {
+		return ""
+	}
+	return cells[index]
 }
 
 // Parse analyse un contenu CSV/TSV et renvoie les personnes valides et les erreurs.
@@ -146,13 +240,16 @@ func Parse(text string) Roster {
 	result := Roster{}
 	seen := map[string]Person{}
 
-	nameIndex, loginIndex := 0, 1
+	colonnes := columns{name: 0, first: -1, login: 1, student: -1, permanent: -1, group: -1}
 	start := 0
 	if len(rows) > 0 {
-		if name, login, found := detectColumns(rows[0]); found {
-			nameIndex, loginIndex, start = name, login, 1
+		if trouvees := detectColumns(rows[0]); trouvees.found {
+			colonnes, start = trouvees, 1
 		}
 	}
+	// Sans colonne de compte, la liste n'en promet aucun : une ligne qui n'en
+	// porte pas n'est pas fautive. Avec une telle colonne, elle l'est.
+	attendu := colonnes.login >= 0
 
 	for offset := start; offset < len(rows); offset++ {
 		row := rows[offset]
@@ -162,7 +259,7 @@ func Parse(text string) Roster {
 		cells := make([]string, len(row))
 		empty := true
 		for index, cell := range row {
-			cells[index] = strings.TrimSpace(cell)
+			cells[index] = unarmor(cell)
 			if cells[index] != "" {
 				empty = false
 			}
@@ -170,34 +267,50 @@ func Parse(text string) Roster {
 		if empty || strings.HasPrefix(cells[0], "#") {
 			continue // ligne vide ou commentaire
 		}
-		if len(cells) <= max(nameIndex, loginIndex) {
-			result.Issues = append(result.Issues, Issue{line, raw,
-				"Deux colonnes attendues : nom complet et compte GitHub."})
-			continue
-		}
 
-		fullName, err := valid.FullName(cells[nameIndex])
-		if err != nil {
-			result.Issues = append(result.Issues, Issue{line, raw, err.Error()})
-			continue
+		nom := at(cells, colonnes.name)
+		// Nom et prénom séparés : c'est la forme d'Omnivox, et le prénom passe
+		// devant — c'est ainsi qu'on nomme une personne, et ainsi que son nom
+		// entrera dans celui de ses dépôts.
+		if prenom := at(cells, colonnes.first); prenom != "" {
+			nom = strings.TrimSpace(prenom + " " + nom)
 		}
-		username, err := valid.Login(cells[loginIndex], "")
+		fullName, err := valid.FullName(nom)
 		if err != nil {
 			result.Issues = append(result.Issues, Issue{line, raw, err.Error()})
 			continue
 		}
 
-		person := Person{FullName: fullName, Username: username}
-		if previous, exists := seen[person.Key()]; exists {
-			result.Issues = append(result.Issues, Issue{line, raw,
-				"Compte « " + person.Username + " » déjà présent pour « " + previous.FullName + " »."})
+		entree := Entry{
+			FullName:  fullName,
+			StudentID: at(cells, colonnes.student),
+			Permanent: at(cells, colonnes.permanent),
+			Group:     at(cells, colonnes.group),
+		}
+
+		brut := at(cells, colonnes.login)
+		if brut == "" && !attendu {
+			result.Entries = append(result.Entries, entree)
 			continue
 		}
-		seen[person.Key()] = person
-		result.People = append(result.People, person)
+		username, err := valid.Login(brut, "")
+		if err != nil {
+			result.Issues = append(result.Issues, Issue{line, raw, err.Error()})
+			continue
+		}
+		entree.Username = username
+
+		if previous, exists := seen[strings.ToLower(username)]; exists {
+			result.Issues = append(result.Issues, Issue{line, raw,
+				"Compte « " + username + " » déjà présent pour « " + previous.FullName + " »."})
+			continue
+		}
+		seen[strings.ToLower(username)] = entree.Person()
+		result.Entries = append(result.Entries, entree)
+		result.People = append(result.People, entree.Person())
 	}
 
-	if len(result.People) == 0 && len(result.Issues) == 0 {
+	if len(result.Entries) == 0 && len(result.Issues) == 0 {
 		result.Issues = append(result.Issues, Issue{Message: "Aucune personne trouvée dans le fichier."})
 	}
 	return result
@@ -217,10 +330,9 @@ func Load(path string) (Roster, error) {
 	if err != nil {
 		return Roster{}, valid.Errorf("Fichier illisible : %v", err)
 	}
-	if !isUTF8(content) {
-		return Roster{}, valid.Errorf("Fichier illisible : encodage UTF-8 attendu (%s).", expanded)
-	}
-	return Parse(string(content)), nil
+	// L'encodage n'est plus une condition : une liste sortie d'Omnivox arrive
+	// en Windows-1252, et la refuser obligerait à la convertir à la main.
+	return Parse(decode(content)), nil
 }
 
 // Write écrit une liste de personnes au format CSV.
@@ -265,11 +377,6 @@ func ExpandPath(path string) (string, error) {
 		trimmed = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(trimmed, "~"), "/"))
 	}
 	return trimmed, nil
-}
-
-// isUTF8 vérifie que le contenu est bien de l'UTF-8.
-func isUTF8(content []byte) bool {
-	return strings.ToValidUTF8(string(content), "�") == string(content)
 }
 
 // GitHub refuse deux dépôts de même nom dans une organisation. Quand celui
