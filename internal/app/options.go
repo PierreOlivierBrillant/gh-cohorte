@@ -27,6 +27,13 @@ type Options struct {
 	// StudentsRequested ouvre l'annuaire : les étudiants de l'organisation
 	// entière, avec les cours que chacun a suivis.
 	StudentsRequested bool
+	// Import reprend des dépôts nommés autrement — « travail-compte », ce que
+	// GitHub Classroom produit — et les fait entrer dans la nomenclature. Sans
+	// valeur, il montre les travaux que ces dépôts dessinent.
+	Import          string
+	ImportRequested bool
+	// Into est la place d'arrivée d'une importation : « a26.5n6.1030 ».
+	Into string
 	// PublishRegistry verse au registre de l'organisation les noms que ce
 	// poste a accumulés, puis quitte. Avec --dry-run, il montre seulement ce
 	// qu'il ferait ; avec --yes, il ne demande pas confirmation.
@@ -105,6 +112,8 @@ Utilisation :
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
   gh cohorte --students --session a26         étudiants de la session a26
+  gh cohorte --import                         reprendre des dépôts nommés autrement
+  gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
   gh cohorte --publish-registry --dry-run     ce que publier les noms ferait
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
@@ -116,6 +125,8 @@ Drapeaux :
   --org ORG                organisation GitHub cible
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
   --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
+  --import [TRAVAIL]       reprendre des dépôts « travail-compte » ; vide, les lister
+  --into PLACE             place d'arrivée d'une importation (« a26.5n6.1030 »)
   --publish-registry       verser au registre de l'organisation les noms de ce poste
   --prefer-local           en cas de désaccord, garder le nom de ce poste
   --registry-team EQUIPE   donner à une équipe accès au registre
@@ -184,6 +195,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.Usage = func() {}
 
 	manage := set.String("manage", unset, "gérer un groupe existant")
+	importer := set.String("import", unset, "reprendre des dépôts nommés autrement")
 	template := set.String("template", unset, "dépôt modèle")
 	starter := set.String("starter", unset, "dossier de fichiers de départ")
 	delay := set.Float64("delay", -1, "marge entre deux créations")
@@ -208,6 +220,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	tri := set.String("sort", "", "colonne de tri de la liste")
 	set.BoolVar(&options.SortDesc, "sort-desc", false, "trier du plus grand au plus petit")
 
+	set.StringVar(&options.Into, "into", "", "place d'arrivée d'une importation")
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
 	set.StringVar(&options.MoveTo, "move-to", "", "place d'arrivée du travail géré")
@@ -269,6 +282,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.ManageRequested = true
 		options.Manage = *manage
 	}
+	if *importer != unset {
+		options.ImportRequested = true
+		options.Import = *importer
+	}
 	if *template != unset {
 		options.TemplateSet = true
 		options.Template = *template
@@ -310,7 +327,9 @@ func translateFlagError(err error) error {
 // « --manage » seul comme « --manage= ». Le paquet flag ne sait pas gérer seul
 // un drapeau dont la valeur est facultative.
 func normalizeArgs(args []string) []string {
-	optional := map[string]bool{"-manage": true, "--manage": true}
+	optional := map[string]bool{
+		"-manage": true, "--manage": true, "-import": true, "--import": true,
+	}
 	normalized := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
 		argument := args[index]
