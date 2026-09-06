@@ -258,14 +258,14 @@ func nouvellesCibles(repos []groups.RepoInfo) *cibles {
 // restent retenus d'un appel à l'autre : deux travaux déplacés ensemble ne
 // doivent pas se heurter.
 func (c *cibles) travail(arrivee Classroom, nom string, depots []groups.Repo,
-	connus map[string]roster.Person) ([]Move, error) {
+	connus known) ([]Move, error) {
 	fragment, err := naming.Fragment(nom, "Travail")
 	if err != nil {
 		return nil, err
 	}
 	lignes := make([]Move, 0, len(depots))
 	for _, depot := range depots {
-		personne := connus[strings.ToLower(depot.Suffix)]
+		personne, _ := connus.personne(depot.Suffix)
 		ligne, err := c.viser(arrivee, fragment, depot,
 			fragmentDe(personne), personne.Username)
 		if err != nil {
@@ -335,4 +335,39 @@ func (c Classroom) Without(usernames ...string) Classroom {
 func (c Classroom) With(people ...roster.Person) Classroom {
 	c.Students = dedupe(append(append([]roster.Person(nil), c.Students...), people...))
 	return c
+}
+
+// ------------------------------------------------------ renommer un travail
+
+// PlanRenameAssignment compose le renommage des dépôts d'un travail qui change
+// de nom sans changer de place. Le nom du travail est un niveau du nom de
+// chaque dépôt : il n'y a pas de fiche où le corriger — les dépôts sont tout ce
+// qu'un travail est.
+//
+// Le dernier niveau est repris tel quel, même quand le nom complet de
+// l'étudiant est connu : on renomme le travail, pas les personnes. Corriger un
+// nom mal orthographié a sa propre opération, et mêler les deux rendrait
+// illisible le renommage qu'on montre avant d'écrire.
+func PlanRenameAssignment(cours Classroom, id, nom string,
+	repos []groups.RepoInfo) ([]Move, error) {
+	if err := peutNommer(cours,
+		"déplacez d'abord ce travail à une place de la nomenclature courante"); err != nil {
+		return nil, err
+	}
+	fragment, err := naming.Fragment(nom, "Travail")
+	if err != nil {
+		return nil, err
+	}
+	depots := cours.Repos(id, repos)
+	if len(depots) == 0 {
+		return nil, valid.Errorf("Aucun dépôt pour le travail « %s ».", cours.ShortName(id))
+	}
+	lignes, err := nouvellesCibles(repos).travail(cours, fragment, depots, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(lignes) == 0 {
+		return nil, valid.Errorf("« %s » porte déjà ce nom.", fragment)
+	}
+	return lignes, nil
 }

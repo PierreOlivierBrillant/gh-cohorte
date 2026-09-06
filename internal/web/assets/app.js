@@ -34,6 +34,48 @@ function vider(noeud) {
   while (noeud.firstChild) noeud.firstChild.remove();
 }
 
+// plageDeCases donne aux listes de cases ce que le terminal accepte déjà sous
+// la forme « 2-5 » : on coche une case, puis maj + clic sur une autre, et tout
+// ce qui les sépare prend l'état de la seconde. Sans cela, trente dépôts se
+// cochent en trente clics.
+//
+// L'écoute est posée sur le conteneur, jamais sur les cases : les listes se
+// redessinent à chaque chargement, et celles d'hier ont disparu. Le conteneur
+// est rendu, pour se poser dans un arbre en cours de construction.
+function plageDeCases(conteneur) {
+  let ancre = null;
+
+  // Maj + clic étend aussi la sélection de texte du navigateur, qui surlignerait
+  // la liste au passage. Ce n'est pas l'appui qui coche, c'est le clic : le
+  // refuser ne coûte que le surlignage.
+  conteneur.addEventListener('mousedown', (evenement) => {
+    if (evenement.shiftKey) evenement.preventDefault();
+  });
+
+  conteneur.addEventListener('click', (evenement) => {
+    const cible = evenement.target;
+    if (!cible.matches('input[type="checkbox"]')) return;
+    const cases = [...conteneur.querySelectorAll('input[type="checkbox"]')];
+    const arrivee = cases.indexOf(cible);
+    const depart = cases.indexOf(ancre);
+    ancre = cible;
+    if (!evenement.shiftKey || depart < 0 || depart === arrivee) return;
+
+    // Le clic vient de basculer la case visée ; les autres prennent son état,
+    // retenu avant la boucle. Certaines listes remettent en effet leurs cases
+    // d'aplomb à chaque « change » : relire la case visée en cours de route
+    // rendrait ce qu'elle valait avant le clic. Pour la même raison elle est
+    // réannoncée avec les autres plutôt que laissée au navigateur, qui la
+    // déclarerait trop tard ; son « change » suivra, sans rien dire de neuf.
+    const coche = cible.checked;
+    for (const case_ of cases.slice(Math.min(depart, arrivee), Math.max(depart, arrivee) + 1)) {
+      case_.checked = coche;
+      case_.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  return conteneur;
+}
+
 // Les tracés viennent des Octicons de GitHub, sur une grille de 16 : les mêmes
 // pictogrammes que le site où mènent tous les liens de la page.
 const TRACES = {
@@ -94,7 +136,11 @@ async function api(methode, chemin, corps) {
     try { donnees = JSON.parse(texte); } catch { donnees = { error: texte }; }
   }
   if (!reponse.ok) {
-    throw new Error((donnees && donnees.error) || `Erreur ${reponse.status}`);
+    const echec = new Error((donnees && donnees.error) || `Erreur ${reponse.status}`);
+    // Le serveur nomme la portée qui manque quand GitHub l'a fait savoir :
+    // c'est elle qui transforme un refus sec en proposition de reprise.
+    if (donnees && donnees.scope) echec.portee = donnees.scope;
+    throw echec;
   }
   return donnees;
 }
@@ -181,10 +227,16 @@ function attendreTable(table, vide, texte) {
 }
 
 // tenter exécute une action et affiche l'erreur éventuelle sans casser la page.
-async function tenter(action, contexte) {
+// Un refus faute de portée n'en est pas vraiment un : rien n'a été fait, et le
+// jeton peut être regénéré sur place. L'action est alors rejouée — une fois,
+// pour qu'un refus qui persiste finisse par se dire.
+async function tenter(action, contexte, rejoue = false) {
   try {
     return await action();
   } catch (erreur) {
+    if (erreur.portee && !rejoue && await proposerRegeneration(erreur.portee, contexte)) {
+      return tenter(action, contexte, true);
+    }
     message(contexte ? `${contexte} : ${erreur.message}` : erreur.message, 'erreur', 12000);
     return null;
   }
@@ -197,6 +249,10 @@ const encode = encodeURIComponent;
 const etat = {
   contexte: null,
   reglages: {},
+  // Ce que le jeton permet, et la fonction qui dit quelles portées sont cochées
+  // dans les réglages généraux.
+  jeton: null,
+  porteesCochees: null,
   organisation: '',
   groupes: [],
   sessions: [],
@@ -266,6 +322,14 @@ function appliquerEvenement(evenement) {
       $('operation-annuler').hidden = true;
       if (fin.failure) journaliser(fin.failure, 'err');
       else $('operation-barre').value = 100;
+      // Une opération arrêtée faute de portée ne se rejoue pas toute seule :
+      // une partie a pu aboutir, et c'est à la personne de dire ce qu'elle
+      // relance. Le jeton, lui, peut être refait tout de suite.
+      if (fin.scope) {
+        proposerRegeneration(fin.scope, fin.label).then((refait) => {
+          if (refait) journaliser('Jeton renouvelé : relancez l’opération.', 'ok');
+        });
+      }
       break;
     }
   }
@@ -1203,6 +1267,8 @@ function majSelectionTravaux() {
   $('travaux-deplacer').disabled = choisis === 0;
 }
 
+plageDeCases($('travaux-liste'));
+
 $('travaux-tout').addEventListener('change', (evenement) => {
   etat.travauxChoisis = evenement.target.checked
     ? new Set((etat.groupe.assignments || []).map((travail) => travail.id))
@@ -1383,6 +1449,8 @@ function majSelection() {
   $('detail-tout').checked = total > 0 && choisis === total;
 }
 
+plageDeCases($('detail-table').querySelector('tbody'));
+
 $('detail-tout').addEventListener('change', (evenement) => {
   etat.selection = evenement.target.checked
     ? new Set(etat.travail.depots.map((repo) => repo.name))
@@ -1394,17 +1462,35 @@ function selectionnes() {
   return etat.travail.depots.filter((repo) => etat.selection.has(repo.name));
 }
 
-// --- accès de tout le travail
+// --- ce qu'on fait au travail entier
 
-// Depuis la page d'un travail, c'est celui qu'on regarde qu'on déplace : il n'y
-// a pas à retourner à la liste pour le cocher.
-$('detail-deplacer').addEventListener('click', () => {
-  const travail = (etat.groupe.assignments || [])
-    .find((item) => item.id === etat.travail.id);
-  if (travail) deplacerTravaux([travail]);
-});
+// Les commandes du travail entier vivent dans un menu : elles sont rares, et la
+// barre garde ainsi la seule qu'on vient y chercher — distribuer aux manquants.
+const menuTravail = menuDeroulant('detail-menu-ouvrir', 'detail-menu');
+
+// Le travail que la page montre, tel que le groupe le connaît : c'est la fiche
+// que les commandes attendent, pas le détail chargé pour l'affichage.
+function travailOuvert() {
+  return (etat.groupe.assignments || []).find((item) => item.id === etat.travail.id);
+}
+
+// Chaque commande referme le menu avant d'agir : le dialogue qui suit se
+// passerait mal d'un menu resté ouvert derrière lui.
+function commandeDuTravail(bouton, action) {
+  $(bouton).addEventListener('click', () => {
+    menuTravail.deplier(false);
+    const travail = travailOuvert();
+    if (travail) action(travail);
+  });
+}
+
+// Depuis la page d'un travail, c'est celui qu'on regarde qu'on déplace ou qu'on
+// renomme : il n'y a pas à retourner à la liste pour le cocher.
+commandeDuTravail('detail-deplacer', (travail) => deplacerTravaux([travail]));
+commandeDuTravail('detail-renommer', (travail) => renommerTravail(travail));
 
 $('detail-acces').addEventListener('click', async () => {
+  menuTravail.deplier(false);
   const fiche = await tenter(() => api('POST',
     `/api/classrooms/${encode(etat.groupe.scope)}/assignments/${encode(etat.travail.name)}/access`),
     'Accès');
@@ -1607,7 +1693,7 @@ $('detail-pull').addEventListener('click', async () => {
       el('span', { texte: item.name + (horsTravail ? '   (hors travail)' : '') }));
   });
   const confirme = await demander(`${liste.clones.length} clone(s) trouvé(s)`,
-    el('div', {}, cases), 'Mettre à jour');
+    plageDeCases(el('div', {}, cases)), 'Mettre à jour');
   if (!confirme) return;
 
   const noms = cases
@@ -1749,6 +1835,8 @@ function majDestinataires() {
     coche.checked = etat.destinataires.has(coche.value);
   }
 }
+
+plageDeCases($('dest-liste'));
 
 $('dest-tout').addEventListener('change', (evenement) => {
   etat.destinataires = evenement.target.checked
@@ -2018,6 +2106,8 @@ function majSelectionEtudiants() {
   $('etudiants-deplacer').disabled = choisis === 0;
 }
 
+plageDeCases($('etudiants-table').querySelector('tbody'));
+
 $('etudiants-tout').addEventListener('change', (evenement) => {
   etat.deplaces = evenement.target.checked
     ? new Set(etat.etudiants.map((ligne) => ligne.username))
@@ -2056,6 +2146,46 @@ function differer(action, delai = 250) {
     clearTimeout(minuteur);
     minuteur = setTimeout(() => action(...arguments_), delai);
   };
+}
+
+// menuDeroulant relie un bouton au panneau qu'il déplie. Le panneau est posé
+// au-dessus de la page plutôt que dans la boîte qui le contient — celle-ci
+// rognerait ce qui dépasse d'elle, et un menu dépasse toujours —, si bien que
+// sa place se calcule à l'ouverture, une fois sa largeur connue.
+//
+// Les critères d'une liste et les commandes d'un travail se déplient de la même
+// façon : ce qui suit ne sait pas ce que le panneau contient.
+function menuDeroulant(ouvrir, menu) {
+  function deplier(ouvert) {
+    const flottant = $(menu);
+    flottant.hidden = !ouvert;
+    $(ouvrir).setAttribute('aria-expanded', String(ouvert));
+    if (!ouvert) return;
+    // Sa largeur ne se connaît qu'une fois affiché : la place se calcule après.
+    const bouton = $(ouvrir).getBoundingClientRect();
+    flottant.style.top = `${bouton.bottom + 6}px`;
+    flottant.style.left = `${Math.max(8, bouton.right - flottant.offsetWidth)}px`;
+  }
+
+  $(ouvrir).addEventListener('click', () => deplier($(menu).hidden));
+
+  // Le menu se referme comme tout menu : ailleurs, à l'échappement, ou dès que
+  // la page bouge sous lui — sa place a été calculée pour l'endroit qu'elle
+  // occupait.
+  document.addEventListener('click', (evenement) => {
+    if (!$(menu).hidden && !evenement.target.closest('.menu-ancre')) deplier(false);
+  });
+  document.addEventListener('keydown', (evenement) => {
+    if (evenement.key === 'Escape' && !$(menu).hidden) {
+      deplier(false);
+      $(ouvrir).focus();
+    }
+  });
+  window.addEventListener('scroll', () => {
+    if (!$(menu).hidden) deplier(false);
+  }, true);
+
+  return { deplier };
 }
 
 // barreDeFiltre relie une barre — recherche, menu de critères, en-têtes
@@ -2097,34 +2227,7 @@ function barreDeFiltre({ table, texte, ouvrir, menu, vider, champs, criteres, ef
     $(ouvrir).classList.toggle('vert', poses > 0);
   }
 
-  function deplier(ouvert) {
-    const flottant = $(menu);
-    flottant.hidden = !ouvert;
-    $(ouvrir).setAttribute('aria-expanded', String(ouvert));
-    if (!ouvert) return;
-    // Sa largeur ne se connaît qu'une fois affiché : la place se calcule après.
-    const bouton = $(ouvrir).getBoundingClientRect();
-    flottant.style.top = `${bouton.bottom + 6}px`;
-    flottant.style.left = `${Math.max(8, bouton.right - flottant.offsetWidth)}px`;
-  }
-
-  $(ouvrir).addEventListener('click', () => deplier($(menu).hidden));
-
-  // Le menu se referme comme tout menu : ailleurs, à l'échappement, ou dès que
-  // la page bouge sous lui — sa place a été calculée pour l'endroit qu'elle
-  // occupait.
-  document.addEventListener('click', (evenement) => {
-    if (!$(menu).hidden && !evenement.target.closest('.menu-ancre')) deplier(false);
-  });
-  document.addEventListener('keydown', (evenement) => {
-    if (evenement.key === 'Escape' && !$(menu).hidden) {
-      deplier(false);
-      $(ouvrir).focus();
-    }
-  });
-  window.addEventListener('scroll', () => {
-    if (!$(menu).hidden) deplier(false);
-  }, true);
+  const { deplier } = menuDeroulant(ouvrir, menu);
 
   const plusTard = differer(recharger);
   $(texte).addEventListener('input', (evenement) => {
@@ -2214,12 +2317,12 @@ $('etudiants-ajouter').addEventListener('click', async () => {
     ? el('p', { classe: 'note', texte: "Le groupe n'a encore aucun travail distribué." })
     : el('div', {},
         el('span', { classe: 'etiquette', texte: 'Lui créer les dépôts de' }),
-        el('div', { classe: 'cases-travaux' }, existants.map((travail) =>
+        plageDeCases(el('div', { classe: 'cases-travaux' }, existants.map((travail) =>
           el('label', { classe: 'case' }, cases.get(travail.name),
             el('span', {},
               el('strong', { texte: travail.name }),
               el('span', { classe: 'aide',
-                texte: `déjà remis à ${travail.students} étudiant(s) du groupe` }))))),
+                texte: `déjà remis à ${travail.students} étudiant(s) du groupe` })))))),
         el('p', { classe: 'aide',
           texte: `Aux réglages du groupe : ${reglages.visibility === 'public' ? 'public' : 'privé'}, ` +
             (reglages.add_collaborator
@@ -2437,10 +2540,7 @@ function preparerMigration(groupe) {
       'garde une redirection depuis chaque ancien nom : les clones déjà faits continuent de ' +
       'fonctionner.';
 
-  $('mig-table').hidden = true;
-  $('mig-resume').textContent = '';
-  $('mig-lancer').disabled = true;
-  vider($('mig-avis'));
+  oublierApercuMigration();
 
   if (!herite) {
     $('mig-session').value = groupe.session;
@@ -2478,10 +2578,63 @@ function corpsMigration() {
   };
 }
 
+// Le dernier aperçu obtenu. La case « laisser en place » ne change pas le plan
+// — les mêmes dépôts sont bloqués qu'on l'accepte ou non —, elle change ce qu'on
+// en fait : garder l'aperçu permet de redire les conséquences du choix sans
+// redemander le plan au serveur.
+let apercuMigration = null;
+
+// oublierApercuMigration ramène l'écran à avant l'aperçu : changer la place
+// d'arrivée périme le plan affiché.
+function oublierApercuMigration() {
+  apercuMigration = null;
+  $('mig-table').hidden = true;
+  $('mig-ignorer').checked = false;
+  $('mig-resume').textContent = '';
+  majAvisMigration();
+}
+
+// majAvisMigration dit ce que l'aperçu implique, la case comprise, et n'ouvre le
+// bouton que si la migration peut aboutir. La case ne se montre que lorsqu'elle
+// a quelque chose à décider : la proposer quand aucun dépôt n'est bloqué, c'est
+// offrir un choix sans effet.
+function majAvisMigration() {
+  const apercu = apercuMigration;
+  const bloques = apercu ? apercu.blocked : 0;
+  const ignorer = $('mig-ignorer').checked;
+  $('mig-ignorer-case').hidden = bloques === 0;
+  vider($('mig-avis'));
+  if (!apercu) {
+    $('mig-lancer').disabled = true;
+    return;
+  }
+  if (bloques && !ignorer) {
+    $('mig-avis').append(el('div', { classe: 'avis alerte',
+      texte: `${bloques} dépôt(s) ne peuvent pas être renommés. Complétez la liste des ` +
+        "étudiants — comptes manquants, noms complets à retrouver — ou acceptez de les laisser " +
+        'en place.' }));
+  } else if (apercu.ready === 0) {
+    $('mig-avis').append(el('div', { classe: 'avis alerte', texte: 'Aucun dépôt à renommer.' }));
+  } else {
+    $('mig-avis').append(el('div', { classe: 'avis',
+      texte: (bloques ? `${bloques} dépôt(s) garderont leur nom actuel. ` : '') +
+        phraseBascule(apercu) }));
+  }
+  $('mig-lancer').disabled = apercu.ready === 0 || (bloques > 0 && !ignorer);
+}
+
+// phraseBascule dit ce que devient le groupe lui-même. C'est le serveur qui en
+// décide — un groupe ne suit ses dépôts que si aucun ne reste en arrière — et
+// l'aperçu le rapporte, plutôt que de le redéduire ici.
+function phraseBascule(apercu) {
+  if (apercu.switch) return `Le groupe devient « ${apercu.scope} ».`;
+  return `Le groupe reste « ${etat.groupe.label} » : c'est ainsi qu'il continue de les voir. ` +
+    `Les dépôts renommés apparaîtront à part, sous « ${apercu.scope} ».`;
+}
+
 $('mig-apercu-bouton').addEventListener('click', async () => {
   const apercu = await tenter(() => api('POST',
     `/api/classrooms/${encode(etat.groupe.scope)}/migration/preview`, corpsMigration()), 'Migration');
-  vider($('mig-avis'));
   if (!apercu) return;
 
   const corps = $('mig-table').querySelector('tbody');
@@ -2496,22 +2649,17 @@ $('mig-apercu-bouton').addEventListener('click', async () => {
   $('mig-table').hidden = apercu.rows.length === 0;
   $('mig-resume').textContent = `${apercu.ready} dépôt(s) à renommer` +
     (apercu.blocked ? `, ${apercu.blocked} bloqué(s)` : '');
-  if (apercu.blocked) {
-    $('mig-avis').append(el('div', { classe: 'avis alerte',
-      texte: `${apercu.blocked} dépôt(s) ne peuvent pas être renommés. Complétez la liste des ` +
-        "étudiants — comptes manquants, noms complets à retrouver — ou acceptez de les laisser " +
-        'en place.' }));
-  }
-  $('mig-lancer').disabled = apercu.ready === 0;
+  apercuMigration = apercu;
+  majAvisMigration();
 });
 
-for (const id of ['mig-session', 'mig-cours', 'mig-section', 'mig-ignorer']) {
-  $(id).addEventListener('change', () => {
-    $('mig-table').hidden = true;
-    $('mig-resume').textContent = '';
-    $('mig-lancer').disabled = true;
-  });
+for (const id of ['mig-session', 'mig-cours', 'mig-section']) {
+  $(id).addEventListener('change', oublierApercuMigration);
 }
+
+// La case ne périme pas l'aperçu : elle ne touche pas au plan, seulement à ce
+// qu'on décide d'en faire. La relire suffit.
+$('mig-ignorer').addEventListener('change', majAvisMigration);
 
 $('mig-lancer').addEventListener('click', async () => {
   const corps = corpsMigration();
@@ -2532,8 +2680,8 @@ $('mig-lancer').addEventListener('click', async () => {
   journaliser(`${bilan.renamed} renommé(s) · ${bilan.skipped} laissé(s) en place · ` +
     `${bilan.failed} en échec`, bilan.failed ? 'warn' : 'ok');
   if (!bilan.switched) {
-    journaliser('Le groupe reste sur l\'ancienne nomenclature : des dépôts sont restés en ' +
-      'arrière.', 'warn');
+    journaliser(`Le groupe reste « ${etat.groupe.label} » : des dépôts sont restés en arrière, ` +
+      'et il continue de les voir.', 'warn');
   }
   await ouvrirGroupe(etat.groupe.scope, true, true);
   afficherVue('groupe-reglages');
@@ -2568,7 +2716,7 @@ async function rafraichirEmplacements() {
   const contexte = await api('GET', '/api/context').catch(() => null);
   if (!contexte) return;
   etat.contexte = contexte;
-  dessinerPortees(contexte.scopes);
+  dessinerPortees(contexte.token);
   dessinerChemins(contexte.paths);
   ecrireReglagesGeneraux();
 }
@@ -2617,14 +2765,127 @@ $('cache-vider').addEventListener('click', async () => {
   dessinerChemins(bilan.paths);
 });
 
-function dessinerPortees(portees) {
-  const conteneur = $('portees');
+// ------------------------------------------------------- portées du jeton
+
+// L'outil ne fabrique aucun jeton : il redemande à gh d'en obtenir un portant
+// les portées voulues. L'échange avec GitHub — un code à recopier — se joue
+// dans le terminal d'où l'outil a été lancé, y compris quand la demande part
+// d'ici : c'est la seule chose que le navigateur ne peut pas mener seul.
+
+// tonDePortee traduit l'état d'une portée en couleur d'étiquette.
+function tonDePortee(etat) {
+  if (etat === 'présente') return 'oui';
+  if (etat === 'absente') return 'non';
+  return '';
+}
+
+// casesDePortees dresse la liste à cocher des portées, et rend une fonction qui
+// dit lesquelles le sont. Les portées du socle de gh restent cochées : elles
+// accompagnent tout jeton qu'il crée et ne peuvent pas en être retirées.
+function casesDePortees(conteneur, jeton, ajoutee) {
   vider(conteneur);
-  for (const [nom, valeur] of Object.entries(portees)) {
-    const ton = valeur === 'présente' ? 'oui' : (valeur === 'absente' ? 'non' : '');
-    conteneur.append(el('span', { classe: 'jeton ' + ton, texte: `${nom} : ${valeur}` }));
+  const cases = [];
+  for (const portee of jeton.scopes || []) {
+    const coche = portee.minimal || portee.state === 'présente' || portee.name === ajoutee;
+    const entree = el('input', {
+      type: 'checkbox', checked: coche, disabled: portee.minimal, value: portee.name,
+    });
+    cases.push(entree);
+    conteneur.append(el('label', { classe: 'case' }, entree, el('span', {},
+      el('code', { texte: portee.name }), ' ',
+      el('span', { classe: 'jeton ' + tonDePortee(portee.state), texte: portee.state }),
+      el('span', { classe: 'aide', texte: `${portee.label} — ${portee.purpose}` }))));
+  }
+  return () => cases.filter((entree) => entree.checked).map((entree) => entree.value);
+}
+
+// dessinerPortees remplit la boîte des réglages généraux.
+function dessinerPortees(jeton) {
+  etat.jeton = jeton;
+  const provenance = $('jeton-provenance');
+  provenance.textContent = `Jeton de @${jeton.viewer} sur ${jeton.host}` +
+    (jeton.origin ? ` (${jeton.origin}).` : '.');
+
+  etat.porteesCochees = casesDePortees($('portees'), jeton);
+
+  const avis = $('jeton-avis');
+  vider(avis);
+  if (!jeton.refreshable) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `Ce jeton vient de l'environnement (${jeton.origin}) : gh ne peut pas le ` +
+        'renouveler. Effacez la variable et relancez « gh auth login », ou donnez-lui ' +
+        'un jeton portant les portées voulues.' }));
+  }
+  if ((jeton.missing || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `Toujours absente(s) après le renouvellement : ${jeton.missing.join(', ')}. ` +
+        "GitHub n'accorde que ce qui lui a été accordé dans le navigateur." }));
+  }
+  $('jeton-renouveler').disabled = !jeton.refreshable;
+}
+
+// regenererJeton demande le nouveau jeton et redessine ce qu'il permet.
+// L'appel reste ouvert le temps de l'échange dans le terminal : il n'y a rien à
+// montrer ici, sinon dire où regarder.
+async function regenererJeton(portees) {
+  // L'attente peut durer : GitHub veut une confirmation, et elle se donne
+  // ailleurs. Un avis reste affiché tant que gh n'a pas rendu la main, sans
+  // quoi la page semblerait ne rien faire.
+  const attente = el('div', { classe: 'avis', texte:
+    "Renouvellement en cours : suivez les instructions dans le terminal d'où " +
+    'gh cohorte a été lancé.' });
+  $('messages').append(attente);
+  $('jeton-etat').textContent = 'Suivez les instructions dans le terminal…';
+  try {
+    const jeton = await api('POST', '/api/token/refresh', { scopes: portees });
+    dessinerPortees(jeton);
+    if (etat.contexte) etat.contexte.token = jeton;
+    message((jeton.missing || []).length
+      ? `Jeton renouvelé, mais ${jeton.missing.join(', ')} manque toujours.`
+      : 'Jeton renouvelé.', (jeton.missing || []).length ? 'alerte' : 'succes');
+    return jeton;
+  } catch (erreur) {
+    message(`Renouvellement du jeton : ${erreur.message}`, 'erreur', 12000);
+    return null;
+  } finally {
+    attente.remove();
+    $('jeton-etat').textContent = '';
   }
 }
+
+// proposerRegeneration ouvre le dialogue quand une action bute sur une portée
+// absente. Ce qui était déjà accordé reste coché, la portée manquante s'ajoute :
+// obtenir un droit de plus ne doit jamais en faire perdre un autre.
+async function proposerRegeneration(portee, contexte) {
+  const jeton = await api('GET', '/api/token').catch(() => null);
+  if (!jeton) return false;
+  if (!jeton.refreshable) {
+    message(`La portée « ${portee} » manque, et ce jeton vient de l'environnement ` +
+      `(${jeton.origin}) : gh ne peut pas le renouveler.`, 'erreur', 12000);
+    return false;
+  }
+
+  const conteneur = el('div', { classe: 'cases-travaux' });
+  const corps = el('div', { classe: 'corps-dialogue' },
+    el('p', { texte: (contexte ? `${contexte} : ` : '') +
+      `le jeton n'a pas la portée « ${portee} ». Un nouveau jeton peut être ` +
+      "obtenu tout de suite, avec ce qu'il permettait déjà et cette portée en plus." }),
+    conteneur,
+    el('p', { classe: 'note',
+      texte: "GitHub demande une confirmation dans le navigateur : le code à recopier " +
+        "paraît dans le terminal d'où gh cohorte a été lancé." }));
+  const cochees = casesDePortees(conteneur, jeton, portee);
+
+  if (!await demander('Générer un nouveau jeton', corps, 'Générer le jeton')) return false;
+  const renouvele = await regenererJeton(cochees());
+  if (!renouvele) return false;
+  // Rejouer l'action sans la portée voulue ne ferait que répéter le refus.
+  return !(renouvele.missing || []).includes(portee);
+}
+
+$('jeton-renouveler').addEventListener('click', () => {
+  regenererJeton(etat.porteesCochees ? etat.porteesCochees() : []);
+});
 
 function dessinerChemins(chemins) {
   const corps = $('chemins').querySelector('tbody');
@@ -2664,6 +2925,7 @@ function preparerAdoption(gabarit) {
   $('adoption-table').hidden = true;
   $('adoption-resume').textContent = '';
   vider($('adoption-avis'));
+  vider($('adoption-exemple'));
 
   const exemples = $('adoption-exemples');
   vider(exemples);
@@ -2719,7 +2981,25 @@ async function essayerGabarit() {
     $('adoption-avis').append(el('div', { classe: 'avis',
       texte: `Les 200 premiers dépôts sont montrés ; les ${essai.matched} seront adoptés.` }));
   }
+  montrerPersonnesLues(essai.students);
   $('adoption-suite').hidden = false;
+}
+
+// montrerPersonnesLues met sous les yeux ce que le gabarit a tiré des noms de
+// dépôts : la question qui suit — comptes GitHub ou non — ne se tranche qu'en
+// regardant ces textes-là.
+function montrerPersonnesLues(personnes) {
+  const exemple = $('adoption-exemple');
+  vider(exemple);
+  if (!personnes || personnes.length === 0) return;
+  exemple.append(document.createTextNode('Ici : '));
+  personnes.slice(0, 3).forEach((personne, rang) => {
+    if (rang) exemple.append(document.createTextNode(', '));
+    exemple.append(el('code', { texte: personne }));
+  });
+  exemple.append(document.createTextNode(personnes.length > 3
+    ? `… (${personnes.length} en tout, colonne « Personne » ci-dessus).`
+    : ' (colonne « Personne » ci-dessus).'));
 }
 
 $('adoption-creer').addEventListener('click', async () => {
@@ -2965,6 +3245,70 @@ async function deplacerTravaux(travauxChoisis) {
   await ouvrirGroupe(etat.groupe.scope, true, true);
 }
 
+// ------------------------------------------------------ renommer un travail
+
+// Un travail mal nommé — « tp1 » pour ce qui est devenu le projet final, une
+// faute de frappe distribuée à trente personnes — n'avait qu'une issue : le
+// déplacer vers un autre groupe pour profiter du nom qu'on y choisit au
+// passage. C'est beaucoup demander pour corriger un mot.
+//
+// Le nom du travail est un niveau du nom de chaque dépôt : il n'y a pas de
+// fiche où le corriger, les dépôts sont tout ce qu'un travail est. Le renommer,
+// c'est donc les renommer tous — et c'est pourquoi le renommage se montre en
+// entier avant la première écriture.
+async function renommerTravail(travail) {
+  const nom = el('input', { type: 'text', classe: 'champ', value: travail.name });
+
+  const confirme = await demander(`Renommer « ${travail.name} »`, el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nouveau nom du travail' }), nom,
+      el('span', { classe: 'aide',
+        texte: 'Il entre dans le nom de chaque dépôt : le corriger renomme les ' +
+          `${travail.repos} dépôt(s) du travail.` })),
+    el('p', { classe: 'note',
+      texte: 'Le groupe et le nom des étudiants ne bougent pas : seul le niveau du ' +
+        'travail change.' })), 'Voir le renommage');
+  if (!confirme) return;
+
+  const corps = { id: travail.id, name: nom.value.trim() };
+  const apercu = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/rename/preview`, corps),
+  'Renommage');
+  if (!apercu) return;
+
+  const lignes = apercu.rows.map((ligne) => el('tr', {},
+    el('td', {}, el('code', { texte: ligne.repo })),
+    el('td', {}, el('code', { texte: ligne.target }))));
+
+  const parti = await demander(`Renommer ${apercu.ready} dépôt(s)`, el('div', {},
+    el('div', { classe: 'apercu-renommage' },
+      el('table', { classe: 'tableau' },
+        el('thead', {}, el('tr', {},
+          el('th', { texte: 'Dépôt actuel' }), el('th', { texte: 'Nouveau nom' }))),
+        el('tbody', {}, lignes))),
+    el('p', { classe: 'note',
+      texte: 'GitHub garde une redirection depuis chaque ancien nom : les clones et les ' +
+        'liens déjà distribués continuent de fonctionner.' })), 'Renommer');
+  if (!parti) return;
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/rename`, corps), 'Renommage');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (!bilan) return;
+  message(`${bilan.renamed} dépôt(s) renommé(s) · « ${bilan.previous} » devient ` +
+    `« ${bilan.name} »` + (bilan.failed ? ` · ${bilan.failed} en échec` : ''),
+  bilan.failed ? 'alerte' : 'succes');
+
+  // La page revient sur le travail sous son nouveau nom : l'ancien ne désigne
+  // plus rien, et rester dessus montrerait une liste vide. L'adresse suit, elle
+  // aussi — recharger la page sur l'ancien nom ne trouverait plus de travail.
+  await chargerGroupes(true);
+  if (!await ouvrirGroupe(etat.groupe.scope, true, true)) return;
+  const renomme = (etat.groupe.assignments || []).find((item) => item.id === bilan.id);
+  if (renomme) await ouvrirTravail(renomme, false, false);
+}
+
 // ----------------------------------------------------- choix d'un chemin
 
 // Le navigateur ne donne jamais le chemin d'un fichier déposé : c'est le
@@ -3165,7 +3509,7 @@ async function demarrer() {
     }
   }
 
-  dessinerPortees(contexte.scopes);
+  dessinerPortees(contexte.token);
   dessinerChemins(contexte.paths);
   ecrireReglagesGeneraux();
 

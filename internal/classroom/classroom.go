@@ -325,8 +325,27 @@ func (c Classroom) MissingNames() []roster.Person {
 }
 
 // fragments associe à chaque étudiant ce qui peut le nommer dans un dépôt.
-func (c Classroom) fragments() map[string]roster.Person {
+func (c Classroom) fragments() known {
 	return knownBy(c.Students)
+}
+
+// known rassemble ce qui, au dernier niveau d'un nom de dépôt, désigne une
+// personne du groupe.
+type known map[string]roster.Person
+
+// personne retrouve à qui appartient le dernier niveau d'un nom de dépôt. La
+// marque de doublon que GitHub ajoute à un nom déjà pris n'en fait pas un autre
+// compte : « aleksilepaj-1 » est « aleksilepaj », et son dépôt est le sien.
+func (k known) personne(fragment string) (roster.Person, bool) {
+	if person, inscrit := k[strings.ToLower(fragment)]; inscrit {
+		return person, true
+	}
+	base, marque := roster.WithoutDuplicateMarker(fragment)
+	if !marque {
+		return roster.Person{}, false
+	}
+	person, inscrit := k[strings.ToLower(base)]
+	return person, inscrit
 }
 
 // knownBy rassemble ce qui peut désigner une personne au dernier niveau d'un
@@ -339,8 +358,8 @@ func (c Classroom) fragments() map[string]roster.Person {
 // permet de les rattacher à leur étudiant — et donc de les renommer le jour où
 // le nom complet est retrouvé. Le nom complet l'emporte quand les deux
 // désignent quelqu'un : c'est lui que la nomenclature écrit.
-func knownBy(people []roster.Person) map[string]roster.Person {
-	connus := make(map[string]roster.Person, 2*len(people))
+func knownBy(people []roster.Person) known {
+	connus := make(known, 2*len(people))
 	for _, person := range people {
 		if strings.TrimSpace(person.Username) != "" {
 			connus[strings.ToLower(person.Username)] = person
@@ -465,7 +484,7 @@ func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[stri
 		if !strings.EqualFold(id, assignmentID) {
 			continue
 		}
-		if student, inscrit := connus[strings.ToLower(parts.Student)]; inscrit {
+		if student, inscrit := connus.personne(parts.Student); inscrit {
 			servis[strings.ToLower(student.Username)] = true
 		}
 	}
@@ -511,8 +530,7 @@ func (c Classroom) StudentOf(repoName string) (roster.Person, bool) {
 	if !reconnu {
 		return roster.Person{}, false
 	}
-	student, inscrit := c.fragments()[strings.ToLower(parts.Student)]
-	return student, inscrit
+	return c.fragments().personne(parts.Student)
 }
 
 // ----------------------------------------------------------------- candidats
@@ -607,8 +625,13 @@ func StudentsOf(usernames []string) []roster.Person {
 	return dedupe(people)
 }
 
-// dedupe écarte les doublons de comptes, en gardant le premier nom connu.
+// dedupe écarte les doublons de comptes, en gardant le premier nom connu. Les
+// comptes que la marque de doublon de GitHub avait dédoublés sont ramenés au
+// leur juste avant : « aleksilepaj » et « aleksilepaj-1 » sont une personne, et
+// c'est ici — dans Validate, donc à chaque enregistrement — qu'ils se
+// rejoignent, quelle que soit l'interface qui a monté la liste.
 func dedupe(people []roster.Person) []roster.Person {
+	people = sansMarque(people, comptesDe(people))
 	vus := map[string]int{}
 	uniques := make([]roster.Person, 0, len(people))
 	for _, person := range people {
@@ -627,6 +650,46 @@ func dedupe(people []roster.Person) []roster.Person {
 		uniques = append(uniques, person)
 	}
 	return uniques
+}
+
+// sansMarque ramène à leur compte les personnes qu'une marque de doublon a fait
+// dévier. La marque ne suffit pas à conclure — « LT-9 » est un vrai compte : le
+// compte sans elle doit être attesté par « comptes », qui rend le nom complet
+// qu'on lui connaît. Deux noms complets qui se contredisent restent deux
+// personnes, quitte à laisser la marque à qui saura trancher.
+func sansMarque(people []roster.Person, comptes map[string]string) []roster.Person {
+	corriges := make([]roster.Person, 0, len(people))
+	for _, person := range people {
+		base, marque := roster.WithoutDuplicateMarker(person.Username)
+		nom, atteste := comptes[strings.ToLower(base)]
+		if marque && atteste && roster.SameName(nom, person.FullName) {
+			person.Username = base
+			if strings.TrimSpace(person.FullName) == "" {
+				person.FullName = nom
+			}
+		}
+		corriges = append(corriges, person)
+	}
+	return corriges
+}
+
+// comptesDe rend « compte → nom complet » pour une liste de personnes. Le nom
+// le plus renseigné l'emporte : c'est lui qui dira si deux fiches sont celles
+// d'une même personne.
+func comptesDe(people []roster.Person) map[string]string {
+	comptes := make(map[string]string, len(people))
+	for _, person := range people {
+		login := strings.ToLower(strings.TrimSpace(person.Username))
+		if login == "" {
+			continue
+		}
+		// Une entrée absente vaut un nom vide : dans les deux cas, le premier
+		// nom renseigné qui passe l'emporte.
+		if comptes[login] == "" {
+			comptes[login] = strings.TrimSpace(person.FullName)
+		}
+	}
+	return comptes
 }
 
 // ------------------------------------------------------------------- places

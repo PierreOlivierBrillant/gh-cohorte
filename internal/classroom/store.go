@@ -67,7 +67,40 @@ func Open(path string) *Store {
 		item.Defaults = item.Defaults.normalized()
 		store.items = append(store.items, awaitingSession(item))
 	}
+	store.items = sansMarques(store.items)
 	return store
+}
+
+// sansMarques ramène à leur compte les étudiants qu'une marque de doublon de
+// GitHub a fait dévier, en confrontant entre eux les groupes d'une même
+// organisation. GitHub n'ajoute « -1 » à un nom de dépôt que parce que celui
+// qu'on demandait était déjà pris, et celui qui l'avait pris est le plus souvent
+// le même étudiant dans un autre groupe — une session précédente, un autre
+// cours. Le rapprochement se fait donc à l'échelle de l'organisation, comme la
+// collision qui l'a provoqué.
+//
+// La correction est faite à la lecture, comme celle des réglages dépassés :
+// lire n'écrit rien. Le fichier étant réécrit d'un bloc, le premier
+// enregistrement venu — n'importe quel groupe — la porte sur le disque.
+func sansMarques(items []Classroom) []Classroom {
+	comptes := map[string]map[string]string{}
+	for _, item := range items {
+		org := strings.ToLower(item.Org)
+		if comptes[org] == nil {
+			comptes[org] = map[string]string{}
+		}
+		for login, nom := range comptesDe(item.Students) {
+			if comptes[org][login] == "" {
+				comptes[org][login] = nom
+			}
+		}
+	}
+	corriges := make([]Classroom, 0, len(items))
+	for _, item := range items {
+		item.Students = dedupe(sansMarque(item.Students, comptes[strings.ToLower(item.Org)]))
+		corriges = append(corriges, item)
+	}
+	return corriges
 }
 
 // awaitingSession ramène au rang de préfixe hérité un groupe déclaré sous la

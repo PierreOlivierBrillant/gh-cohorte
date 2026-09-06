@@ -161,7 +161,7 @@ func (c Classroom) dottedAssignments(repos []groups.RepoInfo) []Assignment {
 			parNom[cle] = trouve
 		}
 		trouve.Repos++
-		if _, inscrit := connus[strings.ToLower(etudiant)]; inscrit {
+		if _, inscrit := connus.personne(etudiant); inscrit {
 			trouve.Students++
 		} else {
 			trouve.Others++
@@ -207,8 +207,7 @@ func (c Classroom) legacyStudentOf(repoName string) (roster.Person, bool) {
 		if !reconnu {
 			return roster.Person{}, false
 		}
-		student, inscrit := c.fragments()[strings.ToLower(etudiant)]
-		return student, inscrit
+		return c.fragments().personne(etudiant)
 	}
 	for _, student := range c.Students {
 		expression := plan.Matcher(LegacyNamePattern, student)
@@ -240,7 +239,7 @@ func (c Classroom) legacyServed(assignmentID string, repos []groups.RepoInfo) ma
 	if strings.Contains(c.LegacyPrefix, naming.Separator) {
 		connus := c.fragments()
 		for _, repo := range c.legacyRepos(assignmentID, repos) {
-			if student, inscrit := connus[strings.ToLower(repo.Suffix)]; inscrit {
+			if student, inscrit := connus.personne(repo.Suffix); inscrit {
 				servis[strings.ToLower(student.Username)] = true
 			}
 		}

@@ -21,6 +21,9 @@ import (
 type Failure struct {
 	Status  int
 	Message string
+	// Accepted reproduit « X-Accepted-OAuth-Scopes » : c'est par cet en-tête
+	// que GitHub dit quelle portée le point d'API réclame.
+	Accepted string
 }
 
 // RepoState est un dépôt tel que le faux serveur le connaît.
@@ -283,6 +286,9 @@ func (s *Server) handle(writer http.ResponseWriter, request *http.Request) {
 	}
 	if failure, found := state.FailOn[key]; found {
 		state.mutex.Unlock()
+		if failure.Accepted != "" {
+			writer.Header().Set("X-Accepted-OAuth-Scopes", failure.Accepted)
+		}
 		s.send(writer, failure.Status, map[string]string{"message": failure.Message})
 		return
 	}

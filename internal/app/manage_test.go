@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 )
 
@@ -131,7 +133,7 @@ func TestGestionPrefixeInexistant(t *testing.T) {
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	h.contient("Aucun dépôt ne commence par « tp9- »")
+	h.contient("Aucun dépôt dans « tp9 »")
 }
 
 func TestGestionChangerDeGroupe(t *testing.T) {
@@ -313,21 +315,85 @@ func TestGestionSuppressionConfirmee(t *testing.T) {
 	h.contient("Groupe « tp1 » — 2 dépôt(s)")
 }
 
-func TestGestionSuppressionPorteeManquante(t *testing.T) {
+// Refuser le renouvellement laisse tout en place : la suppression ne part même
+// pas, puisqu'elle serait refusée.
+func TestGestionSuppressionPorteeManquanteRefusee(t *testing.T) {
 	state := groupe(t)
 	state.Scopes = "repo, read:org"
-	state.FailOn["DELETE /repos/acme/tp1-jlpicard"] = fakegh.Failure{
-		Status: 403, Message: "Must have admin rights to Repository. (delete_repo scope)",
-	}
 	h := gestion(t, state, "tp1")
 
-	code, _ := h.script("supprimer", "tp1-jlpicard", "tp1-jlpicard", "quitter")
+	code, _ := h.script("supprimer", "tp1-jlpicard", "non", "quitter")
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	h.contient("gh auth refresh -s delete_repo", "Suppression impossible")
+	h.contient("n'a pas la portée « delete_repo »", "Annulé : rien n'a été supprimé")
 	if _, existe := state.Repos["acme/tp1-jlpicard"]; !existe {
 		t.Error("rien ne doit être supprimé")
+	}
+	if state.CallCount("DELETE /repos/acme/tp1-jlpicard") != 0 {
+		t.Error("la suppression n'aurait pas dû être tentée")
+	}
+}
+
+// Accepter le renouvellement obtient la portée et la suppression se poursuit,
+// sans qu'il faille relancer l'outil.
+func TestGestionSuppressionApresRenouvellement(t *testing.T) {
+	state := groupe(t)
+	state.Scopes = "repo, read:org"
+	h := gestion(t, state, "tp1")
+	h.Refresher = accordeLesPortees(state, nil)
+
+	code, _ := h.script("supprimer", "tp1-jlpicard", "oui", "tp1-jlpicard", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Jeton renouvelé", "« tp1-jlpicard » supprimé")
+	if _, existe := state.Repos["acme/tp1-jlpicard"]; existe {
+		t.Error("le dépôt aurait dû être supprimé")
+	}
+}
+
+// Un jeton « fine-grained » n'annonce aucune portée : rien ne peut être vérifié
+// d'avance, et c'est le refus de GitHub qui déclenche la proposition. La
+// suppression n'ayant pas eu lieu, elle se reprend.
+func TestGestionSuppressionRepriseApresRefusDeGitHub(t *testing.T) {
+	state := groupe(t)
+	state.Scopes = ""
+	echec := "DELETE /repos/acme/tp1-jlpicard"
+	state.FailOn[echec] = fakegh.Failure{
+		Status: 403, Message: "Must have admin rights to Repository.", Accepted: "delete_repo",
+	}
+	h := gestion(t, state, "tp1")
+	// Le jeton renouvelé est celui que GitHub accepte : le refus disparaît.
+	h.Refresher = accordeLesPortees(state, func() { delete(state.FailOn, echec) })
+
+	code, _ := h.script("supprimer", "tp1-jlpicard", "tp1-jlpicard", "oui", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("« tp1-jlpicard » supprimé")
+	if _, existe := state.Repos["acme/tp1-jlpicard"]; existe {
+		t.Error("le dépôt aurait dû être supprimé")
+	}
+}
+
+// accordeLesPortees imite « gh auth refresh » : il accorde ce qui lui est
+// demandé, comme GitHub le ferait après un passage par le navigateur.
+func accordeLesPortees(state *fakegh.State, ensuite func()) *scopes.Refresher {
+	return &scopes.Refresher{
+		Locate: func() (string, error) { return "gh", nil },
+		Run: func(_ context.Context, _ string, args []string, _ scopes.Request) error {
+			for index, argument := range args {
+				if argument == "--scopes" && index+1 < len(args) {
+					state.Scopes = strings.ReplaceAll(args[index+1], ",", ", ")
+				}
+			}
+			if ensuite != nil {
+				ensuite()
+			}
+			return nil
+		},
+		Read: func(string) (string, string) { return "jeton-renouvele", "gh" },
 	}
 }
 
@@ -700,6 +766,98 @@ func TestTravailDeplaceEnSimulation(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("a26.5n6.01.tp1.jlpicard", "Simulation")
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// ---------------------------------------------------- renommer un travail
+
+// cohorteNommee prépare une organisation dont les dépôts suivent la
+// nomenclature courante : c'est là qu'un travail se renomme sans se déplacer.
+func cohorteNommee(t *testing.T) *fakegh.State {
+	t.Helper()
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp1.jlpicard",
+		"a26.5n6.01.tp2.jlpicard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	return state
+}
+
+// L'assistant ouvre un travail de la nomenclature courante et le renomme sur
+// place : le préfixe suit, on reste dans le même travail.
+func TestTravailRenommeDansLAssistant(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	code, _ := h.script("renommer", "projet-final", "oui", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.State.RepoNames("acme")
+	sort.Strings(noms)
+	attendu := "a26.5n6.01.projet-final.emilie-cote," +
+		"a26.5n6.01.projet-final.jlpicard,a26.5n6.01.tp2.jlpicard"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts : %v", noms)
+	}
+	h.contient("Groupe « a26.5n6.01.projet-final »")
+}
+
+// Refuser en fin de course ne laisse rien derrière.
+func TestTravailNonRenommeQuandOnRefuse(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	code, _ := h.script("renommer", "projet-final", "non", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Annulé : rien n'a été renommé.")
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "a26.5n6.01.tp1.jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// « --rename-to » seul renomme sur place : c'est la même opération, scriptable.
+func TestTravailRenommeEnLigneDeCommande(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	h.Options.RenameTo = "Projet final"
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms,
+		"a26.5n6.01.projet-final.jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// La simulation montre le renommage et n'écrit rien.
+func TestTravailRenommeEnSimulation(t *testing.T) {
+	h := gestion(t, cohorteNommee(t), "a26.5n6.01.tp1")
+	h.Options.RenameTo = "projet-final"
+	h.Options.DryRun = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("a26.5n6.01.projet-final.jlpicard", "Simulation")
+	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "a26.5n6.01.tp1.jlpicard") {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// Un préfixe qui ne dit pas à quel groupe il appartient ne peut pas être
+// renommé sur place : le refus renvoie vers le déplacement, qui donne un nom au
+// passage.
+func TestTravailSansPlaceRefuseLeRenommage(t *testing.T) {
+	h := gestion(t, groupe(t), "tp1")
+	h.Options.RenameTo = "projet-final"
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitValidation {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Déplacez-le d'abord")
 	if noms := h.State.RepoNames("acme"); !slices.Contains(noms, "tp1-jlpicard") {
 		t.Fatalf("dépôts : %v", noms)
 	}

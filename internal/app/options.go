@@ -33,7 +33,8 @@ type Options struct {
 	SortDesc   bool
 	Assignment string
 	// MoveTo déplace le travail ouvert vers une place de la nomenclature
-	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra.
+	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra. Sans
+	// MoveTo, RenameTo renomme le travail là où il est déjà.
 	MoveTo           string
 	RenameTo         string
 	Template         string
@@ -63,7 +64,11 @@ type Options struct {
 	NoSaveConfig     bool
 	NoCache          bool
 	ClearCache       bool
-	ShowVersion      bool
+	// RefreshToken régénère le jeton GitHub avec les portées de Scopes, puis
+	// quitte. Scopes vide vaut pour toutes celles dont l'outil se sert.
+	RefreshToken bool
+	Scopes       string
+	ShowVersion  bool
 
 	// Réglés par les tests seulement : jamais exposés en ligne de commande.
 	BaseURL  string
@@ -83,6 +88,8 @@ Utilisation :
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
+  gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
+  gh cohorte --refresh-token --scopes delete_repo
   gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
   gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
 
@@ -98,7 +105,7 @@ Drapeaux :
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
   --move-to PLACE          déplacer le travail géré vers « session.cours.groupe »
-  --rename-to NOM          nom que le travail déplacé prend à l'arrivée
+  --rename-to NOM          nom que le travail prend ; seul, il le renomme sur place
   --template ORG/DEPOT     dépôt modèle (vide = dépôt neuf initialisé)
   --pattern GABARIT        gabarit de nom des dépôts (défaut : {assignment}-{username})
   --starter DOSSIER        dossier local déposé dans chaque dépôt, en un commit
@@ -123,6 +130,8 @@ Drapeaux :
   --no-save-config         ne pas mémoriser les réglages
   --no-cache               ignorer le cache local
   --clear-cache            vider le cache local puis quitter
+  --refresh-token          régénérer le jeton GitHub puis quitter
+  --scopes LISTE           portées à obtenir (défaut : celles dont l'outil se sert)
   --version                afficher la version
 
 Champs des gabarits : %s
@@ -164,7 +173,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
 	set.StringVar(&options.MoveTo, "move-to", "", "place d'arrivée du travail géré")
-	set.StringVar(&options.RenameTo, "rename-to", "", "nom du travail à l'arrivée")
+	set.StringVar(&options.RenameTo, "rename-to", "", "nom que le travail prend")
 	set.StringVar(&options.Pattern, "pattern", "", "gabarit de nom des dépôts")
 	set.StringVar(&options.CommitMessage, "commit-message", "", "message du commit")
 	set.BoolVar(&options.ForceStarter, "force-starter", false, "déposer même dans un dépôt garni")
@@ -187,6 +196,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.BoolVar(&options.NoSaveConfig, "no-save-config", false, "ne pas mémoriser les réglages")
 	set.BoolVar(&options.NoCache, "no-cache", false, "ignorer le cache")
 	set.BoolVar(&options.ClearCache, "clear-cache", false, "vider le cache puis quitter")
+	set.BoolVar(&options.RefreshToken, "refresh-token", false, "régénérer le jeton GitHub")
+	set.StringVar(&options.Scopes, "scopes", "", "portées à obtenir")
 	set.BoolVar(&options.ShowVersion, "version", false, "afficher la version")
 
 	if err := set.Parse(normalizeArgs(args)); err != nil {

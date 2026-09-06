@@ -20,6 +20,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/web"
 )
 
@@ -28,12 +29,20 @@ import (
 type harnais struct {
 	t       *testing.T
 	State   *fakegh.State
+	Github  *ghapi.Client
 	Serveur *web.Server
 	Client  *http.Client
 	Base    string
 }
 
 func nouveau(t *testing.T, state *fakegh.State) *harnais {
+	t.Helper()
+	return nouveauAvec(t, state, nil)
+}
+
+// nouveauAvec laisse le test retoucher les dépendances de l'interface : c'est
+// par là qu'un faux « gh auth refresh » remplace le vrai.
+func nouveauAvec(t *testing.T, state *fakegh.State, ajuster func(*web.Deps)) *harnais {
 	t.Helper()
 	if state == nil {
 		state = fakegh.NewState()
@@ -59,18 +68,23 @@ func nouveau(t *testing.T, state *fakegh.State) *harnais {
 	// fait à l'arrivée, et l'API s'y tient.
 	reglages := config.Default()
 	reglages.Org = "acme"
-	serveur, err := web.New(web.Deps{
-		Client:     client,
-		Cache:      cache.NewIn(filepath.Join(dossier, "cache"), true),
-		Settings:   reglages,
-		ConfigFile: filepath.Join(dossier, "config.json"),
-		Viewer:     state.Viewer,
-		Host:       "github.com",
-		Version:    "test",
-		ReportDir:  filepath.Join(dossier, "rapports"),
-		Jobs:       2,
-		SaveConfig: true,
-	})
+	deps := web.Deps{
+		Client:      client,
+		Cache:       cache.NewIn(filepath.Join(dossier, "cache"), true),
+		Settings:    reglages,
+		ConfigFile:  filepath.Join(dossier, "config.json"),
+		Viewer:      state.Viewer,
+		Host:        "github.com",
+		TokenOrigin: "oauth_token",
+		Version:     "test",
+		ReportDir:   filepath.Join(dossier, "rapports"),
+		Jobs:        2,
+		SaveConfig:  true,
+	}
+	if ajuster != nil {
+		ajuster(&deps)
+	}
+	serveur, err := web.New(deps)
 	if err != nil {
 		t.Fatalf("interface web : %v", err)
 	}
@@ -93,7 +107,7 @@ func nouveau(t *testing.T, state *fakegh.State) *harnais {
 		t.Fatalf("bocal à témoins : %v", err)
 	}
 	h := &harnais{
-		t: t, State: state, Serveur: serveur, Base: serveur.Address(),
+		t: t, State: state, Github: client, Serveur: serveur, Base: serveur.Address(),
 		Client: &http.Client{Jar: jar, Timeout: 20 * time.Second},
 	}
 	// L'adresse remise dans le terminal ouvre la session et pose le témoin.
@@ -147,6 +161,14 @@ func (h *harnais) json(methode, chemin string, corps any, cible any) {
 	if cible == nil {
 		return
 	}
+	if err := json.Unmarshal(contenu, cible); err != nil {
+		h.t.Fatalf("réponse illisible (%s) : %v", contenu, err)
+	}
+}
+
+// decoder lit un corps de réponse déjà lu, refus compris.
+func (h *harnais) decoder(contenu []byte, cible any) {
+	h.t.Helper()
 	if err := json.Unmarshal(contenu, cible); err != nil {
 		h.t.Fatalf("réponse illisible (%s) : %v", contenu, err)
 	}
@@ -293,18 +315,18 @@ func TestEcritureSansEnteteRefusee(t *testing.T) {
 func TestContexteDecritLaSession(t *testing.T) {
 	h := nouveau(t, nil)
 	var contexte struct {
-		Viewer   string            `json:"viewer"`
-		Version  string            `json:"version"`
-		Scopes   map[string]string `json:"scopes"`
-		Settings config.Settings   `json:"settings"`
+		Viewer   string          `json:"viewer"`
+		Version  string          `json:"version"`
+		Token    jeton           `json:"token"`
+		Settings config.Settings `json:"settings"`
 	}
 	h.json(http.MethodGet, "/api/context", nil, &contexte)
 
 	if contexte.Viewer != "prof" {
 		t.Fatalf("compte %q, attendu « prof »", contexte.Viewer)
 	}
-	if contexte.Scopes["repo"] != "présente" {
-		t.Fatalf("portée repo : %q", contexte.Scopes["repo"])
+	if etat := contexte.Token.etat("repo"); etat != scopes.Present {
+		t.Fatalf("portée repo : %q", etat)
 	}
 	if contexte.Settings.NamePattern != config.DefaultNamePattern {
 		t.Fatalf("gabarit %q", contexte.Settings.NamePattern)
@@ -1515,17 +1537,30 @@ func TestMigrationRefuseTantQuUnDepotEstBloque(t *testing.T) {
 	}
 
 	// En acceptant de les laisser en place, la migration passe — mais le
-	// groupe ne bascule pas tant qu'un dépôt reste en arrière.
+	// groupe ne bascule pas tant qu'un dépôt reste en arrière : basculer, ce
+	// serait cesser de le voir.
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+id+"/migration/apply",
 		map[string]any{"session": "a26", "course": "5n6", "group": "01", "skip_blocked": true})
 	resultat, _ := bilan["result"].(map[string]any)
-	if resultat["renamed"] != float64(1) || resultat["skipped"] != float64(1) {
+	if resultat["renamed"] != float64(1) || resultat["skipped"] != float64(1) ||
+		resultat["switched"] != false {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 	noms := h.State.RepoNames("acme")
 	sort.Strings(noms)
 	if strings.Join(noms, ",") != "a26-5n6-tp1-visiteur,a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)
+	}
+
+	// Le groupe est resté à sa place, avec sa liste : c'est de là qu'on reprend
+	// la migration une fois « visiteur » identifié.
+	var reste struct {
+		Prefix string `json:"prefix"`
+		Known  bool   `json:"known"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+id+"?refresh=1", nil, &reste)
+	if !reste.Known || reste.Prefix != "a26-5n6" {
+		t.Fatalf("groupe après migration partielle : %+v", reste)
 	}
 }
 
@@ -1537,8 +1572,9 @@ func TestMigrationRefuseSansNomComplet(t *testing.T) {
 	id := h.heritage("a26-5n6", "aminata-d")
 
 	var apercu struct {
-		Ready   int `json:"ready"`
-		Blocked int `json:"blocked"`
+		Ready   int  `json:"ready"`
+		Blocked int  `json:"blocked"`
+		Switch  bool `json:"switch"`
 		Rows    []struct {
 			Problem string `json:"problem"`
 		} `json:"rows"`
@@ -1547,6 +1583,11 @@ func TestMigrationRefuseSansNomComplet(t *testing.T) {
 		map[string]any{"session": "a26", "course": "5n6", "group": "01"}, &apercu)
 	if apercu.Blocked != 1 || apercu.Ready != 0 {
 		t.Fatalf("aperçu : %+v", apercu)
+	}
+	// L'aperçu annonce déjà que le groupe ne suivra pas : c'est ce que
+	// l'interface affiche quand on accepte de laisser ce dépôt en place.
+	if apercu.Switch {
+		t.Fatalf("le groupe basculerait malgré un dépôt bloqué : %+v", apercu)
 	}
 	if !strings.Contains(apercu.Rows[0].Problem, "aminata-d") {
 		t.Fatalf("raison : %q", apercu.Rows[0].Problem)

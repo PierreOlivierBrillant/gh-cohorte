@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/cli/go-gh/v2/pkg/auth"
 )
@@ -24,11 +25,12 @@ import (
 // Il est sûr d'emploi depuis plusieurs goroutines : la résolution des noms
 // complets et les inventaires interrogent l'API en parallèle.
 type Client struct {
-	rest    *api.RESTClient
 	baseURL string // vide en production : go-gh résout l'hôte lui-même
 	host    string
 
 	mutex   sync.RWMutex
+	options Options // conservées pour reconstruire le client sur un autre jeton
+	rest    *api.RESTClient
 	scopes  string
 	hasSeen bool
 }
@@ -55,17 +57,29 @@ func TokenForHost(host string) (string, string) {
 
 // New construit un client pour l'hôte donné.
 func New(options Options) (*Client, error) {
-	host := options.Host
-	if host == "" {
-		host = DefaultHost()
+	if options.Host == "" {
+		options.Host = DefaultHost()
 	}
-	token := options.Token
-	if token == "" {
-		token, _ = auth.TokenForHost(host)
+	if options.Token == "" {
+		options.Token, _ = auth.TokenForHost(options.Host)
 	}
+	rest, err := newREST(options)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{
+		baseURL: strings.TrimSuffix(options.BaseURL, "/"),
+		host:    options.Host,
+		options: options,
+		rest:    rest,
+	}, nil
+}
+
+// newREST monte le transport de go-gh pour un jeton donné.
+func newREST(options Options) (*api.RESTClient, error) {
 	rest, err := api.NewRESTClient(api.ClientOptions{
-		Host:      host,
-		AuthToken: token,
+		Host:      options.Host,
+		AuthToken: options.Token,
 		Timeout:   30 * time.Second,
 		Headers: map[string]string{
 			"X-GitHub-Api-Version": "2022-11-28",
@@ -76,11 +90,43 @@ func New(options Options) (*Client, error) {
 	if err != nil {
 		return nil, &Error{Message: "Client GitHub inutilisable : " + err.Error()}
 	}
-	return &Client{rest: rest, baseURL: strings.TrimSuffix(options.BaseURL, "/"), host: host}, nil
+	return rest, nil
 }
 
 // Host renvoie l'hôte interrogé.
 func (c *Client) Host() string { return c.host }
+
+// UseToken remplace le jeton sans changer d'objet : le client renouvelé reste
+// le même pour tout ce qui le détient déjà — la session du terminal, l'interface
+// web et les travaux en cours. Les portées annoncées sont oubliées, le nouveau
+// jeton n'ayant pas forcément les mêmes.
+func (c *Client) UseToken(token string) error {
+	if strings.TrimSpace(token) == "" {
+		return &Error{Message: "Jeton vide : le client n'a pas été changé."}
+	}
+	c.mutex.Lock()
+	options := c.options
+	c.mutex.Unlock()
+
+	options.Token = token
+	rest, err := newREST(options)
+	if err != nil {
+		return err
+	}
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.options, c.rest = options, rest
+	c.scopes, c.hasSeen = "", false
+	return nil
+}
+
+// client renvoie le transport courant : il change quand le jeton change.
+func (c *Client) client() *api.RESTClient {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return c.rest
+}
 
 // Scopes renvoie les portées annoncées par GitHub, ou une chaîne vide si
 // aucune réponse ne les a encore révélées (cas d'un jeton « fine-grained »).
@@ -123,7 +169,7 @@ func (c *Client) do(method, path string, body any, allow ...int) (*Response, err
 		payload = bytes.NewReader(encoded)
 	}
 
-	response, err := c.rest.Request(method, c.url(path), payload)
+	response, err := c.client().Request(method, c.url(path), payload)
 	if err != nil {
 		converted := convert(err)
 		status := StatusOf(converted)
@@ -165,19 +211,24 @@ func (c *Client) rememberScopesFromError(err error) {
 	}
 }
 
+// ScopeList énumère les portées annoncées par GitHub. Le second retour vaut
+// faux quand aucune réponse ne les a révélées : rien ne peut alors être affirmé.
+func (c *Client) ScopeList() ([]string, bool) {
+	announced, seen := c.Scopes()
+	if !seen || strings.TrimSpace(announced) == "" {
+		return nil, false
+	}
+	return scopes.Parse(announced), true
+}
+
 // HasScope indique si une portée est présente. Le second retour vaut faux quand
 // GitHub n'annonce aucune portée : rien ne peut alors être affirmé.
 func (c *Client) HasScope(scope string) (bool, bool) {
-	scopes, seen := c.Scopes()
-	if !seen || strings.TrimSpace(scopes) == "" {
+	list, known := c.ScopeList()
+	if !known {
 		return false, false
 	}
-	for _, item := range strings.Split(scopes, ",") {
-		if strings.TrimSpace(item) == scope {
-			return true, true
-		}
-	}
-	return false, true
+	return scopes.Has(list, scope), true
 }
 
 // ---------------------------------------------------------------------- lecture
@@ -425,7 +476,7 @@ func (c *Client) paginate(path string, onPage func(total int), collect func([]by
 	next := c.url(path + separator + "per_page=100")
 	total := 0
 	for next != "" {
-		response, err := c.rest.Request(http.MethodGet, next, nil)
+		response, err := c.client().Request(http.MethodGet, next, nil)
 		if err != nil {
 			return convert(err)
 		}
