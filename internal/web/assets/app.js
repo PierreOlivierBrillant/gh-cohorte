@@ -482,6 +482,7 @@ function cheminDeLaVue(nom) {
     case 'organisation': return '/organisation';
     case 'annuaire': return '/etudiants';
     case 'nouveau-groupe': return '/nouveau-groupe';
+    case 'import': return '/reprise';
     case 'reglages': return '/reglages';
     case 'travaux': return `/g/${groupe}`;
     case 'assistant': return `/g/${groupe}/nouveau-travail`;
@@ -513,6 +514,8 @@ function lireAdresse() {
       };
     case 'etudiants':
       return { vue: 'annuaire' };
+    case 'reprise':
+      return { vue: 'import' };
     case 'nouveau-groupe': case 'reglages': case 'organisation':
       return { vue: morceaux[0] };
     default:
@@ -543,6 +546,7 @@ async function allerA(route) {
     // Une adresse peut ouvrir un écran directement : il faut alors le remplir
     // comme le ferait le bouton qui y mène.
     if (route.vue === 'nouveau-groupe') preparerNouveauGroupe();
+    if (route.vue === 'import') preparerImport();
     afficherVue(route.vue, true);
     return;
   }
@@ -667,6 +671,7 @@ function ficheDeLEntete(nom) {
       // La hiérarchie mène aux étudiants d'un groupe ; l'annuaire les prend
       // dans l'autre sens, et n'appartient donc à aucun niveau du parcours.
       { texte: 'Étudiants', action: () => afficherVue('annuaire') },
+      { texte: 'Reprendre des dépôts', action: () => ouvrirImport() },
       { texte: 'Nouveau groupe', classe: 'vert', action: () => ouvrirNouveauGroupe() },
     ];
     if (!session) {
@@ -695,6 +700,11 @@ function ficheDeLEntete(nom) {
       sousTitre: `Organisation ${etat.organisation} · une personne, les cours qu'elle a suivis`,
       actions: [{ texte: 'Recharger', action: () => chargerAnnuaire(true) }],
     };
+  }
+  if (nom === 'import') {
+    return { fil: [racine, { texte: 'Reprendre des dépôts' }], titre: 'Reprendre des dépôts',
+      sousTitre: `Dépôts de ${etat.organisation} nommés « travail-compte », `
+        + 'comme GitHub Classroom les laisse.' };
   }
   if (nom === 'nouveau-groupe') {
     return { fil: [racine, { texte: 'Nouveau groupe' }], titre: 'Nouveau groupe',
@@ -1021,6 +1031,11 @@ async function retenirOrganisation(org) {
 }
 
 // --------------------------------------------------- déclaration d'un groupe
+
+function ouvrirImport() {
+  preparerImport();
+  afficherVue('import');
+}
 
 function ouvrirNouveauGroupe() {
   preparerNouveauGroupe();
@@ -2878,6 +2893,157 @@ $('cache-vider').addEventListener('click', async () => {
   if (!bilan) return;
   message(`Cache vidé (${bilan.removed} entrée(s)).`);
   dessinerChemins(bilan.paths);
+});
+
+// ------------------------------------------------- reprise de dépôts
+
+// Des dépôts qu'une autre convention a nommés — « travail-compte », ce que
+// GitHub Classroom produit. L'écran suit l'ordre des questions : quel travail,
+// quelle liste, quelle place. Le rapprochement des comptes est montré avant
+// d'écrire, avec la raison qui l'a produit : une suggestion et une preuve ne se
+// lisent pas de la même façon.
+
+let importPlan = null;
+let importTravail = '';
+
+async function preparerImport() {
+  const org = etat.organisation;
+  if (!org) return;
+  const vue = await tenter(() => api('GET', `/api/orgs/${encode(org)}/foreign`), 'Reprise');
+  if (!vue) return;
+
+  $('import-aide-texte').textContent = vue.help || '';
+  const travaux = vue.assignments || [];
+  const conteneur = $('import-travaux');
+  vider(conteneur);
+  importTravail = '';
+  importPlan = null;
+  $('import-plan').hidden = true;
+
+  $('import-resume').textContent = travaux.length
+    ? `${vue.repos.length} dépôt(s) ne suivent pas la nomenclature. Choisissez le travail à reprendre.`
+    : `${vue.repos.length} dépôt(s) hors nomenclature, mais aucun préfixe commun : `
+      + "il n'y a rien à reprendre d'un bloc.";
+
+  for (const travail of travaux) {
+    const choix = el('label', { classe: 'case' },
+      el('input', {
+        type: 'radio', name: 'import-travail', value: travail.prefix,
+        onchange: () => {
+          importTravail = travail.prefix;
+          if (!$('import-nom').value.trim()) $('import-nom').value = travail.prefix;
+        },
+      }),
+      el('span', {}, el('code', { texte: travail.prefix }),
+        el('span', { classe: 'jeton', texte: `${travail.count} dépôt(s)` })));
+    conteneur.append(choix);
+  }
+}
+
+// tonDeScore traduit la sûreté d'un rapprochement en étiquette.
+function tonDeScore(trouve) {
+  if (trouve.ambiguous) return 'non';
+  if (!trouve.entry || !trouve.entry.FullName) return 'non';
+  return trouve.score >= 60 ? 'oui' : '';
+}
+
+function dessinerImport(plan) {
+  importPlan = plan;
+  const avis = $('import-avis');
+  const detail = $('import-detail');
+  vider(avis);
+  vider(detail);
+
+  avis.append(el('div', { classe: 'avis',
+    texte: `${plan.moves.length} dépôt(s) seront renommés vers « ${plan.scope} ».` }));
+  if ((plan.unmatched || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `${plan.unmatched.length} compte(s) ne mènent à personne : leurs dépôts `
+        + 'garderont le nom qu\'ils portent (@' + plan.unmatched.join(', @') + ').' }));
+  }
+  if ((plan.absent || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `${plan.absent.length} étudiant(s) de la liste n'ont pas de dépôt pour ce `
+        + 'travail : ' + plan.absent.join(', ') + '.' }));
+  }
+
+  detail.append(el('p', { classe: 'note', texte: 'Rapprochement des comptes' }));
+  detail.append(el('table', { classe: 'tableau' },
+    el('thead', {}, el('tr', {},
+      el('th', { texte: 'Compte' }), el('th', { texte: 'Étudiant' }),
+      el('th', { texte: 'Reconnu par' }))),
+    el('tbody', {}, (plan.pairings || []).map((trouve) => {
+      const nom = trouve.ambiguous
+        ? 'à trancher : ' + (trouve.rivals || []).join(', ')
+        : (trouve.entry && trouve.entry.FullName) || 'personne trouvée';
+      return el('tr', {},
+        el('td', {}, el('code', { texte: '@' + trouve.login })),
+        el('td', {}, el('span', { classe: 'jeton ' + tonDeScore(trouve), texte: nom })),
+        el('td', { classe: 'note', texte: trouve.reason || '' }));
+    }))));
+
+  detail.append(el('p', { classe: 'note', texte: 'Renommage' }));
+  detail.append(el('table', { classe: 'tableau' },
+    el('thead', {}, el('tr', {},
+      el('th', { texte: 'Dépôt' }), el('th', { texte: 'Deviendra' }))),
+    el('tbody', {}, (plan.moves || []).map((ligne) =>
+      el('tr', {},
+        el('td', {}, el('code', { texte: ligne.repo })),
+        el('td', {}, el('code', { texte: ligne.target })))))));
+
+  $('import-plan').hidden = false;
+}
+
+// corpsImport rassemble ce que les trois premières boîtes disent.
+function corpsImport() {
+  const manque = [];
+  if (!importTravail) manque.push('un travail');
+  const liste = $('import-liste').value.trim();
+  if (!liste) manque.push('la liste des étudiants');
+  const session = $('import-session').value.trim();
+  const cours = $('import-cours').value.trim();
+  const groupe = $('import-groupe').value.trim();
+  if (!session || !cours || !groupe) manque.push("la place d'arrivée");
+  if (manque.length) {
+    $('import-etat').textContent = 'Il manque ' + manque.join(', ') + '.';
+    return null;
+  }
+  $('import-etat').textContent = '';
+  return {
+    prefix: importTravail,
+    name: $('import-nom').value.trim() || importTravail,
+    scope: [session, cours, groupe].join('.'),
+    path: liste,
+  };
+}
+
+$('import-apercu').addEventListener('click', async () => {
+  const corps = corpsImport();
+  if (!corps) return;
+  const plan = await tenter(
+    () => api('POST', `/api/orgs/${encode(etat.organisation)}/import/preview`, corps),
+    'Reprise');
+  if (plan) dessinerImport(plan);
+});
+
+$('import-appliquer').addEventListener('click', async () => {
+  const corps = corpsImport();
+  if (!corps || !importPlan) return;
+  const accord = await demander('Reprendre ces dépôts', el('div', {},
+    el('p', { texte: `${importPlan.moves.length} dépôt(s) seront renommés vers `
+      + `« ${importPlan.scope} ». GitHub garde une redirection depuis chaque ancien nom.` }),
+    el('p', { classe: 'note',
+      texte: 'Le groupe sera déclaré, et les noms montés au registre de l\'organisation.' })),
+    'Reprendre');
+  if (!accord) return;
+
+  const fiche = await tenter(
+    () => api('POST', `/api/orgs/${encode(etat.organisation)}/import`, corps), 'Reprise');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (!bilan) return;
+  message(`${bilan.renamed} dépôt(s) repris dans « ${bilan.scope} ».`);
+  await ouvrirGroupe(bilan.scope, true);
 });
 
 // ------------------------------------------------------ registre des étudiants

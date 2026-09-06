@@ -1,0 +1,201 @@
+package web
+
+import (
+	"net/http"
+	"strings"
+
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+)
+
+// Reprendre des dépôts qu'une autre convention a nommés — ceux de GitHub
+// Classroom, « travail-compte ». Trois routes, dans l'ordre des questions :
+// ce que l'organisation porte hors nomenclature, ce qu'une importation ferait,
+// et enfin l'importation elle-même.
+
+// importInput est ce que l'interface envoie pour préparer ou lancer.
+type importInput struct {
+	// Prefix est le travail tel que les dépôts le portent, Name celui qu'il
+	// prendra à l'arrivée.
+	Prefix string `json:"prefix"`
+	Name   string `json:"name"`
+	// Scope est la place d'arrivée : « a26.5n6.1030 ».
+	Scope string `json:"scope"`
+	// Path est le fichier de la liste ; People la remplace quand la personne a
+	// corrigé un rapprochement à l'écran.
+	Path   string          `json:"path"`
+	People []roster.Person `json:"people"`
+}
+
+// handleForeign montre ce que l'organisation porte hors nomenclature.
+func (s *Server) handleForeign(writer http.ResponseWriter, request *http.Request) {
+	org, err := valid.Login(request.PathValue("org"), "Organisation")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	repos, source, err := s.repos(org, request.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	dehors := classroom.ForeignOf(repos)
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"repos": dehors.Repos, "assignments": dehors.Assignments,
+		"source": source, "help": roster.OmnivoxHelp,
+	})
+}
+
+// importPlan compose ce qu'une importation ferait.
+//
+// La liste vient du fichier, ou de ce que l'interface renvoie après correction :
+// un rapprochement se juge à l'écran, et ce jugement doit pouvoir l'emporter.
+func (s *Server) importPlan(org string, body importInput) (
+	classroom.Import, classroom.Classroom, error) {
+	var vide classroom.Classroom
+	arrivee, err := classroom.AtScope(org, body.Scope, classroom.DefaultsFrom(s.Settings()))
+	if err != nil {
+		return classroom.Import{}, vide, err
+	}
+	repos, _, err := s.repos(org, false)
+	if err != nil {
+		return classroom.Import{}, vide, err
+	}
+
+	entrees := make([]roster.Entry, 0, len(body.People))
+	for _, personne := range body.People {
+		entrees = append(entrees, roster.Entry{
+			FullName: personne.FullName, Username: personne.Username,
+		})
+	}
+	if len(entrees) == 0 {
+		liste, err := roster.Load(body.Path)
+		if err != nil {
+			return classroom.Import{}, vide, err
+		}
+		if len(liste.Entries) == 0 {
+			return classroom.Import{}, vide, valid.Errorf(
+				"Aucun étudiant dans « %s ».", body.Path)
+		}
+		entrees = liste.Entries
+	}
+
+	plan, err := classroom.PlanImport(arrivee, body.Prefix, body.Name, entrees,
+		s.profiles(org, body.Prefix, repos), repos)
+	return plan, arrivee, err
+}
+
+// handleImportPreview montre le renommage sans rien écrire.
+func (s *Server) handleImportPreview(writer http.ResponseWriter, request *http.Request) {
+	org, body, err := s.importRequest(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	plan, _, err := s.importPlan(org, body)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, plan)
+}
+
+// handleImport renomme les dépôts, déclare le groupe, et confie les noms au
+// registre.
+func (s *Server) handleImport(writer http.ResponseWriter, request *http.Request) {
+	org, body, err := s.importRequest(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	plan, arrivee, err := s.importPlan(org, body)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if !plan.Ready() {
+		fail(writer, valid.Errorf("Aucun dépôt à reprendre pour « %s ».", body.Prefix))
+		return
+	}
+	// Le registre passe en premier : un nom qui n'y monterait pas ne serait
+	// connu que de ce poste.
+	if err := s.apprendre(org, plan.Students...); err != nil {
+		fail(writer, err)
+		return
+	}
+
+	label := "Reprise de « " + plan.Prefix + " » vers " + arrivee.Scope()
+	job := s.jobs.Start("importation", label, func(job *Job) (any, error) {
+		renommes, echecs := 0, 0
+		var suivis []groups.Renamed
+		for index, ligne := range plan.Moves {
+			if job.Canceled() {
+				break
+			}
+			apres, err := s.deps.Client.RenameRepo(org, ligne.Repo, ligne.Target)
+			if err != nil {
+				echecs++
+				job.Line(ligne.Repo+" : échec — "+err.Error(),
+					map[string]string{"status": "échec"})
+			} else {
+				renommes++
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
+				job.Line(ligne.Repo+" → "+ligne.Target,
+					map[string]string{"status": "mis à jour"})
+			}
+			job.Progress(index+1, len(plan.Moves), ligne.Repo)
+		}
+		s.renamed(org, suivis)
+
+		enregistre, err := s.classrooms.Save(arrivee.With(plan.Students...))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"renamed": renommes, "failed": echecs,
+			"scope": enregistre.Scope(), "students": len(plan.Students),
+		}, nil
+	})
+	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
+// importRequest lit l'organisation et le corps d'une demande d'importation.
+func (s *Server) importRequest(request *http.Request) (string, importInput, error) {
+	var body importInput
+	org, err := valid.Login(request.PathValue("org"), "Organisation")
+	if err != nil {
+		return "", body, err
+	}
+	if err := decode(request, &body); err != nil {
+		return "", body, err
+	}
+	if strings.TrimSpace(body.Prefix) == "" {
+		return "", body, valid.Errorf("Aucun travail à reprendre n'a été indiqué.")
+	}
+	return org, body, nil
+}
+
+// profiles demande à GitHub le nom affiché des comptes d'un travail. C'est
+// l'indice le plus sûr après le numéro d'étudiant, et il ne coûte qu'une
+// requête par compte inconnu.
+func (s *Server) profiles(org, prefix string, repos []groups.RepoInfo) map[string]string {
+	groupe := groups.Build(prefix, repos)
+	pairs := make([]identity.Pair, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		pairs = append(pairs, identity.Pair{Repo: depot.Suffix, Login: depot.Suffix})
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	noms := s.resolver(org).Resolve(pairs, true, nil)
+	profils := map[string]string{}
+	for compte, nom := range noms {
+		if nom != "" {
+			profils[strings.ToLower(compte)] = nom
+		}
+	}
+	return profils
+}

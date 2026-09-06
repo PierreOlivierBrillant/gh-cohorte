@@ -471,6 +471,15 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
    assez aérée pour qu'une case reste facile à viser. */
 .cases-travaux { display: flex; flex-direction: column; gap: .4rem; margin-top: .35rem; }
 
+/* Reprise de dépôts : les champs de la place d'arrivée tiennent sur une ligne
+   tant qu'il y a la largeur, et se replient sinon. */
+.ligne-champs { display: flex; flex-wrap: wrap; gap: .75rem 1rem; }
+.aide-omnivox {
+  margin: .5rem 0 0; padding: .6rem .75rem; white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem;
+  background: var(--fond-doux); border-radius: 4px; line-height: 1.5;
+}
+
 .rangee.serree { gap: .6rem; }
 .rangee.serree > .champ-bloc { flex: 1 1 5rem; }
 

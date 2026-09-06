@@ -100,6 +100,28 @@ Les lignes vides et celles commençant par `#` sont ignorées ; chaque ligne
 rejetée est signalée avec son numéro et la raison, et le reste du fichier
 continue d'être lu.
 
+**La liste d'Omnivox se lit telle quelle**, sans rien convertir : son encodage
+Windows-1252, ses champs `="…"` et ses colonnes séparées « Nom » et « Prénom »
+sont reconnus. Dans Léa : *Liste des étudiants › Paramètres d'affichage*, mode
+« Pour Excel », séparateur `;`, et cochez **Numéro d'étudiant**, **Nom de
+l'étudiant** et **Code permanent**.
+
+Elle ne dit pas les comptes GitHub. Ajoutez-lui une colonne `GitHub` si vous les
+connaissez ; sinon l'outil les rapproche des noms et des numéros d'étudiant, et
+montre chaque rapprochement — avec ce qui l'a produit — avant d'écrire.
+
+## Reprendre des dépôts existants
+
+Des dépôts nommés `travail-compte`, comme GitHub Classroom les laisse, se
+reprennent d'un bloc : l'outil lit les travaux que leurs préfixes dessinent,
+rapproche les comptes des étudiants de la liste, puis renomme vers la
+nomenclature. GitHub garde une redirection depuis chaque ancien nom.
+
+```bash
+gh cohorte --import                                    # lister les travaux repérés
+gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+```
+
 ## Nommage des dépôts
 
 Un dépôt porte **cinq niveaux, séparés par un point** :
@@ -209,6 +231,8 @@ Les plus courantes :
 | `--roster FICHIER` | liste « nom complet, compte GitHub » au format CSV |
 | `--assignment NOM` | identifiant du travail |
 | `--manage [PREFIXE]` | gérer un groupe existant au lieu d'en créer un |
+| `--import [TRAVAIL]` | reprendre des dépôts nommés « travail-compte » |
+| `--into PLACE` | place d'arrivée d'une reprise (« a26.5n6.1030 ») |
 | `--template ORG/DEPOT` | dépôt modèle |
 | `--starter DOSSIER` | dossier local déposé dans chaque dépôt, en un commit |
 | `--dry-run` | simuler sans rien créer |

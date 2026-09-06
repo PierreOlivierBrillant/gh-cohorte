@@ -21,6 +21,23 @@ import (
 // dernier champ d'une ligne qui se termine par un séparateur reste vide, et
 // une colonne vide de plus ne doit pas décaler la lecture des en-têtes.
 
+// OmnivoxHelp dit où prendre la liste et comment la régler. Le texte vit dans
+// le paquet qui lit ce format, pour que les trois interfaces l'expliquent de la
+// même façon.
+const OmnivoxHelp = `Dans Léa : Liste des étudiants › Paramètres d'affichage.
+  1. Mode d'affichage      : « Pour Excel »
+  2. Séparateur            : «  ; »  (point-virgule)
+  3. Éléments à inclure    : cochez « Numéro d'étudiant », « Nom de l'étudiant »
+                             et « Code permanent ». Décochez le reste.
+  4. Visualiser, puis enregistrez le fichier .csv proposé.
+
+Le fichier arrive en Windows-1252 avec des champs « ="…" » : l'outil le lit tel
+quel, il n'y a rien à convertir.
+
+Ajoutez-y une colonne « GitHub » si vous connaissez les comptes ; sans elle,
+l'outil les rapproche des noms et des numéros d'étudiant, et vous montre chaque
+rapprochement avant d'écrire.`
+
 // decode rend un contenu lisible, quel que soit son encodage.
 //
 // La règle est sûre dans les deux sens : un texte accentué en Windows-1252

@@ -90,6 +90,78 @@
 
   </section>
 
+  <!-- ----------------------------------------------- reprise de dépôts -->
+  <!-- Des dépôts qu'une autre convention a nommés — « travail-compte », ce que
+       GitHub Classroom produit. L'écran suit l'ordre des questions : quels
+       travaux sont là, qui est derrière chaque compte, où cela doit arriver. -->
+  <section id="vue-import" class="vue" hidden>
+    <div class="boite">
+      <div class="boite-entete"><strong>1. Le travail à reprendre</strong></div>
+      <div class="boite-corps">
+        <p class="note" id="import-resume"></p>
+        <div id="import-travaux" class="cases-travaux"></div>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>2. La liste des étudiants</strong></div>
+      <div class="boite-corps">
+        <details id="import-aide">
+          <summary>Où prendre cette liste dans Omnivox ?</summary>
+          <pre class="aide-omnivox" id="import-aide-texte"></pre>
+        </details>
+        <label class="champ-bloc">
+          <span class="etiquette">Fichier de la liste</span>
+          <span class="ligne-champ">
+            <input type="text" id="import-liste" class="champ"
+              placeholder="ListeEtudiants_cours…_gr….csv">
+            <button type="button" class="bouton" data-parcourir="import-liste"
+              data-titre="Choisir la liste des étudiants">Parcourir…</button>
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>3. La place d'arrivée</strong></div>
+      <div class="boite-corps">
+        <div class="ligne-champs">
+          <label class="champ-bloc etroit-champ">
+            <span class="etiquette">Session</span>
+            <input type="text" id="import-session" class="champ" placeholder="a26">
+          </label>
+          <label class="champ-bloc etroit-champ">
+            <span class="etiquette">Cours</span>
+            <input type="text" id="import-cours" class="champ" placeholder="5N6">
+          </label>
+          <label class="champ-bloc etroit-champ">
+            <span class="etiquette">Groupe</span>
+            <input type="text" id="import-groupe" class="champ" placeholder="1030">
+          </label>
+          <label class="champ-bloc etroit-champ">
+            <span class="etiquette">Nom du travail à l'arrivée</span>
+            <input type="text" id="import-nom" class="champ">
+          </label>
+        </div>
+      </div>
+      <div class="boite-pied">
+        <button type="button" id="import-apercu" class="bouton">Voir ce qui serait repris</button>
+        <span class="note" id="import-etat"></span>
+      </div>
+    </div>
+
+    <div class="boite" id="import-plan" hidden>
+      <div class="boite-entete"><strong>4. Ce qui sera repris</strong></div>
+      <div class="boite-corps">
+        <div id="import-avis" class="avis-pile"></div>
+        <div id="import-detail"></div>
+      </div>
+      <div class="boite-pied">
+        <button type="button" id="import-appliquer" class="bouton vert">Reprendre ces dépôts</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ------------------------------- annuaire : les étudiants de l'organisation -->
   <!-- La hiérarchie descend jusqu'aux étudiants d'un groupe ; celle-ci les prend
        à l'envers : une personne par ligne, et les cours qu'elle a suivis en

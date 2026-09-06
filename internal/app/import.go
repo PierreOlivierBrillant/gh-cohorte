@@ -21,23 +21,6 @@ import (
 // chaque compte, où cela doit arriver. Rien n'est écrit avant le récapitulatif
 // et l'accord.
 
-// OmnivoxHelp explique comment obtenir la liste qu'attend l'importation. Le
-// texte est ici, dans le domaine de l'assistant, pour que les trois interfaces
-// disent la même chose.
-const OmnivoxHelp = `Dans Léa : Liste des étudiants › Paramètres d'affichage.
-  1. Mode d'affichage      : « Pour Excel »
-  2. Séparateur            : «  ; »  (point-virgule)
-  3. Éléments à inclure    : cochez « Numéro d'étudiant », « Nom de l'étudiant »
-                             et « Code permanent ». Décochez le reste.
-  4. Visualiser, puis enregistrez le fichier .csv proposé.
-
-Le fichier arrive en Windows-1252 avec des champs « ="…" » : l'outil le lit tel
-quel, il n'y a rien à convertir.
-
-Ajoutez-y une colonne « GitHub » si vous connaissez les comptes ; sans elle,
-l'outil les rapproche des noms et des numéros d'étudiant, et vous montre chaque
-rapprochement avant d'écrire.`
-
 // importSession tient l'écran d'importation.
 type importSession struct {
 	session *Session
@@ -155,7 +138,7 @@ func (i *importSession) charger() ([]roster.Entry, error) {
 		}
 		console.Blank()
 		console.Heading("Liste des étudiants")
-		for _, ligne := range strings.Split(OmnivoxHelp, "\n") {
+		for _, ligne := range strings.Split(roster.OmnivoxHelp, "\n") {
 			console.Note("%s", ligne)
 		}
 		reponse, err := i.session.Prompt.Ask(ui.Question{
