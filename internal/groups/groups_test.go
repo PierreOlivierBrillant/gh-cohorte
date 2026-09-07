@@ -281,3 +281,63 @@ func TestInventaireSansUnDepotSupprime(t *testing.T) {
 		t.Error("retirer un dépôt absent ne doit rien changer")
 	}
 }
+
+func TestSplitRetireLeCompteQuiTermineLeNom(t *testing.T) {
+	cas := []struct {
+		nom, compte, travail string
+		coupe                bool
+	}{
+		// Le cas qui motive la fonction : deux tirets dans le travail, un dans
+		// le nom du compte, et rien dans le nom seul ne dit où couper.
+		{"kickmyb-firebase-Walid7Akk", "Walid7Akk", "kickmyb-firebase", true},
+		{"tp1-jlpicard", "jlpicard", "tp1", true},
+		{"tp1-JLPicard", "jlpicard", "tp1", true},
+		{"a26.5n6.01.tp1.emilie-cote", "emilie-cote", "a26.5n6.01.tp1", true},
+		// Le compte doit terminer le nom, et être détaché.
+		{"tp1-jlpicard-bis", "jlpicard", "", false},
+		{"tp1jlpicard", "jlpicard", "", false},
+		{"jlpicard", "jlpicard", "", false},
+		{"tp1-jlpicard", "", "", false},
+	}
+	for _, essai := range cas {
+		travail, coupe := groups.Split(essai.nom, essai.compte)
+		if coupe != essai.coupe || travail != essai.travail {
+			t.Errorf("Split(%q, %q) = %q, %v ; attendu %q, %v",
+				essai.nom, essai.compte, travail, coupe, essai.travail, essai.coupe)
+		}
+	}
+}
+
+func TestOwnerPrefereLeCompteQueLeNomPorte(t *testing.T) {
+	// L'enseignant a aussi accès au dépôt : c'est le nom qui tranche.
+	compte, sur := groups.Owner("kickmyb-firebase-Walid7Akk",
+		[]string{"prof-cegep", "Walid7Akk"})
+	if !sur || compte != "Walid7Akk" {
+		t.Fatalf("Owner = %q, %v", compte, sur)
+	}
+}
+
+func TestOwnerPrendLeCompteLePlusLong(t *testing.T) {
+	compte, sur := groups.Owner("tp1-walid7akk", []string{"akk", "walid7akk"})
+	if !sur || compte != "walid7akk" {
+		t.Fatalf("Owner = %q, %v", compte, sur)
+	}
+}
+
+func TestOwnerSeContenteDunAccesUnique(t *testing.T) {
+	// Rien dans « projet-equipe-3 » ne nomme personne : l'accès seul suffit.
+	compte, sur := groups.Owner("projet-equipe-3", []string{"emilie-cote"})
+	if !sur || compte != "emilie-cote" {
+		t.Fatalf("Owner = %q, %v", compte, sur)
+	}
+}
+
+func TestOwnerNeTranchePasEntreDeuxInconnus(t *testing.T) {
+	if compte, sur := groups.Owner("projet-equipe-3",
+		[]string{"emilie-cote", "jlpicard"}); sur {
+		t.Fatalf("Owner = %q, %v : rien ne désigne l'un plutôt que l'autre", compte, sur)
+	}
+	if compte, sur := groups.Owner("tp1-personne", nil); sur {
+		t.Fatalf("Owner = %q, %v : aucun accès ne mène à personne", compte, sur)
+	}
+}

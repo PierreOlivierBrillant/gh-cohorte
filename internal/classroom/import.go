@@ -71,7 +71,21 @@ type Import struct {
 	NamedOnly bool `json:"named_only"`
 	// Absent nomme les personnes de la liste qu'aucun dépôt ne concerne.
 	Absent []string `json:"absent"`
+	// Splits nomme les travaux distincts que les accès ont révélés sous le
+	// préfixe demandé. Un seul dans le cas ordinaire ; plusieurs veut dire que
+	// le préfixe est un fourre-tout — « kickmyb » pour « kickmyb-firebase » et
+	// « kickmyb-android » —, qu'il n'y a rien à reprendre tel quel, et qu'il
+	// faut choisir lequel.
+	Splits []groups.Detected `json:"splits"`
+	// Unconfirmed nomme les dépôts dont aucun accès n'a désigné la personne :
+	// leur compte est celui que le nom porte, faute de mieux, et c'est le seul
+	// endroit où il peut encore être faux.
+	Unconfirmed []string `json:"unconfirmed"`
 }
+
+// Divided dit que le préfixe demandé couvre plusieurs travaux : il y a une
+// question à poser avant de pouvoir écrire quoi que ce soit.
+func (i Import) Divided() bool { return len(i.Splits) > 1 }
 
 // Ready dit qu'il y a quelque chose à écrire.
 func (i Import) Ready() bool { return len(i.Moves) > 0 }
@@ -88,6 +102,12 @@ type ImportRequest struct {
 	// Profiles associe un compte au nom affiché de son profil GitHub. C'est
 	// l'indice le plus sûr après le numéro d'étudiant ; il peut être nil.
 	Profiles map[string]string
+	// Owners donne, pour un nom de dépôt, le compte GitHub que ses accès
+	// désignent. C'est la seule source sûre : un nom de dépôt ne dit pas où
+	// finit le travail, et le découper au jugé invente des comptes qui
+	// n'existent pas. Ce que la carte ne dit pas retombe sur le nom, faute de
+	// mieux — voir « Unconfirmed ».
+	Owners map[string]string
 	// Guess autorise le rapprochement des comptes que la liste ne nomme pas.
 	//
 	// Une fois qu'on a corrigé un rapprochement à l'écran, non : le jugement
@@ -113,18 +133,34 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 	if groupe.Len() == 0 {
 		return Import{}, valid.Errorf("Aucun dépôt ne commence par « %s ».", prefix)
 	}
-	if strings.TrimSpace(name) == "" {
-		name = prefix
-	}
 
-	comptes := make([]string, 0, groupe.Len())
-	for _, depot := range groupe.Repos {
-		comptes = append(comptes, depot.Suffix)
+	// Les accès disent qui est derrière chaque dépôt ; le nom, lui, ne dit
+	// alors plus que le travail. Un préfixe qui en cache plusieurs se voit ici,
+	// et nulle part ailleurs.
+	lus := lire(groupe, demande.Owners)
+	travaux := parTravail(lus, groupe.Prefix)
+	if len(travaux) > 1 {
+		return Import{Prefix: groupe.Prefix, Name: name, Scope: arrivee.Scope(),
+			Splits: travaux, NamedOnly: demande.NamedOnly}, nil
 	}
-	rapprochements := pair(entries, comptes, demande.Profiles, demande.Guess)
+	travail := travaux[0].Prefix
+	// Le nom laissé tel quel suit le travail que les accès ont révélé : qui a
+	// choisi « kickmyb » sans y toucher visait « kickmyb-firebase », le seul
+	// travail qui s'y trouvait. Un nom tapé, lui, est un choix, et il tient.
+	if strings.TrimSpace(name) == "" || strings.EqualFold(strings.TrimSpace(name), prefix) {
+		name = travail
+	}
+	groupe = groups.Group{Prefix: travail, Repos: comptes(lus)}
+
+	logins := make([]string, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		logins = append(logins, depot.Suffix)
+	}
+	rapprochements := pair(entries, logins, demande.Profiles, demande.Guess)
 
 	plan := Import{Prefix: groupe.Prefix, Name: name, Scope: arrivee.Scope(),
-		Pairings: rapprochements, NamedOnly: demande.NamedOnly}
+		Pairings: rapprochements, NamedOnly: demande.NamedOnly,
+		Splits: travaux, Unconfirmed: sansAcces(lus)}
 	connus := make([]roster.Person, 0, len(rapprochements))
 	vus := map[string]bool{}
 	nommes := map[string]bool{}
@@ -155,6 +191,90 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 	}
 	plan.Moves = lignes
 	return plan, nil
+}
+
+// depotLu est un dépôt du travail, tel que ses accès l'éclairent : le compte de
+// la personne, le travail que son nom porte une fois ce compte retiré, et si
+// tout cela vient des accès ou seulement du nom.
+type depotLu struct {
+	repo    groups.Repo
+	login   string
+	travail string
+	sur     bool
+}
+
+// lire relit les dépôts d'un préfixe à la lumière des accès. Sans accès connu,
+// le nom reste seul juge — c'est ce que faisait l'outil avant de savoir les
+// lire, et ce qu'il continue de faire pour un dépôt auquel personne n'est
+// rattaché.
+func lire(groupe groups.Group, proprietaires map[string]string) []depotLu {
+	lus := make([]depotLu, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		lu := depotLu{repo: depot, login: depot.Suffix, travail: groupe.Prefix}
+		if login := strings.TrimSpace(proprietaires[depot.Name]); login != "" {
+			lu.login, lu.sur = login, true
+			if travail, coupe := groups.Split(depot.Name, login); coupe {
+				lu.travail = travail
+			}
+		}
+		lus = append(lus, lu)
+	}
+	return lus
+}
+
+// parTravail range les dépôts par le travail que leur nom porte, du plus fourni
+// au moins fourni. Un préfixe ordinaire n'en donne qu'un ; un fourre-tout en
+// donne autant qu'il en cache.
+func parTravail(lus []depotLu, defaut string) []groups.Detected {
+	comptes := map[string]int{}
+	tels := map[string]string{} // minuscules → travail tel qu'il s'écrit
+	for _, lu := range lus {
+		nom := lu.travail
+		if strings.TrimSpace(nom) == "" {
+			nom = defaut
+		}
+		cle := strings.ToLower(nom)
+		comptes[cle]++
+		if _, deja := tels[cle]; !deja {
+			tels[cle] = nom
+		}
+	}
+	travaux := make([]groups.Detected, 0, len(comptes))
+	for cle, combien := range comptes {
+		travaux = append(travaux, groups.Detected{Prefix: tels[cle], Count: combien})
+	}
+	sort.Slice(travaux, func(i, j int) bool {
+		if travaux[i].Count != travaux[j].Count {
+			return travaux[i].Count > travaux[j].Count
+		}
+		return travaux[i].Prefix < travaux[j].Prefix
+	})
+	return travaux
+}
+
+// comptes rend les dépôts avec, pour dernier niveau, le compte que les accès
+// désignent. Tout ce qui suit — le rapprochement, le renommage, le repli quand
+// personne n'est connu — s'appuie sur ce champ, et n'a donc rien à savoir des
+// accès.
+func comptes(lus []depotLu) []groups.Repo {
+	depots := make([]groups.Repo, 0, len(lus))
+	for _, lu := range lus {
+		depot := lu.repo
+		depot.Suffix = lu.login
+		depots = append(depots, depot)
+	}
+	return depots
+}
+
+// sansAcces nomme les dépôts dont le compte n'a pas été confirmé.
+func sansAcces(lus []depotLu) []string {
+	var noms []string
+	for _, lu := range lus {
+		if !lu.sur {
+			noms = append(noms, lu.repo.Name)
+		}
+	}
+	return noms
 }
 
 // aReprendre retient les dépôts qui seront renommés. Sans NamedOnly ils le sont

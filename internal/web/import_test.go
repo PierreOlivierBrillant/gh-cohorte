@@ -67,6 +67,11 @@ type planVue struct {
 	} `json:"moves"`
 	Unmatched []string `json:"unmatched"`
 	Absent    []string `json:"absent"`
+	Splits    []struct {
+		Prefix string `json:"prefix"`
+		Count  int    `json:"count"`
+	} `json:"splits"`
+	Unconfirmed []string `json:"unconfirmed"`
 }
 
 // Ce que l'organisation porte hors nomenclature, et l'aide pour aller chercher
@@ -295,5 +300,101 @@ func TestLInterfaceLaisseLesDepotsSansEtudiant(t *testing.T) {
 	// le travail entièrement repris.
 	if len(plan.Unmatched) != 1 {
 		t.Fatalf("dépôts sans personne = %v", plan.Unmatched)
+	}
+}
+
+// Le cas rapporté : « kickmyb-firebase » est le travail, « Walid7Akk » le
+// compte, et le nom seul ne dit pas où couper. Sans les accès, l'interface
+// affichait « @firebase-Walid7Akk » et lui cherchait un nom.
+func TestLeCompteVientDesAccesPasDuNom(t *testing.T) {
+	state := fakegh.NewState()
+	for nom, compte := range map[string]string{
+		"kickmyb-firebase-ladamlarocque": "ladamlarocque",
+		"kickmyb-firebase-felixbourassa": "felixbourassa",
+		"kickmyb-firebase-lyonnais":      "lyonnais",
+	} {
+		state.AddRepo("acme", nom, true)
+		state.AddCollaborator("acme/"+nom, compte, "push")
+		// L'enseignant a accès à tout : il ne doit désigner personne.
+		state.AddCollaborator("acme/"+nom, "prof", "admin")
+	}
+	h := nouveau(t, state)
+
+	var plan planVue
+	h.json(http.MethodPost, "/api/orgs/acme/import/preview", map[string]any{
+		// Le préfixe deviné s'arrête à « kickmyb » : c'est ce que l'écran propose.
+		"prefix": "kickmyb", "name": "kickmyb", "scope": "a26.5n6.1030",
+		"path": listeOmnivox(t),
+	}, &plan)
+
+	if plan.Prefix != "kickmyb-firebase" {
+		t.Fatalf("travail = %q : les accès devaient le révéler", plan.Prefix)
+	}
+	for _, trouve := range plan.Pairings {
+		if strings.Contains(strings.ToLower(trouve.Login), "firebase") {
+			t.Fatalf("le compte porte encore le travail : %+v", trouve)
+		}
+		if trouve.Entry.FullName == "" {
+			t.Fatalf("le bon compte devait mener à quelqu'un : %+v", trouve)
+		}
+	}
+	if len(plan.Unconfirmed) != 0 {
+		t.Fatalf("tous les comptes viennent des accès : %v", plan.Unconfirmed)
+	}
+	cibles := map[string]string{}
+	for _, ligne := range plan.Moves {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if cibles["kickmyb-firebase-ladamlarocque"] != "a26.5n6.1030.kickmyb-firebase.laurent-adam-larocque" {
+		t.Fatalf("cibles = %v", cibles)
+	}
+}
+
+// Deux travaux sous un même préfixe : l'aperçu les nomme et n'écrit rien, et la
+// reprise est refusée tant qu'on n'a pas choisi.
+func TestUnPrefixeQuiCacheDeuxTravauxDemandeAChoisir(t *testing.T) {
+	state := fakegh.NewState()
+	for nom, compte := range map[string]string{
+		"kickmyb-firebase-ladamlarocque": "ladamlarocque",
+		"kickmyb-firebase-felixbourassa": "felixbourassa",
+		"kickmyb-android-lyonnais":       "lyonnais",
+	} {
+		state.AddRepo("acme", nom, true)
+		state.AddCollaborator("acme/"+nom, compte, "push")
+	}
+	h := nouveau(t, state)
+	corps := map[string]any{
+		"prefix": "kickmyb", "name": "kickmyb", "scope": "a26.5n6.1030",
+		"path": listeOmnivox(t),
+	}
+
+	var plan planVue
+	h.json(http.MethodPost, "/api/orgs/acme/import/preview", corps, &plan)
+	if len(plan.Splits) != 2 || len(plan.Moves) != 0 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if plan.Splits[0].Prefix != "kickmyb-firebase" || plan.Splits[0].Count != 2 {
+		t.Fatalf("travaux = %+v", plan.Splits)
+	}
+
+	// Écrire sans avoir choisi est refusé, et rien n'a bougé.
+	reponse, contenu := h.requete(http.MethodPost, "/api/orgs/acme/import", corps)
+	if reponse.StatusCode < 400 {
+		t.Fatalf("statut = %d : la reprise devait être refusée", reponse.StatusCode)
+	}
+	if !strings.Contains(string(contenu), "un à la fois") {
+		t.Fatalf("message = %s", contenu)
+	}
+	if noms := h.depots(); !slices.Contains(noms, "kickmyb-android-lyonnais") {
+		t.Fatalf("un dépôt a été renommé : %v", noms)
+	}
+
+	// Le travail choisi, la reprise redevient ordinaire.
+	corps["prefix"] = "kickmyb-firebase"
+	corps["name"] = "kickmyb-firebase"
+	var choisi planVue
+	h.json(http.MethodPost, "/api/orgs/acme/import/preview", corps, &choisi)
+	if len(choisi.Splits) != 1 || len(choisi.Moves) != 2 {
+		t.Fatalf("plan = %+v", choisi)
 	}
 }

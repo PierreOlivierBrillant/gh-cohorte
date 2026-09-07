@@ -208,6 +208,28 @@ func (s *State) Files(fullName, branch string) map[string]string {
 	return files
 }
 
+// AddCollaborator donne à un compte un accès direct au dépôt, comme GitHub
+// Classroom le fait pour l'étudiant à qui il vient de créer le sien.
+func (s *State) AddCollaborator(fullName, login, permission string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.Collaborators[fullName] == nil {
+		s.Collaborators[fullName] = map[string]string{}
+	}
+	s.Collaborators[fullName][login] = permission
+}
+
+// Invite met un compte en attente d'acceptation : il n'est pas encore
+// collaborateur, et le dépôt est pourtant déjà le sien.
+func (s *State) Invite(fullName, login, permission string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.nextInvitation++
+	s.Invitations[fullName] = append(s.Invitations[fullName], invitation{
+		ID: s.nextInvitation, Login: login, Permission: permission,
+	})
+}
+
 // AcceptInvitations transforme les invitations en attente en collaborateurs établis.
 func (s *State) AcceptInvitations(fullName string) {
 	s.mutex.Lock()

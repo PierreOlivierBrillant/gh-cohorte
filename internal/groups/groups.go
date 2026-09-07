@@ -313,6 +313,78 @@ func suit(name, prefix string) bool {
 	return strings.ContainsRune(Separators, rune(name[len(prefix)]))
 }
 
+// ------------------------------------------ à qui un dépôt appartient-il ?
+
+// Un nom de dépôt ne dit pas de façon fiable où finit le travail et où commence
+// la personne : « kickmyb-firebase-Walid7Akk » se lit aussi bien « kickmyb » +
+// « firebase-Walid7Akk ». Le découper au jugé donne alors un compte GitHub qui
+// n'existe pas, et le nom qu'on rapproche ensuite est faux.
+//
+// Les accès, eux, ne se devinent pas : la personne qui travaille dans un dépôt
+// y a été ajoutée. Son compte connu, le nom se découpe sans ambiguïté — ce qui
+// reste devant est le travail, quel que soit le nombre de tirets qu'il porte.
+
+// Split retire d'un nom de dépôt le compte qui le termine et rend le travail
+// qui précède. Le compte doit finir le nom et être détaché par un séparateur :
+// « kickmyb-firebase-Walid7Akk » et « Walid7Akk » donnent « kickmyb-firebase ».
+func Split(name, login string) (string, bool) {
+	name = strings.TrimSpace(name)
+	login = strings.TrimSpace(login)
+	if login == "" || len(name) <= len(login)+1 {
+		return "", false
+	}
+	coupe := len(name) - len(login)
+	if !strings.EqualFold(name[coupe:], login) {
+		return "", false
+	}
+	if !strings.ContainsRune(Separators, rune(name[coupe-1])) {
+		return "", false
+	}
+	return name[:coupe-1], true
+}
+
+// Owner choisit, parmi les comptes qui ont accès à un dépôt, celui de la
+// personne à qui il appartient.
+//
+// Le nom tranche en premier : un dépôt qui finit par le compte de quelqu'un est
+// le sien, et cela reste vrai quand l'enseignant ou un correcteur figure aussi
+// dans les accès. Le compte le plus long gagne, pour que « walid7akk » l'emporte
+// sur un « akk » qui terminerait le même nom.
+//
+// Sans cet indice, un accès unique suffit : c'est le cas d'un dépôt que rien
+// dans son nom ne rattache à personne. Au-delà, rien n'est sûr, et rien n'est
+// rendu — mieux vaut le dire que se tromper.
+func Owner(name string, candidates []string) (string, bool) {
+	choisi := ""
+	for _, candidat := range candidates {
+		candidat = strings.TrimSpace(candidat)
+		if _, porte := Split(name, candidat); !porte {
+			continue
+		}
+		if len(candidat) > len(choisi) {
+			choisi = candidat
+		}
+	}
+	if choisi != "" {
+		return choisi, true
+	}
+
+	uniques := make([]string, 0, len(candidates))
+	vus := map[string]bool{}
+	for _, candidat := range candidates {
+		candidat = strings.TrimSpace(candidat)
+		if candidat == "" || vus[strings.ToLower(candidat)] {
+			continue
+		}
+		vus[strings.ToLower(candidat)] = true
+		uniques = append(uniques, candidat)
+	}
+	if len(uniques) == 1 {
+		return uniques[0], true
+	}
+	return "", false
+}
+
 // Resolver traduit un jeton non numérique en indice, ou renvoie -1.
 type Resolver func(token string) int
 

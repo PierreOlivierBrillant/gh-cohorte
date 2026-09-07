@@ -27,6 +27,10 @@ import (
 type importSession struct {
 	session *Session
 	org     string
+	// proprietaires dit, pour un dépôt, le compte GitHub que ses accès
+	// désignent. Relevé une fois le travail choisi, il sert à chaque plan
+	// refait : un rapprochement corrigé ne doit pas rendre son compte au nom.
+	proprietaires map[string]string
 }
 
 // importRepos déroule l'importation, de la découverte au renommage.
@@ -74,13 +78,33 @@ func (i *importSession) run() (int, error) {
 	if err != nil {
 		return ExitValidation, err
 	}
+	// Qui a accès à quoi se lit avant le reste : c'est ce qui dit le compte de
+	// chaque dépôt, et donc où finit le travail dans son nom.
+	i.proprietaires = i.acces(prefixe, repos)
 	plan, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: prefixe, Name: nom, Entries: entrees,
 		Profiles: i.profils(prefixe, repos), Guess: true,
-		NamedOnly: i.session.Options.NamedOnly,
+		NamedOnly: i.session.Options.NamedOnly, Owners: i.proprietaires,
 	}, repos)
 	if err != nil {
 		return ExitValidation, err
+	}
+	if plan.Divided() {
+		choisi, err := i.choisirParmiLesCaches(plan)
+		if err != nil || choisi == "" {
+			return ExitOK, err
+		}
+		if strings.TrimSpace(i.session.Options.RenameTo) == "" {
+			nom = choisi
+		}
+		plan, err = classroom.PlanImport(arrivee, classroom.ImportRequest{
+			Prefix: choisi, Name: nom, Entries: entrees,
+			Profiles: i.profils(choisi, repos), Guess: true,
+			NamedOnly: i.session.Options.NamedOnly, Owners: i.proprietaires,
+		}, repos)
+		if err != nil {
+			return ExitValidation, err
+		}
 	}
 	i.montrer(plan)
 
@@ -136,6 +160,63 @@ func (i *importSession) choisirTravail(dehors classroom.Foreign) (string, error)
 	}
 	options := make([]ui.Option, 0, len(dehors.Assignments)+1)
 	for _, travail := range dehors.Assignments {
+		options = append(options, ui.Option{
+			Value: travail.Prefix,
+			Label: travail.Prefix + " — " + itoa(travail.Count) + " dépôt(s)",
+		})
+	}
+	options = append(options, ui.Option{Value: "", Label: "Revenir"})
+	return i.session.Prompt.Choose("Travail à reprendre", options, "")
+}
+
+// acces relève, pour les dépôts d'un préfixe, le compte GitHub que leurs accès
+// désignent. C'est un appel par dépôt la première fois, et rien ensuite : le
+// cache les retient d'une reprise à l'autre.
+func (i *importSession) acces(prefixe string, repos []groups.RepoInfo) map[string]string {
+	groupe := groups.Build(prefixe, repos)
+	if groupe.Len() == 0 {
+		return nil
+	}
+	noms := make([]string, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		noms = append(noms, depot.Name)
+	}
+	resolveur := identity.New(i.session.Client, i.session.Cache, i.session.Options.Jobs)
+	spin := ui.NewSpinner(i.session.Console, "Accès aux dépôts…")
+	spin.Start()
+	trouves := resolveur.Owners(i.org, noms, i.session.Viewer, nil)
+	spin.Stop()
+
+	comptes := make(map[string]string, len(trouves))
+	for nom, proprietaire := range trouves {
+		if proprietaire.Login != "" {
+			comptes[nom] = proprietaire.Login
+		}
+	}
+	return comptes
+}
+
+// choisirParmiLesCaches tranche quand le préfixe deviné couvrait plusieurs
+// travaux. « kickmyb » n'en est pas un : « kickmyb-firebase » et
+// « kickmyb-android » en sont deux, et se reprennent l'un après l'autre.
+func (i *importSession) choisirParmiLesCaches(plan classroom.Import) (string, error) {
+	console := i.session.Console
+	console.Blank()
+	console.Warning("« %s » n'est pas un travail : les accès aux dépôts en révèlent %d.",
+		plan.Prefix, len(plan.Splits))
+	rows := make([][]string, 0, len(plan.Splits))
+	for _, travail := range plan.Splits {
+		rows = append(rows, []string{travail.Prefix, itoa(travail.Count) + " dépôt(s)"})
+	}
+	console.Table([]string{"Travail", "Dépôts"}, rows, 15)
+
+	if !i.session.Interactive() {
+		return "", valid.Errorf(
+			"Plusieurs travaux sous « %s » : nommez celui à reprendre avec --import.",
+			plan.Prefix)
+	}
+	options := make([]ui.Option, 0, len(plan.Splits)+1)
+	for _, travail := range plan.Splits {
 		options = append(options, ui.Option{
 			Value: travail.Prefix,
 			Label: travail.Prefix + " — " + itoa(travail.Count) + " dépôt(s)",
@@ -216,7 +297,13 @@ func (i *importSession) profils(prefixe string, repos []groups.RepoInfo) map[str
 	groupe := groups.Build(prefixe, repos)
 	pairs := make([]identity.Pair, 0, groupe.Len())
 	for _, depot := range groupe.Repos {
-		pairs = append(pairs, identity.Pair{Repo: depot.Suffix, Login: depot.Suffix})
+		// Le compte des accès d'abord : demander le profil de ce que le nom
+		// portait — « firebase-Walid7Akk » — ne ramènerait rien.
+		compte := depot.Suffix
+		if login := i.proprietaires[depot.Name]; login != "" {
+			compte = login
+		}
+		pairs = append(pairs, identity.Pair{Repo: compte, Login: compte})
 	}
 	if len(pairs) == 0 {
 		return nil
@@ -280,6 +367,14 @@ func (i *importSession) montrer(plan classroom.Import) {
 		console.Printf("  %s : %s",
 			console.Warn(plural("%d étudiant(s) sans dépôt pour ce travail", len(plan.Absent))),
 			console.Dim(strings.Join(plan.Absent, ", ")))
+	}
+	// Le compte des autres vient de leurs accès : c'est le seul qui puisse
+	// encore être faux.
+	if len(plan.Unconfirmed) > 0 {
+		console.Blank()
+		console.Printf("  %s : %s",
+			console.Warn(plural("%d dépôt(s) ne donnent accès à personne", len(plan.Unconfirmed))),
+			console.Dim("leur compte est celui que leur nom porte"))
 	}
 }
 
@@ -398,6 +493,7 @@ func (i *importSession) corriger(arrivee classroom.Classroom, plan classroom.Imp
 		refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 			Prefix: plan.Prefix, Name: plan.Name,
 			Entries: entreesRetenues(noms, retenus), NamedOnly: plan.NamedOnly,
+			Owners: i.proprietaires,
 		}, repos)
 		if err != nil {
 			return plan, err
@@ -427,6 +523,7 @@ func (i *importSession) laisserLesInconnus(arrivee classroom.Classroom,
 	refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: plan.Prefix, Name: plan.Name,
 		Entries: entreesRetenues(noms, retenus), NamedOnly: true,
+		Owners: i.proprietaires,
 	}, repos)
 	if err != nil {
 		return plan, err

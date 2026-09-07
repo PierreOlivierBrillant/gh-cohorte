@@ -2990,6 +2990,7 @@ function viderImport() {
   }
   $('import-nommes').checked = false;
   $('import-filtre').value = 'tout';
+  $('import-suite-bloc').hidden = false;
   vider($('import-rapprochements').querySelector('tbody'));
   vider($('import-renommages').querySelector('tbody'));
   vider($('import-avis'));
@@ -3170,6 +3171,15 @@ async function verifier(complet) {
     'Reprise');
   if (!plan) return;
   importPlan = plan;
+  marquerEtape('place', plan.scope);
+  // Le préfixe deviné cachait plusieurs travaux : les accès viennent de le
+  // dire, et il n'y a rien à rapprocher tant qu'on n'a pas choisi lequel.
+  if ((plan.splits || []).length > 1) {
+    montrerTravauxCaches(plan);
+    ouvrirEtape('verifier');
+    return;
+  }
+  $('import-suite-bloc').hidden = false;
   if (complet) {
     lireNoms(plan);
     dessinerRapprochements(plan);
@@ -3177,8 +3187,50 @@ async function verifier(complet) {
   dessinerAvis(plan);
   dessinerRenommages(plan);
   compter();
-  marquerEtape('place', plan.scope);
   if (complet) ouvrirEtape('verifier');
+}
+
+// montrerTravauxCaches propose les travaux qu'un préfixe fourre-tout
+// rassemblait. « kickmyb » n'est pas un travail : « kickmyb-firebase » et
+// « kickmyb-android » en sont deux, et se reprennent l'un après l'autre.
+function montrerTravauxCaches(plan) {
+  vider($('import-rapprochements').querySelector('tbody'));
+  vider($('import-renommages').querySelector('tbody'));
+  // Rien à continuer tant que le travail n'est pas tranché : l'étape des noms
+  // n'aurait aucun dépôt à montrer.
+  $('import-suite-bloc').hidden = true;
+  $('import-compte').textContent = '';
+  marquerEtape('verifier', '');
+  marquerEtape('noms', '');
+
+  const avis = $('import-avis');
+  vider(avis);
+  const bloc = el('div', { classe: 'avis alerte' },
+    el('p', { texte: `« ${plan.prefix} » n'est pas un travail : les accès aux dépôts en `
+      + `révèlent ${plan.splits.length}. Reprenez-les un à la fois.` }));
+  const choix = el('div', { classe: 'actions' });
+  for (const travail of plan.splits) {
+    choix.append(el('button', {
+      classe: 'bouton', type: 'button',
+      texte: `${travail.prefix} · ${travail.count} dépôt(s)`,
+      onclick: () => reprendreTravail(travail.prefix),
+    }));
+  }
+  bloc.append(choix);
+  avis.append(bloc);
+}
+
+// reprendreTravail refait la lecture pour un seul des travaux révélés. Le nom
+// d'arrivée le suit quand rien d'autre n'a été tapé : c'est celui-là qu'on vient
+// de choisir.
+function reprendreTravail(prefixe) {
+  const ancien = importTravail;
+  importTravail = prefixe;
+  marquerEtape('travail', prefixe);
+  if (!$('import-nom').value.trim() || $('import-nom').value.trim() === ancien) {
+    $('import-nom').value = prefixe;
+  }
+  verifier(true);
 }
 
 // lireNoms retient tout ce que la liste portait : ceux qu'un dépôt a trouvés,
@@ -3310,6 +3362,14 @@ function dessinerAvis(plan) {
     avis.append(el('div', { classe: 'avis alerte',
       texte: `${plan.absent.length} étudiant(s) de la liste n'ont pas de dépôt pour ce `
         + 'travail — ' + quelquesNoms(plan.absent) + '.' }));
+  }
+  // Le compte des autres dépôts vient de leurs accès : c'est le seul qui puisse
+  // encore être faux, et le seul qui mérite d'être signalé.
+  if ((plan.unconfirmed || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `${plan.unconfirmed.length} dépôt(s) ne donnent accès à personne : leur compte `
+        + 'est celui que leur nom porte, faute de mieux — '
+        + quelquesNoms(plan.unconfirmed) + '.' }));
   }
 }
 
