@@ -420,7 +420,11 @@ $('operation-annuler').addEventListener('click', () => {
 // demander ouvre le dialogue et renvoie vrai si la personne confirme.
 // La réponse vient des boutons eux-mêmes : tous les moteurs n'émettent pas
 // « close » quand un formulaire « method=dialog » referme la fenêtre.
-function demander(titre, contenu, libelle = 'Confirmer') {
+// « preparer » reçoit le bouton de confirmation juste avant l'ouverture : un
+// contenu qui exige un choix peut ainsi le tenir éteint tant que rien n'est
+// désigné. Le bouton est remis d'aplomb à chaque question — celle d'avant a pu
+// le laisser éteint.
+function demander(titre, contenu, libelle = 'Confirmer', preparer = null) {
   const dialogue = $('dialogue');
   const valider = $('dialogue-ok');
   const annuler = $('dialogue-annuler');
@@ -430,6 +434,7 @@ function demander(titre, contenu, libelle = 'Confirmer') {
   corps.className = 'corps-dialogue';
   corps.append(contenu);
   valider.textContent = libelle;
+  valider.disabled = false;
 
   return new Promise((resolve) => {
     let repondu = false;
@@ -458,6 +463,7 @@ function demander(titre, contenu, libelle = 'Confirmer') {
     // Échap referme sans passer par les boutons.
     dialogue.addEventListener('cancel', surNon);
     dialogue.addEventListener('close', surFermeture);
+    if (preparer) preparer(valider);
     dialogue.showModal();
   });
 }
@@ -469,6 +475,12 @@ const ongletDeLaVue = {
   travaux: 'travaux', travail: 'travaux', assistant: 'travaux',
   etudiants: 'etudiants', 'groupe-reglages': 'groupe-reglages',
 };
+
+// aplati met un texte à plat pour la recherche : minuscules, accents retirés.
+// « Été 2026 » se cherche alors aussi bien en tapant « ete ».
+function aplati(texte) {
+  return (texte || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+}
 
 // sigle rend un code de cours tel qu'on l'écrit : « 4w6 » se lit « 4W6 ». Les
 // dépôts, eux, gardent la casse d'origine — GitHub ne la distingue pas.
@@ -3589,9 +3601,10 @@ function dessinerChemins(chemins) {
 // ------------------------------------------- déplacer des étudiants de groupe
 
 // Une personne change de groupe en cours de session : c'est fréquent, et cela
-// arrive rarement à une seule. Les fiches suivent toujours ; les dépôts,
-// seulement si on le demande, parce que les renommer est une écriture sur
-// GitHub.
+// arrive rarement à une seule. Ses dépôts suivent toujours : leur nom porte la
+// place du groupe, et c'est lui qui dit à qui ils appartiennent. Les laisser en
+// arrière montrerait la personne des deux côtés — dans la liste du groupe
+// d'arrivée, et dans le groupe de départ que ses dépôts lui rattachent encore.
 //
 // Le groupe d'arrivée n'a pas à exister d'avance : le déplacement peut le
 // déclarer au passage, plutôt que d'obliger à sortir d'ici pour le créer.
@@ -3602,102 +3615,224 @@ const GROUPE_NEUF = '\u0000neuf';
 // l'organisation, ou « ＋ Nouveau groupe… », qui le déclare au passage plutôt que
 // d'obliger à sortir d'ici pour le créer. Déplacer des personnes et déplacer des
 // travaux visent la même chose : la destination ne se compose qu'une fois.
+//
+// Une liste déroulante n'y suffisait plus. Une session apporte une dizaine de
+// groupes, l'organisation en garde plusieurs sessions, et « Groupe 02 · a26 ·
+// 5N6 · 02 » répété quarante fois ne se lit pas. Les groupes sont donc rangés
+// comme dans le parcours — par session, puis par cours —, et une recherche les
+// réduit à mesure qu'on tape.
+//
+// Rien n'est retenu d'avance : le déplacement renomme des dépôts, il ne doit
+// pas partir vers une destination que personne n'a désignée. Tant qu'aucune ne
+// l'est, le bouton du dialogue reste éteint.
 async function choixDeGroupe() {
   // Arriver droit sur un groupe par son adresse ne charge pas les autres.
   if (etat.groupes.length === 0) await chargerGroupes();
   const ailleurs = etat.groupes.filter((groupe) =>
     groupe.scope !== etat.groupe.scope &&
-    groupe.org.toLowerCase() === etat.groupe.org.toLowerCase());
+    groupe.org.toLowerCase() === etat.groupe.org.toLowerCase())
+    .sort((a, b) => rangDeSession(a.session) - rangDeSession(b.session) ||
+      a.session.localeCompare(b.session) || a.course.localeCompare(b.course) ||
+      a.group.localeCompare(b.group, undefined, { numeric: true }));
 
-  const choix = el('select', { classe: 'champ' });
-  for (const groupe of ailleurs) {
-    const place = groupe.session
-      ? `${groupe.session} · ${sigle(groupe.course)} · ${groupe.group}`
-      : 'nomenclature dépassée';
-    choix.append(el('option', { value: groupe.scope, texte: `${groupe.label} · ${place}` }));
-  }
-  choix.append(el('option', { value: GROUPE_NEUF, texte: '\uff0b Nouveau groupe…' }));
-  if (ailleurs.length === 0) choix.value = GROUPE_NEUF;
+  // Le scope retenu, ou GROUPE_NEUF. Le bouton du dialogue n'est connu qu'à
+  // l'ouverture : « preparer » le confie, et il suit le choix ensuite.
+  let choisi = null;
+  let valider = null;
+
+  const recherche = el('input', { classe: 'champ', type: 'search',
+    placeholder: 'Filtrer : session, cours, groupe…' });
+  const liste = el('div', { classe: 'choix-places' });
+  const resume = el('p', { classe: 'note' });
 
   const session = el('input', { classe: 'champ', type: 'text',
     value: etat.groupe.session || '', placeholder: 'a26' });
   const cours = el('input', { classe: 'champ', type: 'text',
     value: etat.groupe.course || '', placeholder: '5n6' });
   const numero = el('input', { classe: 'champ', type: 'text', placeholder: '02' });
-  const place = el('p', { classe: 'note' });
 
-  // La place se compose au fil de la frappe : c'est elle qui sera écrite dans
-  // le nom de chaque dépôt, autant la voir avant de valider.
-  const majPlace = () => {
-    const niveaux = [session.value, cours.value, numero.value].map((valeur) => valeur.trim());
-    place.textContent = niveaux.every(Boolean)
-      ? `Place du groupe : ${niveaux.join('.')}`
-      : 'Session, cours et groupe sont tous les trois nécessaires.';
-  };
-  for (const champ of [session, cours, numero]) champ.addEventListener('input', majPlace);
-  majPlace();
-
-  const neuf = el('div', {},
-    el('div', { classe: 'rangee serree' },
-      el('label', { classe: 'champ-bloc' },
-        el('span', { classe: 'etiquette', texte: 'Session' }), session),
-      el('label', { classe: 'champ-bloc' },
-        el('span', { classe: 'etiquette', texte: 'Cours' }), cours),
-      el('label', { classe: 'champ-bloc' },
-        el('span', { classe: 'etiquette', texte: 'Groupe' }), numero)),
-    place);
-  const majNeuf = () => { neuf.hidden = choix.value !== GROUPE_NEUF; };
-  choix.addEventListener('change', majNeuf);
-  majNeuf();
-
-  const bloc = el('div', {},
+  const neuf = el('div', { classe: 'rangee serree' },
     el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: "Groupe d'arrivée" }), choix),
-    neuf);
+      el('span', { classe: 'etiquette', texte: 'Session' }), session),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Cours' }), cours),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Groupe' }), numero));
+
+  // La ligne qui déclare un groupe reste hors de la liste filtrée : une
+  // recherche qui ne rend rien est précisément le moment où elle sert.
+  const ligneNeuve = el('button', { classe: 'choix-place neuf', type: 'button',
+    onclick: () => retenir(GROUPE_NEUF) },
+    el('span', { classe: 'choix-infos' },
+      el('span', { classe: 'titre', texte: '＋ Nouveau groupe…' }),
+      el('span', { classe: 'detail', texte: 'déclaré au passage, sans sortir d’ici' })));
+
+  // niveaux rend la place saisie pour un groupe à déclarer, ou rien tant que
+  // les trois niveaux ne sont pas là : un nom de dépôt les veut tous.
+  function niveaux() {
+    const saisis = [session.value, cours.value, numero.value]
+      .map((valeur) => valeur.trim());
+    return saisis.every(Boolean) ? saisis : null;
+  }
+
+  function pret() {
+    if (choisi === GROUPE_NEUF) return niveaux() !== null;
+    return choisi !== null;
+  }
+
+  // Le résumé dit l'arrivée en toutes lettres : la ligne retenue peut avoir
+  // défilé hors de vue, et c'est cette place-là qui sera écrite dans le nom de
+  // chaque dépôt.
+  function majResume() {
+    if (choisi === GROUPE_NEUF) {
+      const saisis = niveaux();
+      resume.textContent = saisis
+        ? `Nouveau groupe à la place ${saisis.join('.')}`
+        : 'Session, cours et groupe sont tous les trois nécessaires.';
+      return;
+    }
+    const groupe = ailleurs.find((autre) => autre.scope === choisi);
+    resume.textContent = groupe
+      ? `Arrivée : ${groupe.label} — ${groupe.scope}`
+      : 'Choisissez le groupe d’arrivée.';
+  }
+
+  function maj() {
+    ligneNeuve.classList.toggle('choisi', choisi === GROUPE_NEUF);
+    for (const ligne of liste.querySelectorAll('.choix-place')) {
+      ligne.classList.toggle('choisi', ligne.dataset.scope === choisi);
+    }
+    neuf.hidden = choisi !== GROUPE_NEUF;
+    majResume();
+    if (valider) valider.disabled = !pret();
+  }
+
+  function retenir(valeur) {
+    choisi = valeur;
+    maj();
+    if (valeur === GROUPE_NEUF) session.focus();
+  }
+
+  // Les mots sous lesquels un groupe se cherche : sa place, son numéro, le
+  // sigle de son cours, le nom long de sa session — « automne » se tape plus
+  // volontiers que « a26 ». Les accents tombent au passage : « Été » se cherche
+  // aussi bien en tapant « ete ».
+  const mots = new Map(ailleurs.map((groupe) => [groupe.scope,
+    aplati([groupe.label, groupe.scope, groupe.session, nomDeSession(groupe.session),
+      groupe.course, groupe.group].join(' ')).split(/[^\p{L}\p{N}]+/u).filter(Boolean)]));
+
+  function ligneDeGroupe(groupe) {
+    const compte = groupe.known
+      ? `${(groupe.students || []).length} étudiant(s)`
+      : 'aucune liste retenue';
+    return el('button', { classe: 'choix-place', type: 'button',
+      'data-scope': groupe.scope, onclick: () => retenir(groupe.scope) },
+      el('span', { classe: 'choix-infos' },
+        el('span', { classe: 'titre', texte: groupe.label }),
+        el('span', { classe: 'detail',
+          texte: `${compte} · ${travaux((groupe.assignments || []).length)}` })),
+      el('span', { classe: 'espace' }),
+      el('code', { classe: 'jeton', texte: groupe.scope }));
+  }
+
+  function dessiner() {
+    // Chaque mot cherché doit en ouvrir un du groupe, plutôt que se retrouver
+    // n'importe où dedans : « 02 » désigne ainsi le groupe 02, et non l'année
+    // 2026 où il se cache aussi.
+    const termes = aplati(recherche.value.trim()).split(/\s+/).filter(Boolean);
+    const retenus = ailleurs.filter((groupe) => termes.every((terme) =>
+      mots.get(groupe.scope).some((mot) => mot.startsWith(terme))));
+
+    vider(liste);
+    let section = '';
+    for (const groupe of retenus) {
+      const titre = `${nomDeSession(groupe.session)} · ${sigle(groupe.course)}`;
+      if (titre !== section) {
+        section = titre;
+        liste.append(el('div', { classe: 'choix-section', texte: titre }));
+      }
+      liste.append(ligneDeGroupe(groupe));
+    }
+    if (retenus.length === 0) {
+      liste.append(el('div', { classe: 'boite-vide', texte: ailleurs.length === 0
+        ? 'Aucun autre groupe dans cette organisation.'
+        : 'Aucun groupe ne correspond.' }));
+    }
+    maj();
+  }
+
+  recherche.addEventListener('input', dessiner);
+  for (const champ of [session, cours, numero]) champ.addEventListener('input', maj);
+
+  const bloc = el('div', { classe: 'choix-arrivee' },
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: "Groupe d'arrivée" }), recherche),
+    ligneNeuve, liste, neuf, resume);
+
+  // Le dialogue est un formulaire : « Entrée » y vaut « valider », et fermerait
+  // la question au lieu de servir la saisie en cours. Dans la recherche, elle
+  // retient le premier groupe trouvé — c'est tout l'intérêt de filtrer ; les
+  // boutons de la liste, eux, gardent leur « Entrée » native.
+  bloc.addEventListener('keydown', (evenement) => {
+    if (evenement.key !== 'Enter' || evenement.target.closest('button')) return;
+    evenement.preventDefault();
+    if (evenement.target !== recherche) return;
+    const premiere = liste.querySelector('.choix-place');
+    if (premiere) retenir(premiere.dataset.scope);
+  });
+
+  dessiner();
+  // Sans autre groupe où aller, seule la déclaration reste : autant l'ouvrir.
+  if (ailleurs.length === 0) retenir(GROUPE_NEUF);
 
   // destination rend ce que l'API attend : la place d'un groupe existant, ou
-  // celle d'un groupe à déclarer.
-  const destination = () => (choix.value === GROUPE_NEUF
-    ? { new_group: {
-        session: session.value.trim(), course: cours.value.trim(),
-        group: numero.value.trim() } }
-    : { target: choix.value });
+  // celle d'un groupe à déclarer. Elle ne rend rien tant que rien n'est choisi.
+  const destination = () => {
+    if (choisi === GROUPE_NEUF) {
+      const saisis = niveaux() || ['', '', ''];
+      return { new_group: { session: saisis[0], course: saisis[1], group: saisis[2] } };
+    }
+    return choisi ? { target: choisi } : null;
+  };
 
-  return { bloc, destination };
+  // preparer reçoit le bouton du dialogue à l'ouverture : c'est lui qui reste
+  // éteint tant qu'aucune arrivée n'est désignée.
+  const preparer = (bouton) => { valider = bouton; maj(); };
+
+  return { bloc, destination, preparer };
 }
 
 async function deplacerEtudiants(personnes) {
-  const { bloc, destination } = await choixDeGroupe();
-  const avecDepots = el('input', { type: 'checkbox', checked: true });
+  const { bloc, destination, preparer } = await choixDeGroupe();
   const seule = personnes.length === 1;
   const titre = seule
     ? `Déplacer ${personnes[0].full_name || '@' + personnes[0].username}`
     : `Déplacer ${personnes.length} étudiants`;
   const leurs = seule ? 'ses' : 'leurs';
+  const depots = personnes.reduce(
+    (total, personne) => total + (personne.assignments || []).length, 0);
+  const sansNom = personnes.some((personne) => !personne.full_name);
 
+  // Le titre dit déjà combien de personnes partent, et la liste d'où l'on vient
+  // dit lesquelles : les renommer toutes ici ferait un mur avant la question.
   const confirme = await demander(titre, el('div', {},
-    seule ? null : el('p', { classe: 'note',
-      texte: personnes.map((personne) =>
-        personne.full_name || '@' + personne.username).join(', ') }),
     bloc,
-    el('label', { classe: 'case' }, avecDepots,
-      el('span', {}, el('strong', { texte: `Renommer aussi ${leurs} dépôts` }),
-        el('span', { classe: 'aide',
-          texte: 'Ils prennent la place du groupe d’arrivée. GitHub garde une redirection ' +
-            'depuis chaque ancien nom.' }))),
-    el('p', { classe: 'note',
-      texte: `Sans renommage, ${leurs} dépôts restent au nom du groupe actuel : celui-ci ` +
-        'continuera de les montrer.' }),
-    el('p', { classe: 'note',
+    el('p', { classe: 'note', texte: depots === 0
+      ? `Aucun dépôt à renommer : ${leurs} fiches sont tout ce qui change de groupe.`
+      : `${depots} dépôt(s) seront renommés : leur nom porte la place du groupe, et ` +
+        'c’est lui qui dit à qui ils appartiennent. GitHub garde une redirection ' +
+        'depuis chaque ancien nom.' }),
+    depots === 0 || !sansNom ? null : el('p', { classe: 'note',
       texte: 'Un dépôt dont le nom complet manque encore garde le dernier niveau de son ' +
         'nom — souvent le compte GitHub. Il arrive quand même à la bonne place, et se ' +
-        'renomme une fois le nom retrouvé.' })), 'Déplacer');
+        'renomme une fois le nom retrouvé.' })), 'Déplacer', preparer);
   if (!confirme) return;
+  const cible = destination();
+  if (!cible) return;
 
   const corps = Object.assign({
     usernames: personnes.map((personne) => personne.username),
-    repos: avecDepots.checked,
-  }, destination());
+  }, cible);
 
   const fiche = await tenter(() => api('POST',
     `/api/classrooms/${encode(etat.groupe.scope)}/students/move`, corps), 'Déplacement');
@@ -3707,6 +3842,14 @@ async function deplacerEtudiants(personnes) {
   // travail de fond, avec son journal.
   const bilan = fiche.id ? await suivre(fiche) : fiche;
   if (!bilan) return;
+  // Les listes ne suivent que si tous les dépôts sont arrivés : un déplacement
+  // interrompu n'a déplacé personne, et le journal dit lesquels ont résisté.
+  if (!bilan.count) {
+    message(`Aucun étudiant déplacé · ${bilan.failed} dépôt(s) en échec`, 'alerte');
+    await ouvrirGroupe(etat.groupe.scope, true, true);
+    afficherVue('etudiants');
+    return;
+  }
   const qui = bilan.count === 1
     ? `@${bilan.moved[0]} déplacé`
     : `${bilan.count} étudiants déplacés`;
@@ -3732,7 +3875,7 @@ async function deplacerEtudiants(personnes) {
 // ensuite, depuis la liste des étudiants. Sans cette règle, déplacer réclamerait
 // un nom complet, et le retrouver réclamerait un groupe déplacé.
 async function deplacerTravaux(travauxChoisis) {
-  const { bloc, destination } = await choixDeGroupe();
+  const { bloc, destination, preparer } = await choixDeGroupe();
   const seul = travauxChoisis.length === 1;
   const nom = el('input', { type: 'text', classe: 'champ',
     value: seul ? travauxChoisis[0].name : '' });
@@ -3753,14 +3896,16 @@ async function deplacerTravaux(travauxChoisis) {
         texte: 'Les dépôts dont l’étudiant reste inconnu gardent le dernier niveau de leur ' +
           'nom — souvent son compte GitHub. Les noms complets se corrigent ensuite, depuis ' +
           'la liste des étudiants du groupe d’arrivée.' })),
-    'Voir le renommage');
+    'Voir le renommage', preparer);
   if (!confirme) return;
+  const cible = destination();
+  if (!cible) return;
 
   const corps = Object.assign({
     assignments: travauxChoisis.map((travail) => ({
       id: travail.id, name: seul ? nom.value.trim() : '',
     })),
-  }, destination());
+  }, cible);
 
   // Rien n'est écrit tant que le renommage n'a pas été montré : c'est la seule
   // façon de vérifier que ce sont bien ces dépôts-là qu'on sort du fourre-tout.

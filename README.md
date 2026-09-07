@@ -175,8 +175,8 @@ déjà distribués continuent de fonctionner.
 - **Filtrer, trier, chercher** les listes d'étudiants et de travaux, à
   l'identique dans les trois interfaces (`--filter`, `--pushed-after`,
   `--pushed-before`, `--never-pushed`, `--sort`).
-- **Déplacer un travail ou des étudiants** d'un groupe à l'autre, en renommant
-  les dépôts si on le demande.
+- **Déplacer un travail ou des étudiants** d'un groupe à l'autre : leurs dépôts
+  sont renommés, puisque c'est leur nom qui dit à quel groupe ils appartiennent.
 
 Ce que GitHub Classroom fait et que l'outil ne fait pas : pas de lien
 d'invitation à distribuer — les dépôts sont créés directement —, pas d'échéance,

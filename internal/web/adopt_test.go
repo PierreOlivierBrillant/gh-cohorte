@@ -27,7 +27,7 @@ func TestEtudiantDeplaceAvecSesDepots(t *testing.T) {
 	arrivee := h.groupe("a26", "5n6", "02", "Aminata Diallo", "aminata-d")
 
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
-		map[string]any{"username": "jlpicard", "target": arrivee, "repos": true})
+		map[string]any{"username": "jlpicard", "target": arrivee})
 	if bilan["status"] != "terminé" {
 		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
 	}
@@ -60,10 +60,10 @@ func TestEtudiantDeplaceAvecSesDepots(t *testing.T) {
 	}
 }
 
-func TestEtudiantDeplaceSansSesDepots(t *testing.T) {
-	state := fakegh.NewState()
-	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
-	h := nouveau(t, state)
+// Une personne qui n'a encore aucun dépôt n'existe que dans la liste : il n'y a
+// rien à renommer, et la réponse vient tout de suite.
+func TestEtudiantSansDepotDeplaceSaListeSeule(t *testing.T) {
+	h := nouveau(t, nil)
 	depart := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
 	arrivee := h.groupe("a26", "5n6", "02", "Aminata Diallo", "aminata-d")
 
@@ -73,13 +73,66 @@ func TestEtudiantDeplaceSansSesDepots(t *testing.T) {
 		Renamed int      `json:"renamed"`
 	}
 	h.json(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
-		map[string]any{"username": "jlpicard", "target": arrivee, "repos": false}, &bilan)
+		map[string]any{"username": "jlpicard", "target": arrivee}, &bilan)
 	if bilan.Count != 1 || bilan.Moved[0] != "jlpicard" || bilan.Renamed != 0 {
 		t.Fatalf("bilan : %+v", bilan)
 	}
+}
+
+// Le nom d'un dépôt dit à quel groupe il appartient : déplacer quelqu'un sans
+// l'emporter le montrerait des deux côtés — dans la liste de l'arrivée, et dans
+// le groupe de départ que ses dépôts lui rattachent encore. Il n'y a donc rien
+// à demander : les dépôts suivent toujours.
+func TestDeplacementEmporteToujoursLesDepots(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
+	h := nouveau(t, state)
+	depart := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
+	arrivee := h.groupe("a26", "5n6", "02", "Aminata Diallo", "aminata-d")
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
+		map[string]any{"username": "jlpicard", "target": arrivee})
+	if bilan["status"] != "terminé" {
+		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
+	}
 	if noms := h.depots(); len(noms) != 1 ||
-		noms[0] != "a26.5n6.01.tp1.jean-luc-picard" {
-		t.Fatalf("aucun dépôt ne devait bouger : %v", noms)
+		noms[0] != "a26.5n6.02.tp1.jean-luc-picard" {
+		t.Fatalf("dépôts : %v", noms)
+	}
+}
+
+// Les listes n'écoutent que GitHub : un renommage qui échoue les laisse où
+// elles sont, plutôt que d'affirmer sur cette machine un rangement que
+// l'organisation contredit.
+func TestListesNeSuiventPasUnRenommageEchoue(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.01.tp1.jean-luc-picard", "a26.5n6.01.travailsession.jean-luc-picard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	state.FailOn["PATCH /repos/acme/a26.5n6.01.travailsession.jean-luc-picard"] =
+		fakegh.Failure{Status: 403, Message: "Forbidden"}
+
+	h := nouveau(t, state)
+	depart := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
+	arrivee := h.groupe("a26", "5n6", "02", "Aminata Diallo", "aminata-d")
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
+		map[string]any{"username": "jlpicard", "target": arrivee})
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["failed"] != float64(1) || resultat["count"] != float64(0) {
+		t.Fatalf("bilan : %+v", resultat)
+	}
+
+	// Le fichier local est relu directement : l'interface, elle, montre déjà
+	// l'arrivée que le dépôt renommé lui rattache — et c'est ce qu'elle doit
+	// faire, puisque GitHub le dit.
+	if declares := h.declares(depart); len(declares) != 1 || declares[0] != "jlpicard" {
+		t.Fatalf("le groupe de départ a perdu quelqu'un : %v", declares)
+	}
+	if declares := h.declares(arrivee); len(declares) != 1 || declares[0] != "aminata-d" {
+		t.Fatalf("le groupe d'arrivée a gagné quelqu'un : %v", declares)
 	}
 }
 
@@ -99,7 +152,7 @@ func TestPlusieursEtudiantsDeplacesEnsemble(t *testing.T) {
 	bilan := h.travail(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
 		map[string]any{
 			"usernames": []string{"jlpicard", "aminata-d"},
-			"target":    arrivee, "repos": true,
+			"target":    arrivee,
 		})
 	if bilan["status"] != "terminé" {
 		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
@@ -140,7 +193,6 @@ func TestDeplacementDeclareLeGroupeDArrivee(t *testing.T) {
 		map[string]any{
 			"usernames": []string{"jlpicard"},
 			"new_group": map[string]string{"session": "a26", "course": "5n6", "group": "03"},
-			"repos":     true,
 		})
 	resultat, _ := bilan["result"].(map[string]any)
 	if resultat["created"] != true || resultat["target_scope"] != "a26.5n6.03" {
