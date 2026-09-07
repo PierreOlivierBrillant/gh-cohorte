@@ -549,3 +549,53 @@ func TestLaRepriseSePasseDeListe(t *testing.T) {
 		t.Fatalf("cibles = %v", cibles)
 	}
 }
+
+// Le préfixe proposé porte parfois le tiret que le nom doublait —
+// « tp3-h23-4204n6-kickmyb- ». Le compte ne doit pas hériter du second : rien
+// sur GitHub ne s'appelle « -ahmadloudin ».
+func TestLeCompteNheritePasDuTiretDouble(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"TP3-H23-4204N6-KickMyB--ahmadloudin",
+		"TP3-H23-4204N6-KickMyB--ladamlarocque",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+
+	// Ce que l'étape des dépôts montre.
+	var vue struct {
+		Repos []struct {
+			Name  string `json:"name"`
+			Login string `json:"login"`
+		} `json:"repos"`
+	}
+	h.json(http.MethodPost, "/api/orgs/acme/import/repos",
+		map[string]any{"prefix": "tp3-h23-4204n6-kickmyb-"}, &vue)
+	for _, depot := range vue.Repos {
+		if strings.HasPrefix(depot.Login, "-") {
+			t.Fatalf("compte = %q pour « %s »", depot.Login, depot.Name)
+		}
+	}
+
+	// Et ce que la revue des rapprochements affiche.
+	var plan planVue
+	h.json(http.MethodPost, "/api/orgs/acme/import/preview", map[string]any{
+		"prefix": "tp3-h23-4204n6-kickmyb-", "name": "tp3", "scope": "a26.5n6.1030",
+		"path": listeOmnivox(t),
+	}, &plan)
+	if len(plan.Pairings) != 2 {
+		t.Fatalf("rapprochements = %+v", plan.Pairings)
+	}
+	for _, trouve := range plan.Pairings {
+		if strings.HasPrefix(trouve.Login, "-") {
+			t.Fatalf("compte = %q", trouve.Login)
+		}
+	}
+	// Et le renommage s'en tient au même compte.
+	for _, ligne := range plan.Moves {
+		if strings.Contains(ligne.Target, "..") || strings.Contains(ligne.Target, ".-") {
+			t.Fatalf("cible = %q", ligne.Target)
+		}
+	}
+}

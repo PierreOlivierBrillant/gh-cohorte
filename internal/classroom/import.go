@@ -274,12 +274,12 @@ func lire(groupe groups.Group, proprietaires, connus map[string]string) []depotL
 // Le nom est relu tel qu'il s'écrit, et non tel que le préfixe demandé
 // s'écrivait : ce dernier a été mis en minuscules pour être comparé, et le
 // reprendre ferait deux travaux d'un seul dès qu'un dépôt du même lot a, lui,
-// livré son compte. Les séparateurs en trop tombent des deux côtés — un compte
-// GitHub ne commence pas par un tiret, un travail ne finit pas par un.
+// livré son compte. Le travail perd au passage les séparateurs qui traînent à
+// sa fin — le compte, lui, arrive déjà net du découpage.
 func sansAccord(depot groups.Repo, prefixe string) (login, travail string) {
-	login = strings.TrimLeft(depot.Suffix, groups.Separators)
+	login = depot.Suffix
 	if login == "" {
-		return depot.Suffix, strings.TrimRight(prefixe, groups.Separators)
+		return login, strings.TrimRight(prefixe, groups.Separators)
 	}
 	coupe := len(depot.Name) - len(login)
 	if coupe <= 0 || !strings.EqualFold(depot.Name[coupe:], login) {

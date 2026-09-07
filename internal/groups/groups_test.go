@@ -2,6 +2,7 @@ package groups_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
@@ -351,5 +352,27 @@ func TestSplitNeGardePasLeSeparateurEnTrop(t *testing.T) {
 	// Un nom qui ne serait que des séparateurs et un compte ne dit aucun travail.
 	if travail, coupe := groups.Split("--alice", "alice"); coupe {
 		t.Fatalf("Split = %q, %v", travail, coupe)
+	}
+}
+
+func TestBuildNeGardePasLeSeparateurEnTeteDuSuffixe(t *testing.T) {
+	// GitHub Classroom double parfois le tiret : le second n'est à personne.
+	depots := []groups.RepoInfo{
+		{Name: "TP3-H23-4204N6-KickMyB--ahmadloudin"},
+		{Name: "TP3-H23-4204N6-KickMyB--felixb"},
+	}
+	// Le préfixe arrive tel que la détection le propose, tiret final compris.
+	groupe := groups.Build("tp3-h23-4204n6-kickmyb-", depots)
+	if groupe.Len() != 2 {
+		t.Fatalf("dépôts = %+v", groupe.Repos)
+	}
+	for _, depot := range groupe.Repos {
+		if strings.HasPrefix(depot.Suffix, "-") {
+			t.Fatalf("suffixe = %q : un compte GitHub ne commence pas par un tiret",
+				depot.Suffix)
+		}
+	}
+	if _, _, trouve := groupe.Find("ahmadloudin"); !trouve {
+		t.Fatalf("le dépôt ne se retrouve pas par son compte : %+v", groupe.Repos)
 	}
 }

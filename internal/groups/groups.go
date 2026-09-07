@@ -289,8 +289,11 @@ func Build(prefix string, repos []RepoInfo) Group {
 			pushed = pushed[:10]
 		}
 		group.Repos = append(group.Repos, Repo{
-			Name:     raw.Name,
-			Suffix:   raw.Name[len(wanted)+1:],
+			Name: raw.Name,
+			// Les séparateurs en trop ne sont à personne : « TP3-KickMyB--alice »
+			// désigne « alice », pas « -alice ». Un compte GitHub ne commence
+			// pas par un tiret, un nom slugifié non plus.
+			Suffix:   strings.TrimLeft(raw.Name[len(wanted)+1:], Separators),
 			Private:  raw.Private,
 			URL:      raw.HTMLURL,
 			PushedAt: pushed,
