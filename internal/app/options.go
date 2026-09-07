@@ -34,6 +34,10 @@ type Options struct {
 	ImportRequested bool
 	// Into est la place d'arrivée d'une importation : « a26.5n6.1030 ».
 	Into string
+	// NamedOnly laisse où ils sont les dépôts d'une importation dont on ne
+	// connaît pas la personne, plutôt que de les reprendre sous le compte
+	// qu'ils portent.
+	NamedOnly bool
 	// PublishRegistry verse au registre de l'organisation les noms que ce
 	// poste a accumulés, puis quitte. Avec --dry-run, il montre seulement ce
 	// qu'il ferait ; avec --yes, il ne demande pas confirmation.
@@ -139,6 +143,7 @@ Drapeaux :
   --never-pushed           ne lister que les dépôts sans aucun envoi
   --sort nom|compte|envoi  colonne de tri de la liste (défaut : nom)
   --sort-desc              trier du plus grand au plus petit
+  --named-only             ne reprendre que les dépôts dont l'étudiant est connu
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
   --move-to PLACE          déplacer le travail géré vers « session.cours.groupe »
@@ -221,6 +226,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.BoolVar(&options.SortDesc, "sort-desc", false, "trier du plus grand au plus petit")
 
 	set.StringVar(&options.Into, "into", "", "place d'arrivée d'une importation")
+	set.BoolVar(&options.NamedOnly, "named-only", false,
+		"ne reprendre que les dépôts dont l'étudiant est connu")
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
 	set.StringVar(&options.MoveTo, "move-to", "", "place d'arrivée du travail géré")

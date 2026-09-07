@@ -269,3 +269,31 @@ func TestSansHistoriqueLaSessionResteAChoisir(t *testing.T) {
 		t.Fatalf("session inventée : %q", place.Session)
 	}
 }
+
+// L'interface peut ne reprendre que les dépôts dont l'étudiant est connu :
+// les autres restent où ils sont.
+func TestLInterfaceLaisseLesDepotsSansEtudiant(t *testing.T) {
+	state := classroomOrg()
+	state.AddRepo("acme", "tp1-visiteur-anonyme-42", true)
+	h := nouveau(t, state)
+
+	var plan planVue
+	h.json(http.MethodPost, "/api/orgs/acme/import/preview", map[string]any{
+		"prefix": "tp1", "name": "tp1", "scope": "a26.5n6.1030",
+		"path": listeOmnivox(t), "named_only": true,
+	}, &plan)
+
+	if len(plan.Moves) != 3 {
+		t.Fatalf("renommages = %+v", plan.Moves)
+	}
+	for _, ligne := range plan.Moves {
+		if strings.Contains(ligne.Repo, "visiteur-anonyme") {
+			t.Fatalf("un dépôt sans étudiant a été repris : %+v", ligne)
+		}
+	}
+	// Il est quand même nommé : le laisser derrière en silence ferait croire
+	// le travail entièrement repris.
+	if len(plan.Unmatched) != 1 {
+		t.Fatalf("dépôts sans personne = %v", plan.Unmatched)
+	}
+}

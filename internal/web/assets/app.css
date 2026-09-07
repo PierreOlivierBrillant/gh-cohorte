@@ -519,22 +519,26 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .etape-titre { font-weight: 600; }
 .etape-resume { margin-left: auto; color: var(--texte-doux); font-size: .85rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+/* Le corps d'une étape espace ses blocs lui-même : une note, un tableau, une
+   case et un bouton n'ont pas à porter chacun sa marge, et les oublis se
+   voient tout de suite. */
 .etape-corps { display: none; padding: 0 1rem 1rem; }
-.etape.ouverte .etape-corps { display: block; }
+.etape.ouverte .etape-corps { display: flex; flex-direction: column; gap: .9rem; }
+.etape-corps > .depot { margin-top: 0; }
 .etape[aria-disabled="true"] .etape-tete { cursor: not-allowed; opacity: .55; }
 
 /* Les listes longues défilent chez elles, en-tête figé. */
-.tableau-defile { max-height: min(18rem, 34vh); overflow-y: auto; margin-top: .5rem;
+.tableau-defile { max-height: min(18rem, 34vh); overflow-y: auto;
   border: 1px solid var(--bord); border-radius: 6px; }
 .tableau-defile.court { max-height: min(12rem, 30vh); }
 .tableau-defile .tableau { margin: 0; }
 .tableau-defile thead th { position: sticky; top: 0; background: var(--fond); z-index: 1; }
 .barre-filtre { display: flex; align-items: center; justify-content: space-between;
-  gap: 1rem; flex-wrap: wrap; margin-top: .6rem; }
+  gap: 1rem; flex-wrap: wrap; }
 .choix-etudiant { max-width: 22rem; }
 
 /* Les travaux repérés : une ligne cliquable, la pastille détachée du nom. */
-.liste-choix { display: flex; flex-direction: column; gap: .35rem; margin-top: .5rem; }
+.liste-choix { display: flex; flex-direction: column; gap: .35rem; }
 .liste-choix .case { padding: .45rem .6rem; border: 1px solid var(--bord);
   border-radius: 6px; }
 .liste-choix .case:hover { background: var(--fond-doux); }

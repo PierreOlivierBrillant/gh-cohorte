@@ -32,6 +32,9 @@ type importInput struct {
 	Path     string `json:"path"`
 	Filename string `json:"filename"`
 	Content  []byte `json:"content"`
+	// NamedOnly laisse où ils sont les dépôts dont on ne connaît pas la
+	// personne.
+	NamedOnly bool `json:"named_only"`
 	// People remplace la liste quand un rapprochement a été corrigé à l'écran.
 	// Sa présence dit aussi que plus rien ne doit être deviné : le jugement
 	// rendu tient, y compris quand il consiste à ne rapprocher personne.
@@ -79,6 +82,7 @@ func (s *Server) importPlan(org string, body importInput) (
 	}
 	demande := classroom.ImportRequest{
 		Prefix: body.Prefix, Name: body.Name, Entries: entrees, Guess: deviner,
+		NamedOnly: body.NamedOnly,
 	}
 	if deviner {
 		demande.Profiles = s.profiles(org, body.Prefix, repos)

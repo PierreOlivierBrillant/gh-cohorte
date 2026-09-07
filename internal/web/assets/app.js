@@ -2972,7 +2972,8 @@ async function preparerImport() {
   importNoms = [];
   importChoix = new Map();
   importDevinee = {};
-  $('import-place-note').textContent = '';
+  dire('import-place-note', '');
+  $('import-nommes').checked = false;
   for (const nom of ['travail', 'liste', 'place', 'verifier', 'journal']) {
     marquerEtape(nom, '');
   }
@@ -3050,16 +3051,23 @@ async function devinerPlace() {
   poser('import-groupe', place.group, importDevinee.group);
   importDevinee = place;
 
-  const note = $('import-place-note');
   if ((place.groups || []).length) {
-    note.textContent = 'La liste mêle les groupes ' + place.groups.join(', ')
-      + ' : indiquez celui qui reçoit ces dépôts.';
+    dire('import-place-note', 'La liste mêle les groupes ' + place.groups.join(', ')
+      + ' : indiquez celui qui reçoit ces dépôts.');
     return;
   }
   const devines = [place.session, place.course, place.group].filter(Boolean).length;
-  note.textContent = devines
+  dire('import-place-note', devines
     ? 'Prérempli depuis la liste et le premier commit du travail. Corrigez au besoin.'
-    : '';
+    : '');
+}
+
+// dire écrit une note, et l'efface de la mise en page quand elle n'a rien à
+// dire : une ligne vide compte comme un bloc dans une colonne espacée.
+function dire(id, texte) {
+  const note = $(id);
+  note.textContent = texte;
+  note.hidden = !texte;
 }
 
 // poser remplit un champ deviné sans effacer ce qu'on a tapé soi-même.
@@ -3094,6 +3102,7 @@ function corpsImport() {
     path: cheminDepot('import-liste'),
     filename: $('import-liste').value.trim(),
     content: contenuDepot('import-liste') || null,
+    named_only: $('import-nommes').checked,
   };
   // Dès qu'un rapprochement a été touché, c'est l'écran qui fait foi : le
   // serveur ne redevine plus rien, y compris là où on a choisi « personne ».
@@ -3211,6 +3220,7 @@ function planifierVerification() {
 }
 
 $('import-filtre').addEventListener('change', filtrer);
+$('import-nommes').addEventListener('change', () => verifier(false));
 
 function filtrer() {
   const seulement = $('import-filtre').checked;
@@ -3244,9 +3254,11 @@ function dessinerAvis(plan) {
   avis.append(el('div', { classe: 'avis',
     texte: `${plan.moves.length} dépôt(s) seront renommés vers « ${plan.scope} ».` }));
   if ((plan.unmatched || []).length) {
+    const sort = plan.named_only
+      ? 'leurs dépôts resteront où ils sont'
+      : "leurs dépôts garderont le nom qu'ils portent";
     avis.append(el('div', { classe: 'avis alerte',
-      texte: `${plan.unmatched.length} compte(s) ne mènent à personne : leurs dépôts `
-        + "garderont le nom qu'ils portent — "
+      texte: `${plan.unmatched.length} compte(s) ne mènent à personne : ${sort} — `
         + quelquesNoms(plan.unmatched, '@') + '.' }));
   }
   if ((plan.absent || []).length) {

@@ -214,6 +214,7 @@ func TestImportProposeLaPlaceDArrivee(t *testing.T) {
 	code, scripte := h.script(
 		"",    // la place proposée convient
 		"non", // rien à corriger
+		"non", // reprendre aussi le dépôt sans étudiant connu
 		"oui", // renommer
 	)
 	if code != app.ExitOK {
@@ -225,4 +226,54 @@ func TestImportProposeLaPlaceDArrivee(t *testing.T) {
 	if !slices.Contains(h.depots(), "a26.3n5.1040.tp1.etienne-lyonnais") {
 		t.Fatalf("la place proposée n'a pas été suivie : %v", h.depots())
 	}
+}
+
+// Les dépôts dont personne n'a été reconnu peuvent rester où ils sont : les
+// reprendre les ferait entrer dans la nomenclature sous un dernier niveau qui
+// n'est pas un nom.
+func TestImportPeutLaisserLesDepotsSansEtudiant(t *testing.T) {
+	state := classroomOrg(t)
+	state.AddRepo("acme", "tp1-visiteur-anonyme-42", true)
+	h := nouveau(t, state)
+	h.Options.ImportRequested = true
+	h.Options.Import = "tp1"
+	h.Options.Into = "a26.5n6.1030"
+	h.Options.Roster = liste(t)
+
+	code, _ := h.script(
+		"non", // rien à corriger
+		"oui", // laisser où ils sont ceux qu'on ne connaît pas
+		"oui", // renommer
+	)
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.depots()
+	if !slices.Contains(noms, "tp1-visiteur-anonyme-42") {
+		t.Fatalf("le dépôt inconnu a été repris : %v", noms)
+	}
+	if !slices.Contains(noms, "a26.5n6.1030.tp1.etienne-lyonnais") {
+		t.Fatalf("les dépôts connus n'ont pas été repris : %v", noms)
+	}
+}
+
+// Le même choix se prend au drapeau, sans personne pour répondre.
+func TestImportNamedOnlyAuDrapeau(t *testing.T) {
+	state := classroomOrg(t)
+	state.AddRepo("acme", "tp1-visiteur-anonyme-42", true)
+	h := nouveau(t, state)
+	h.Options.ImportRequested = true
+	h.Options.Import = "tp1"
+	h.Options.Into = "a26.5n6.1030"
+	h.Options.Roster = liste(t)
+	h.Options.NamedOnly = true
+	h.Options.Yes = true
+
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	if !slices.Contains(h.depots(), "tp1-visiteur-anonyme-42") {
+		t.Fatalf("le dépôt inconnu a été repris : %v", h.depots())
+	}
+	h.contient("dépôt(s) sans étudiant connu", "laissés où ils sont")
 }

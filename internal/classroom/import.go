@@ -64,9 +64,11 @@ type Import struct {
 	Moves []Move `json:"moves"`
 	// Students sont les personnes que l'importation inscrira au groupe.
 	Students []roster.Person `json:"students"`
-	// Unmatched nomme les dépôts dont le compte n'a mené à personne : ils
-	// resteront où ils sont.
+	// Unmatched nomme les dépôts dont le compte n'a mené à personne.
 	Unmatched []string `json:"unmatched"`
+	// NamedOnly dit ce qu'il advient d'eux : laissés où ils sont, ou repris
+	// sous le compte qu'ils portent faute d'un nom à leur donner.
+	NamedOnly bool `json:"named_only"`
 	// Absent nomme les personnes de la liste qu'aucun dépôt ne concerne.
 	Absent []string `json:"absent"`
 }
@@ -92,6 +94,14 @@ type ImportRequest struct {
 	// rendu doit tenir, y compris quand il consiste à ne rapprocher personne.
 	// Redeviner alors déferait ce qu'on vient de décider.
 	Guess bool
+	// NamedOnly laisse où ils sont les dépôts dont on ne connaît pas la
+	// personne, plutôt que de les reprendre sous le compte qu'ils portent.
+	//
+	// Les deux se défendent. Reprendre le compte garde le travail entier et
+	// laisse corriger le nom plus tard ; laisser derrière évite d'inscrire
+	// dans la nomenclature un dernier niveau qui n'est pas un nom. C'est à
+	// qui importe de trancher.
+	NamedOnly bool
 }
 
 // PlanImport compose l'importation d'un travail : le rapprochement d'abord, le
@@ -114,14 +124,16 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 	rapprochements := pair(entries, comptes, demande.Profiles, demande.Guess)
 
 	plan := Import{Prefix: groupe.Prefix, Name: name, Scope: arrivee.Scope(),
-		Pairings: rapprochements}
+		Pairings: rapprochements, NamedOnly: demande.NamedOnly}
 	connus := make([]roster.Person, 0, len(rapprochements))
 	vus := map[string]bool{}
+	nommes := map[string]bool{}
 	for _, trouve := range rapprochements {
 		if !trouve.Found() {
 			plan.Unmatched = append(plan.Unmatched, trouve.Login)
 			continue
 		}
+		nommes[strings.ToLower(trouve.Login)] = true
 		vus[strings.ToLower(trouve.Entry.FullName)] = true
 		// Le compte vient du dépôt, le nom de la liste : c'est ce couple que
 		// le renommage et le registre attendent.
@@ -136,12 +148,29 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 	}
 	plan.Students = connus
 
-	lignes, err := PlanRelocate(arrivee.With(connus...), name, groupe.Repos, connus, repos)
+	lignes, err := PlanRelocate(arrivee.With(connus...), name,
+		aReprendre(groupe.Repos, nommes, demande.NamedOnly), connus, repos)
 	if err != nil {
 		return plan, err
 	}
 	plan.Moves = lignes
 	return plan, nil
+}
+
+// aReprendre retient les dépôts qui seront renommés. Sans NamedOnly ils le sont
+// tous, celui dont on ignore la personne compris : il garde alors le compte
+// qu'il porte comme dernier niveau, faute d'un nom à lui donner.
+func aReprendre(depots []groups.Repo, nommes map[string]bool, nommesSeulement bool) []groups.Repo {
+	if !nommesSeulement {
+		return depots
+	}
+	retenus := make([]groups.Repo, 0, len(depots))
+	for _, depot := range depots {
+		if nommes[strings.ToLower(depot.Suffix)] {
+			retenus = append(retenus, depot)
+		}
+	}
+	return retenus
 }
 
 // pair rapproche les comptes des personnes. Ce que la liste dit explicitement

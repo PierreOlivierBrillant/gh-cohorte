@@ -77,6 +77,7 @@ func (i *importSession) run() (int, error) {
 	plan, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: prefixe, Name: nom, Entries: entrees,
 		Profiles: i.profils(prefixe, repos), Guess: true,
+		NamedOnly: i.session.Options.NamedOnly,
 	}, repos)
 	if err != nil {
 		return ExitValidation, err
@@ -264,6 +265,16 @@ func (i *importSession) montrer(plan classroom.Import) {
 	}
 	console.Table([]string{"Dépôt", "Deviendra"}, moves, 20)
 
+	if len(plan.Unmatched) > 0 {
+		sort := "repris sous le compte qu'ils portent, faute d'un nom"
+		if plan.NamedOnly {
+			sort = "laissés où ils sont"
+		}
+		console.Blank()
+		console.Printf("  %s : %s",
+			console.Warn(plural("%d dépôt(s) sans étudiant connu", len(plan.Unmatched))),
+			console.Dim(sort))
+	}
 	if len(plan.Absent) > 0 {
 		console.Blank()
 		console.Printf("  %s : %s",
@@ -350,8 +361,11 @@ func (i *importSession) corriger(arrivee classroom.Classroom, plan classroom.Imp
 
 	for {
 		suite, err := i.session.Prompt.Confirm("Corriger un rapprochement ?", false)
-		if err != nil || !suite {
+		if err != nil {
 			return plan, err
+		}
+		if !suite {
+			return i.laisserLesInconnus(arrivee, plan, noms, retenus, repos)
 		}
 		login, err := i.session.Prompt.Choose("Compte à corriger",
 			comptesACorriger(plan, retenus), "")
@@ -383,7 +397,7 @@ func (i *importSession) corriger(arrivee classroom.Classroom, plan classroom.Imp
 		// tenir, y compris quand il consiste à ne rapprocher personne.
 		refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 			Prefix: plan.Prefix, Name: plan.Name,
-			Entries: entreesRetenues(noms, retenus),
+			Entries: entreesRetenues(noms, retenus), NamedOnly: plan.NamedOnly,
 		}, repos)
 		if err != nil {
 			return plan, err
@@ -392,6 +406,34 @@ func (i *importSession) corriger(arrivee classroom.Classroom, plan classroom.Imp
 		console.Blank()
 		i.montrer(plan)
 	}
+}
+
+// laisserLesInconnus propose de laisser derrière les dépôts dont personne n'a
+// été reconnu. Sans cela ils entrent dans la nomenclature sous le compte qu'ils
+// portent : un dernier niveau qui n'est pas un nom. Les deux se défendent, et
+// la question ne se pose que lorsqu'il en reste.
+func (i *importSession) laisserLesInconnus(arrivee classroom.Classroom,
+	plan classroom.Import, noms []string, retenus map[string]string,
+	repos []groups.RepoInfo) (classroom.Import, error) {
+	if len(plan.Unmatched) == 0 || plan.NamedOnly {
+		return plan, nil
+	}
+	laisser, err := i.session.Prompt.Confirm(plural(
+		"Laisser où ils sont les %d dépôt(s) dont l'étudiant est inconnu ?",
+		len(plan.Unmatched)), false)
+	if err != nil || !laisser {
+		return plan, err
+	}
+	refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
+		Prefix: plan.Prefix, Name: plan.Name,
+		Entries: entreesRetenues(noms, retenus), NamedOnly: true,
+	}, repos)
+	if err != nil {
+		return plan, err
+	}
+	i.session.Console.Blank()
+	i.montrer(refait)
+	return refait, nil
 }
 
 // comptesACorriger énumère les dépôts et ce à quoi ils mènent pour l'instant.

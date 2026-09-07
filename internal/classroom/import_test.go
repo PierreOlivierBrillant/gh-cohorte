@@ -259,3 +259,28 @@ func TestLaDateSArreteAuPremierDepotQuiRepond(t *testing.T) {
 		t.Fatalf("début = %s après %d demande(s)", debut, demandes)
 	}
 }
+
+// On peut ne reprendre que les dépôts dont on connaît la personne : les autres
+// restent où ils sont plutôt que d'entrer dans la nomenclature sous un dernier
+// niveau qui n'est pas un nom.
+func TestOnPeutNeReprendreQueLesDepotsNommes(t *testing.T) {
+	inventaire := depots("tp1-lyonnais", "tp1-visiteur-anonyme-42")
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Name: "tp1", Entries: inscrits(), Guess: true,
+		NamedOnly: true}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(plan.Moves) != 1 ||
+		plan.Moves[0].Target != "a26.5n6.1030.tp1.etienne-lyonnais" {
+		t.Fatalf("renommages = %+v", plan.Moves)
+	}
+	// Il est quand même nommé : le laisser derrière en silence ferait croire
+	// le travail entièrement repris.
+	if len(plan.Unmatched) != 1 || plan.Unmatched[0] != "visiteur-anonyme-42" {
+		t.Fatalf("dépôts sans personne = %v", plan.Unmatched)
+	}
+	if !plan.NamedOnly {
+		t.Fatal("le plan ne dit pas ce qu'il advient des dépôts sans personne")
+	}
+}
