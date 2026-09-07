@@ -3235,6 +3235,7 @@ function planifierVerification() {
 
 $('import-filtre').addEventListener('change', filtrer);
 $('import-nommes').addEventListener('change', () => verifier(false));
+$('import-suite').addEventListener('click', () => ouvrirEtape('noms'));
 
 // filtrer ne change que ce qu'on regarde : les dépôts cachés sont repris comme
 // les autres. Ce qui entre ou non dans la reprise se décide à l'étape suivante.
