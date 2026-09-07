@@ -80,15 +80,71 @@ func (s *Server) importPlan(org string, body importInput) (
 	if err != nil {
 		return classroom.Import{}, vide, err
 	}
+	// Qui a accès à quoi se lit avant tout le reste : c'est ce qui dit le
+	// compte de chaque dépôt, et donc où finit le travail dans son nom.
+	proprietaires := s.owners(org, body.Prefix, repos)
 	demande := classroom.ImportRequest{
 		Prefix: body.Prefix, Name: body.Name, Entries: entrees, Guess: deviner,
-		NamedOnly: body.NamedOnly,
+		NamedOnly: body.NamedOnly, Owners: proprietaires,
 	}
 	if deviner {
-		demande.Profiles = s.profiles(org, body.Prefix, repos)
+		// Ce que l'organisation sait déjà et les profils GitHub ne servent
+		// qu'à la première lecture. Une fois qu'on a corrigé à l'écran, le
+		// jugement rendu doit tenir — y compris quand il consiste à ne
+		// rapprocher personne, ce qu'un nom connu réattribuerait aussitôt.
+		demande.Known = s.connus(org)
+		demande.Profiles = s.profiles(org, body.Prefix, repos, proprietaires)
 	}
 	plan, err := classroom.PlanImport(arrivee, demande, repos)
 	return plan, arrivee, err
+}
+
+// connus rend le nom complet des comptes que l'organisation sait déjà nommer :
+// son registre d'abord, puis les groupes déjà déclarés sur ce poste. Un compte
+// qui s'y trouve n'a pas à repasser par un rapprochement — la réponse est
+// écrite, et c'est autant de vérifications en moins à l'écran.
+func (s *Server) connus(org string) map[string]string {
+	noms := map[string]string{}
+	registre, _ := s.names(org)
+	for _, etudiant := range registre.All() {
+		if nom := strings.TrimSpace(etudiant.FullName); nom != "" {
+			noms[strings.ToLower(etudiant.Username)] = nom
+		}
+	}
+	// Ce que le poste retient et que le registre ignore encore vaut aussi :
+	// une reprise faite avant la publication en est pleine.
+	for _, personne := range s.classrooms.People(org) {
+		compte := strings.ToLower(strings.TrimSpace(personne.Username))
+		if compte == "" || strings.TrimSpace(personne.FullName) == "" {
+			continue
+		}
+		if _, deja := noms[compte]; !deja {
+			noms[compte] = personne.FullName
+		}
+	}
+	return noms
+}
+
+// owners relève, pour les dépôts d'un préfixe, le compte GitHub que leurs accès
+// désignent. Un appel par dépôt la première fois, rien ensuite : le cache les
+// retient, et l'écran les redemande à chaque correction de rapprochement.
+func (s *Server) owners(org, prefix string, repos []groups.RepoInfo) map[string]string {
+	groupe := groups.Build(prefix, repos)
+	if groupe.Len() == 0 {
+		return nil
+	}
+	noms := make([]string, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		noms = append(noms, depot.Name)
+	}
+	trouves := s.resolver(org).Owners(org, noms, s.deps.Viewer, nil)
+	comptes := make(map[string]string, len(trouves))
+	for nom, proprietaire := range trouves {
+		if proprietaire.Login != "" {
+			comptes[nom] = proprietaire.Login
+		}
+	}
+	return comptes
 }
 
 // entries rend la liste du groupe et dit s'il reste quelque chose à deviner.
@@ -181,6 +237,12 @@ func (s *Server) handleImport(writer http.ResponseWriter, request *http.Request)
 		fail(writer, err)
 		return
 	}
+	if plan.Divided() {
+		fail(writer, valid.Errorf(
+			"« %s » couvre %d travaux : reprenez-les un à la fois.",
+			body.Prefix, len(plan.Splits)))
+		return
+	}
 	if !plan.Ready() {
 		fail(writer, valid.Errorf("Aucun dépôt à reprendre pour « %s ».", body.Prefix))
 		return
@@ -246,11 +308,18 @@ func (s *Server) importRequest(request *http.Request) (string, importInput, erro
 // profiles demande à GitHub le nom affiché des comptes d'un travail. C'est
 // l'indice le plus sûr après le numéro d'étudiant, et il ne coûte qu'une
 // requête par compte inconnu.
-func (s *Server) profiles(org, prefix string, repos []groups.RepoInfo) map[string]string {
+func (s *Server) profiles(org, prefix string, repos []groups.RepoInfo,
+	proprietaires map[string]string) map[string]string {
 	groupe := groups.Build(prefix, repos)
 	pairs := make([]identity.Pair, 0, groupe.Len())
 	for _, depot := range groupe.Repos {
-		pairs = append(pairs, identity.Pair{Repo: depot.Suffix, Login: depot.Suffix})
+		// Le compte des accès d'abord : demander le profil de ce que le nom
+		// portait — « firebase-Walid7Akk » — ne ramènerait rien.
+		compte := depot.Suffix
+		if login := proprietaires[depot.Name]; login != "" {
+			compte = login
+		}
+		pairs = append(pairs, identity.Pair{Repo: compte, Login: compte})
 	}
 	if len(pairs) == 0 {
 		return nil

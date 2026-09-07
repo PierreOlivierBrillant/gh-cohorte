@@ -91,3 +91,67 @@ func TestProfilIntrouvable(t *testing.T) {
 		t.Errorf("noms = %+v", noms)
 	}
 }
+
+func TestOwnersLitLeCompteDansLesAcces(t *testing.T) {
+	client, serveur := monter(t)
+	// Le nom ne dit pas où finit le travail : « kickmyb-firebase » en fait
+	// partie, et le découper au jugé donnerait « firebase-Walid7Akk ».
+	serveur.State.AddRepo("acme", "kickmyb-firebase-Walid7Akk", true)
+	serveur.State.AddCollaborator("acme/kickmyb-firebase-Walid7Akk", "Walid7Akk", "push")
+	// L'enseignant a accès à tout : il n'est l'indice de rien.
+	serveur.State.AddCollaborator("acme/kickmyb-firebase-Walid7Akk", "prof", "admin")
+
+	resolveur := identity.New(client, cache.NewIn(t.TempDir(), true), 4)
+	trouves := resolveur.Owners("acme", []string{"kickmyb-firebase-Walid7Akk"}, "prof", nil)
+	if trouves["kickmyb-firebase-Walid7Akk"].Login != "Walid7Akk" {
+		t.Fatalf("propriétaire = %+v", trouves["kickmyb-firebase-Walid7Akk"])
+	}
+}
+
+func TestOwnersCompteUneInvitationNonAcceptee(t *testing.T) {
+	client, serveur := monter(t)
+	serveur.State.AddRepo("acme", "tp1-jlpicard", true)
+	serveur.State.Invite("acme/tp1-jlpicard", "jlpicard", "push")
+
+	resolveur := identity.New(client, cache.NewIn(t.TempDir(), true), 4)
+	trouves := resolveur.Owners("acme", []string{"tp1-jlpicard"}, "prof", nil)
+	if trouves["tp1-jlpicard"].Login != "jlpicard" {
+		t.Fatalf("propriétaire = %+v : une invitation en attente vaut un accès",
+			trouves["tp1-jlpicard"])
+	}
+}
+
+func TestOwnersSansAccesNeTranchePas(t *testing.T) {
+	client, serveur := monter(t)
+	serveur.State.AddRepo("acme", "tp1-orphelin", true)
+
+	resolveur := identity.New(client, cache.NewIn(t.TempDir(), true), 4)
+	trouves := resolveur.Owners("acme", []string{"tp1-orphelin"}, "prof", nil)
+	if trouves["tp1-orphelin"].Login != "" {
+		t.Fatalf("propriétaire = %+v : rien n'y donne accès", trouves["tp1-orphelin"])
+	}
+}
+
+func TestOwnersNeRedemandePasCeQuIlSait(t *testing.T) {
+	client, serveur := monter(t)
+	serveur.State.AddRepo("acme", "tp1-jlpicard", true)
+	serveur.State.AddCollaborator("acme/tp1-jlpicard", "jlpicard", "push")
+	stockage := cache.NewIn(t.TempDir(), true)
+
+	identity.New(client, stockage, 4).Owners("acme", []string{"tp1-jlpicard"}, "prof", nil)
+	appels := serveur.State.CallCount("/collaborators")
+	if appels == 0 {
+		t.Fatal("aucun appel : le premier passage doit lire les accès")
+	}
+
+	// Un résolveur neuf, mais le même cache : plus rien ne part sur le réseau.
+	trouves := identity.New(client, stockage, 4).
+		Owners("acme", []string{"tp1-jlpicard"}, "prof", nil)
+	if trouves["tp1-jlpicard"].Login != "jlpicard" {
+		t.Fatalf("propriétaire = %+v", trouves["tp1-jlpicard"])
+	}
+	if serveur.State.CallCount("/collaborators") != appels {
+		t.Fatalf("appels = %d, attendu %d : le cache devait répondre",
+			serveur.State.CallCount("/collaborators"), appels)
+	}
+}

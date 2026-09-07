@@ -17,6 +17,9 @@ const (
 	ReposTTL   = 6 * time.Hour
 	OrgsTTL    = 12 * time.Hour
 	ProfileTTL = 30 * 24 * time.Hour
+	// AccessTTL est courte : un étudiant ajouté à un dépôt doit être vu le jour
+	// même, là où un nom de profil ne change presque jamais.
+	AccessTTL = 6 * time.Hour
 	// RegistryTTL est longue à dessein : ce n'est pas le temps qui dit si le
 	// registre a bougé, c'est le commit relevé sur sa branche. La péremption
 	// n'est là que pour ne pas garder indéfiniment ce qui ne sert plus.
@@ -35,6 +38,11 @@ func RegistryKey(org string) string { return "registry:" + strings.ToLower(org) 
 
 // ProfileKey est la clé du nom complet associé à un compte GitHub.
 func ProfileKey(login string) string { return "profile:" + strings.ToLower(login) }
+
+// AccessKey est la clé des comptes qui ont accès à un dépôt.
+func AccessKey(org, repo string) string {
+	return "access:" + strings.ToLower(org) + "/" + strings.ToLower(repo)
+}
 
 // Dir renvoie l'emplacement du cache, conforme au standard du système.
 func Dir() string {

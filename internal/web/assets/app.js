@@ -2969,27 +2969,55 @@ for (const tete of document.querySelectorAll('#import-stepper .etape-tete')) {
 
 // --- 1. le travail
 
+// viderImport ramène l'assistant à son premier écran. Effacer les seuls résumés
+// des étapes ne suffit pas : leurs corps sont repliés, pas vides, et une reprise
+// rouverte montrerait la liste, la place et les rapprochements de la
+// précédente — que « Vérifier » renverrait au serveur.
+function viderImport() {
+  // Une correction faite juste avant de partir a pu laisser une vérification en
+  // vol : elle redessinerait l'écran qu'on vient de vider.
+  clearTimeout(importAttente);
+  importTravail = '';
+  importPlan = null;
+  importNoms = [];
+  importChoix = new Map();
+  importDevinee = {};
+
+  vider($('import-travaux'));
+  viderDepot('import-liste');
+  for (const id of ['import-session', 'import-cours', 'import-groupe', 'import-nom']) {
+    $(id).value = '';
+  }
+  $('import-nommes').checked = false;
+  $('import-filtre').value = 'tout';
+  $('import-suite-bloc').hidden = false;
+  vider($('import-rapprochements').querySelector('tbody'));
+  vider($('import-renommages').querySelector('tbody'));
+  vider($('import-avis'));
+  vider($('import-journal'));
+  $('import-barre').value = 0;
+  $('import-resume').textContent = '';
+  $('import-compte').textContent = '';
+  $('import-etat').textContent = '';
+  dire('import-place-note', '');
+  for (const nom of ['travail', 'liste', 'place', 'verifier', 'noms', 'journal']) {
+    marquerEtape(nom, '');
+  }
+  ouvrirEtape('travail');
+}
+
 async function preparerImport() {
   const org = etat.organisation;
   if (!org) return;
+  // Vidé avant d'aller chercher : une reprise qui échoue laisserait sinon
+  // l'écran de la précédente, intact et trompeur.
+  viderImport();
   const vue = await tenter(() => api('GET', `/api/orgs/${encode(org)}/foreign`), 'Reprise');
   if (!vue) return;
 
   $('import-aide-texte').textContent = vue.help || '';
   const travaux = vue.assignments || [];
   const conteneur = $('import-travaux');
-  vider(conteneur);
-  importTravail = '';
-  importPlan = null;
-  importNoms = [];
-  importChoix = new Map();
-  importDevinee = {};
-  dire('import-place-note', '');
-  $('import-nommes').checked = false;
-  for (const nom of ['travail', 'liste', 'place', 'verifier', 'noms', 'journal']) {
-    marquerEtape(nom, '');
-  }
-  ouvrirEtape('travail');
 
   $('import-resume').textContent = travaux.length
     ? `${vue.repos.length} dépôt(s) ne suivent pas la nomenclature. Choisissez le travail à reprendre.`
@@ -3143,6 +3171,15 @@ async function verifier(complet) {
     'Reprise');
   if (!plan) return;
   importPlan = plan;
+  marquerEtape('place', plan.scope);
+  // Le préfixe deviné cachait plusieurs travaux : les accès viennent de le
+  // dire, et il n'y a rien à rapprocher tant qu'on n'a pas choisi lequel.
+  if ((plan.splits || []).length > 1) {
+    montrerTravauxCaches(plan);
+    ouvrirEtape('verifier');
+    return;
+  }
+  $('import-suite-bloc').hidden = false;
   if (complet) {
     lireNoms(plan);
     dessinerRapprochements(plan);
@@ -3150,8 +3187,50 @@ async function verifier(complet) {
   dessinerAvis(plan);
   dessinerRenommages(plan);
   compter();
-  marquerEtape('place', plan.scope);
   if (complet) ouvrirEtape('verifier');
+}
+
+// montrerTravauxCaches propose les travaux qu'un préfixe fourre-tout
+// rassemblait. « kickmyb » n'est pas un travail : « kickmyb-firebase » et
+// « kickmyb-android » en sont deux, et se reprennent l'un après l'autre.
+function montrerTravauxCaches(plan) {
+  vider($('import-rapprochements').querySelector('tbody'));
+  vider($('import-renommages').querySelector('tbody'));
+  // Rien à continuer tant que le travail n'est pas tranché : l'étape des noms
+  // n'aurait aucun dépôt à montrer.
+  $('import-suite-bloc').hidden = true;
+  $('import-compte').textContent = '';
+  marquerEtape('verifier', '');
+  marquerEtape('noms', '');
+
+  const avis = $('import-avis');
+  vider(avis);
+  const bloc = el('div', { classe: 'avis alerte' },
+    el('p', { texte: `« ${plan.prefix} » n'est pas un travail : les accès aux dépôts en `
+      + `révèlent ${plan.splits.length}. Reprenez-les un à la fois.` }));
+  const choix = el('div', { classe: 'actions' });
+  for (const travail of plan.splits) {
+    choix.append(el('button', {
+      classe: 'bouton', type: 'button',
+      texte: `${travail.prefix} · ${travail.count} dépôt(s)`,
+      onclick: () => reprendreTravail(travail.prefix),
+    }));
+  }
+  bloc.append(choix);
+  avis.append(bloc);
+}
+
+// reprendreTravail refait la lecture pour un seul des travaux révélés. Le nom
+// d'arrivée le suit quand rien d'autre n'a été tapé : c'est celui-là qu'on vient
+// de choisir.
+function reprendreTravail(prefixe) {
+  const ancien = importTravail;
+  importTravail = prefixe;
+  marquerEtape('travail', prefixe);
+  if (!$('import-nom').value.trim() || $('import-nom').value.trim() === ancien) {
+    $('import-nom').value = prefixe;
+  }
+  verifier(true);
 }
 
 // lireNoms retient tout ce que la liste portait : ceux qu'un dépôt a trouvés,
@@ -3235,6 +3314,7 @@ function planifierVerification() {
 
 $('import-filtre').addEventListener('change', filtrer);
 $('import-nommes').addEventListener('change', () => verifier(false));
+$('import-suite').addEventListener('click', () => ouvrirEtape('noms'));
 
 // filtrer ne change que ce qu'on regarde : les dépôts cachés sont repris comme
 // les autres. Ce qui entre ou non dans la reprise se décide à l'étape suivante.
@@ -3282,6 +3362,14 @@ function dessinerAvis(plan) {
     avis.append(el('div', { classe: 'avis alerte',
       texte: `${plan.absent.length} étudiant(s) de la liste n'ont pas de dépôt pour ce `
         + 'travail — ' + quelquesNoms(plan.absent) + '.' }));
+  }
+  // Le compte des autres dépôts vient de leurs accès : c'est le seul qui puisse
+  // encore être faux, et le seul qui mérite d'être signalé.
+  if ((plan.unconfirmed || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `${plan.unconfirmed.length} dépôt(s) ne donnent accès à personne : leur compte `
+        + 'est celui que leur nom porte, faute de mieux — '
+        + quelquesNoms(plan.unconfirmed) + '.' }));
   }
 }
 
@@ -4140,6 +4228,16 @@ function contenuDepot(id) {
 // un tel fichier n'a pas de chemin, et son nom n'en fait pas un.
 function cheminDepot(id) {
   return contenuDepot(id) ? '' : $(id).value.trim();
+}
+
+// viderDepot oublie le fichier d'une zone : le chemin comme les octets déposés.
+// Effacer le champ seul laisserait le contenu derrière, et l'écran dirait qu'il
+// n'y a plus de liste alors qu'une requête en enverrait encore une.
+function viderDepot(id) {
+  const champ = $(id);
+  const zone = champ.closest('.depot');
+  if (zone) delete zone.dataset.contenu;
+  champ.value = '';
 }
 
 for (const zone of document.querySelectorAll('[data-depot]')) brancherDepot(zone);
