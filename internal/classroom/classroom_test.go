@@ -141,6 +141,55 @@ func TestDepotHorsListeCompteApart(t *testing.T) {
 	}
 }
 
+// annuaire joue le registre de l'organisation : il répond au dernier niveau
+// d'un nom de dépôt. Une fiche peut n'y porter qu'un compte — c'est le cas de
+// tout ce qui a été repris de dépôts hérités.
+type annuaire map[string]roster.Person
+
+func (a annuaire) Lookup(fragment string) (roster.Person, bool) {
+	personne, connue := a[strings.ToLower(fragment)]
+	return personne, connue
+}
+
+// Un dépôt qui porte le compte de quelqu'un dont on n'a jamais eu le nom
+// complet désigne quand même une personne du groupe. Sans cela, elle ne
+// figurait dans aucune liste — donc nulle part où la nommer ni la déplacer —
+// alors que c'est justement d'elle qu'il manque le nom.
+func TestUnCompteSansNomCompletResteUnEtudiantDuGroupe(t *testing.T) {
+	inventaire := depots(
+		"a26.5n6.01.tp1.emilie-cote",
+		"a26.5n6.01.tp1.aleksilepaj",
+		"a26.5n6.01.tp1.visiteur-inconnu",
+	)
+	connus := annuaire{
+		"emilie-cote": roster.Person{FullName: "Émilie Côté", Username: "emilie-cote"},
+		"aleksilepaj": roster.Person{Username: "aleksilepaj"},
+	}
+	cours := groupe("a26", "5n6", "01", nil).Enrich(connus, inventaire)
+
+	sansNom, inscrit := cours.Find("aleksilepaj")
+	if !inscrit {
+		t.Fatalf("étudiants déduits : %v", cours.Students)
+	}
+	if sansNom.FullName != "" {
+		t.Errorf("nom complet = %q : rien ne doit être inventé", sansNom.FullName)
+	}
+	// Son dépôt lui est rattaché : il compte parmi ceux du groupe, et non
+	// parmi les orphelins.
+	if _, sien := cours.StudentOf("a26.5n6.01.tp1.aleksilepaj"); !sien {
+		t.Error("le dépôt doit être rattaché à son étudiant")
+	}
+	travaux := cours.Assignments(inventaire)
+	if len(travaux) != 1 || travaux[0].Students != 2 || travaux[0].Others != 1 {
+		t.Fatalf("comptage : %+v", travaux)
+	}
+	// Ce que le registre ignore reste hors liste : un slug n'est pas une
+	// personne de plus.
+	if _, invente := cours.Find("visiteur-inconnu"); invente {
+		t.Error("un dépôt que personne ne réclame ne doit inscrire personne")
+	}
+}
+
 func TestServedRepereLesEtudiantsDejaServis(t *testing.T) {
 	inventaire := depots("a26.5n6.01.tp1.emilie-cote")
 	cours := groupe("a26", "5n6", "01", cohorte)
