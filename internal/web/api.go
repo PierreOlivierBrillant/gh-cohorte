@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
@@ -16,6 +17,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/orgs"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/picker"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -232,6 +234,9 @@ func (s *Server) repos(org string, force bool) ([]groups.RepoInfo, string, error
 	if err != nil {
 		return nil, "", err
 	}
+	// Les dépôts de service sont écartés ici, une fois : rien de ce qui suit
+	// n'a alors à se demander si « .github » est un groupe.
+	fetched = groups.Ordinary(fetched)
 	s.deps.Cache.Set(cache.ReposKey(org), fetched)
 	s.remember(org, fetched)
 	return fetched, "GitHub", nil
@@ -252,6 +257,46 @@ func (s *Server) forget(org string) {
 	s.deps.Cache.Forget(cache.ReposKey(org))
 }
 
+// updateInventory applique à l'inventaire retenu — en mémoire comme dans le
+// cache — un changement que « groups » sait décrire. Sans inventaire connu, il
+// n'y a rien à corriger : la prochaine lecture partira de GitHub.
+func (s *Server) updateInventory(org string, apply func([]groups.RepoInfo) []groups.RepoInfo) {
+	s.mutex.Lock()
+	known, found := s.inventory[org]
+	s.mutex.Unlock()
+
+	if !found {
+		var cached []groups.RepoInfo
+		if !s.deps.Cache.Get(cache.ReposKey(org), cache.ReposTTL, &cached) || len(cached) == 0 {
+			s.forget(org)
+			return
+		}
+		known = cached
+	}
+	corrige := apply(known)
+	s.remember(org, corrige)
+	s.deps.Cache.Set(cache.ReposKey(org), corrige)
+}
+
+// renamed suit dans l'inventaire les dépôts qu'on vient de renommer. Ils sont
+// repris d'un bloc, après la boucle : le cache s'écrit une fois, pas une fois
+// par dépôt.
+func (s *Server) renamed(org string, done []groups.Renamed) {
+	if len(done) == 0 {
+		return
+	}
+	s.updateInventory(org, func(repos []groups.RepoInfo) []groups.RepoInfo {
+		return groups.WithRenamed(repos, done)
+	})
+}
+
+// deleted retire de l'inventaire un dépôt qu'on vient de supprimer.
+func (s *Server) deleted(org, name string) {
+	s.updateInventory(org, func(repos []groups.RepoInfo) []groups.RepoInfo {
+		return groups.WithoutRepo(repos, name)
+	})
+}
+
 // resolver retrouve, par organisation, le service qui nomme les personnes.
 func (s *Server) resolver(org string) *identity.Resolver {
 	s.mutex.Lock()
@@ -259,9 +304,44 @@ func (s *Server) resolver(org string) *identity.Resolver {
 	if existing, found := s.resolvers[org]; found {
 		return existing
 	}
-	fresh := identity.New(s.deps.Client, s.deps.Cache, s.reportDir(), s.deps.Jobs)
+	fresh := identity.New(s.deps.Client, s.deps.Cache, s.deps.Jobs)
 	s.resolvers[org] = fresh
 	return fresh
+}
+
+// ------------------------------------------------------------------ registre
+
+// registryOf retrouve, par organisation, le registre des étudiants.
+func (s *Server) registryOf(org string) *registry.Store {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if existing, found := s.registries[org]; found {
+		return existing
+	}
+	fresh := registry.New(s.deps.Client, org, s.deps.Cache)
+	s.registries[org] = fresh
+	return fresh
+}
+
+// names lit le registre de l'organisation, et rend avec lui ce qu'il faut en
+// dire à qui regarde.
+//
+// Un registre qu'on n'a pas pu lire ne prive de rien : les groupes s'affichent
+// quand même, les noms manquent. Mais cela se dit — une liste trouée qu'on
+// prend pour une liste entière est pire qu'une liste annoncée trouée.
+func (s *Server) names(org string) (*registry.Set, string) {
+	snapshot, err := s.registryOf(org).Load()
+	switch {
+	case err != nil:
+		return registry.Empty(), "Registre des étudiants illisible (" + err.Error() +
+			") : les noms complets manquent."
+	case snapshot.Stale:
+		return snapshot.Set, "GitHub est injoignable : le registre des étudiants " +
+			"affiché est celui de la dernière lecture."
+	case len(snapshot.Issues) > 0:
+		return snapshot.Set, "Registre des étudiants : " + strings.Join(snapshot.Issues, " ; ")
+	}
+	return snapshot.Set, ""
 }
 
 // urlOf reconstitue l'adresse d'un dépôt quand l'API ne l'a pas donnée.

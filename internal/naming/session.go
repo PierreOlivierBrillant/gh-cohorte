@@ -1,8 +1,10 @@
 package naming
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Le nom court d'une session dit la saison et l'année : « a26 », « h27 ». La
@@ -98,4 +100,22 @@ func lower(letter byte) byte {
 		return letter + ('a' - 'A')
 	}
 	return letter
+}
+
+// SessionAt devine le nom court de la session qui contenait un moment donné.
+//
+// Le calendrier collégial découpe l'année en trois : l'hiver de janvier à mai,
+// l'été en juin et juillet, l'automne d'août à décembre. Le printemps existe
+// dans la nomenclature — « p26 » se compose et se lit —, mais aucune date ne
+// le désigne à elle seule : ses mois sont ceux de l'hiver. Une devinette ne le
+// propose donc jamais ; il se tape.
+func SessionAt(moment time.Time) string {
+	lettre := byte('a')
+	switch mois := moment.Month(); {
+	case mois <= time.May:
+		lettre = 'h'
+	case mois <= time.July:
+		lettre = 'e'
+	}
+	return string(lettre) + fmt.Sprintf("%02d", moment.Year()%100)
 }

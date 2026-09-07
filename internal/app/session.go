@@ -9,6 +9,8 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
@@ -47,6 +49,9 @@ type Session struct {
 	// variable d'environnement. Ce que gh peut renouveler en dépend.
 	tokenOrigin string
 
+	// registries retient le registre des étudiants, par organisation.
+	registries map[string]*registry.Store
+
 	// saved est l'état des réglages au chargement : il dit ce qui a changé.
 	saved       config.Settings
 	forgotten   bool        // les réglages ont été oubliés à la demande
@@ -76,6 +81,60 @@ func New(options *Options, console *ui.Console, prompter ui.Prompter) *Session {
 		Sleep:      time.Sleep,
 		Now:        time.Now,
 	}
+}
+
+// registryOf retrouve, par organisation, le registre des étudiants.
+func (s *Session) registryOf(org string) *registry.Store {
+	if s.registries == nil {
+		s.registries = map[string]*registry.Store{}
+	}
+	if existing, found := s.registries[org]; found {
+		return existing
+	}
+	fresh := registry.New(s.Client, org, s.Cache)
+	s.registries[org] = fresh
+	return fresh
+}
+
+// names lit le registre de l'organisation, et rend avec lui ce qu'il faut en
+// dire. Un registre qu'on n'a pas pu lire ne prive de rien : les groupes
+// s'affichent quand même, les noms manquent — mais cela se dit.
+func (s *Session) names(org string) (*registry.Set, string) {
+	snapshot, err := s.registryOf(org).Load()
+	switch {
+	case err != nil:
+		return registry.Empty(), "Registre des étudiants illisible (" + err.Error() +
+			") : les noms complets manquent."
+	case snapshot.Stale:
+		return snapshot.Set, "GitHub est injoignable : le registre affiché est celui " +
+			"de la dernière lecture."
+	case len(snapshot.Issues) > 0:
+		return snapshot.Set, "Registre des étudiants : " + strings.Join(snapshot.Issues, " ; ")
+	}
+	return snapshot.Set, ""
+}
+
+// apprendre confie au registre de l'organisation ce qu'on vient d'apprendre des
+// personnes : leur nom, et le slug que ce nom donnera à leurs dépôts.
+//
+// C'est fait avant toute écriture sur GitHub. Un nom qui n'atteindrait pas le
+// registre ne serait connu que de cette machine, ce qui est précisément ce
+// qu'on veut cesser ; mieux vaut donc s'arrêter là que distribuer d'abord.
+//
+// L'écriture est idempotente : redire au registre ce qu'il sait déjà n'y écrit
+// rien, et le cas courant ne coûte qu'une lecture.
+func (s *Session) apprendre(org string, people []roster.Person) error {
+	nommees := make([]roster.Person, 0, len(people))
+	for _, person := range people {
+		if strings.TrimSpace(person.Username) != "" {
+			nommees = append(nommees, person)
+		}
+	}
+	if len(nommees) == 0 {
+		return nil
+	}
+	_, err := s.registryOf(org).Apply(registry.Learn(nommees...))
+	return err
 }
 
 // Interactive indique si des questions peuvent être posées.
@@ -118,8 +177,6 @@ func (s *Session) Run() int {
 }
 
 func (s *Session) run() (int, error) {
-	s.adoptLegacyCache()
-
 	if s.Options.ClearCache {
 		// Purge demandée en ligne de commande : ni jeton ni réseau nécessaires.
 		removed := s.Cache.Clear()
@@ -153,6 +210,18 @@ func (s *Session) run() (int, error) {
 		return ExitOK, err
 	}
 
+	if mode == "importer" {
+		return s.importRepos()
+	}
+	if mode == "registre" {
+		if s.Options.ForgetRegistryHistory {
+			return s.forgetRegistryHistory()
+		}
+		if s.Options.RegistryTeam != "" {
+			return s.grantRegistryTeam(s.Options.RegistryTeam)
+		}
+		return s.publishRegistry()
+	}
 	if mode == "etudiants" {
 		return newDirectorySession(s).run()
 	}
@@ -161,18 +230,6 @@ func (s *Session) run() (int, error) {
 		return s.manager.run()
 	}
 	return s.create()
-}
-
-// adoptLegacyCache reprend, une seule fois, le cache de la version précédente
-// de l'outil : les inventaires et les noms déjà connus restent valables.
-func (s *Session) adoptLegacyCache() {
-	legacy := cache.LegacyPath()
-	if legacy == "" {
-		return
-	}
-	if adopted := s.Cache.Adopt(legacy); adopted > 0 {
-		s.Console.Note("%d entrée(s) reprises du cache de « classroom » (%s).", adopted, legacy)
-	}
 }
 
 // chooseMode décide du mode : création, gestion d'un groupe, options avancées.
@@ -185,6 +242,13 @@ func (s *Session) adoptLegacyCache() {
 func (s *Session) chooseMode() (string, error) {
 	if s.Options.Web {
 		return "web", nil
+	}
+	if s.Options.ImportRequested {
+		return "importer", nil
+	}
+	if s.Options.PublishRegistry || s.Options.ForgetRegistryHistory ||
+		s.Options.RegistryTeam != "" {
+		return "registre", nil
 	}
 	if s.Options.StudentsRequested {
 		return "etudiants", nil
@@ -209,6 +273,8 @@ func (s *Session) chooseMode() (string, error) {
 			"creer", "Créer des dépôts pour une liste de personnes",
 			"gerer", "Lister et gérer un groupe de dépôts existant",
 			"etudiants", "Lister les étudiants de l'organisation",
+			"importer", "Reprendre des dépôts nommés autrement",
+			"registre", "Publier les noms au registre de l'organisation",
 			"web", "Ouvrir l'interface graphique dans le navigateur",
 			"avance", "Options avancées",
 			"quitter", "Quitter",

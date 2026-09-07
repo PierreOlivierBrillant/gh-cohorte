@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/clone"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
@@ -57,10 +58,6 @@ type manageSession struct {
 }
 
 func newManageSession(session *Session, initialPrefix string) *manageSession {
-	reportDir, err := roster.ExpandPath(session.Options.ReportDir)
-	if err != nil {
-		reportDir = session.Options.ReportDir
-	}
 	return &manageSession{
 		session:       session,
 		org:           session.Settings.Org,
@@ -68,14 +65,28 @@ func newManageSession(session *Session, initialPrefix string) *manageSession {
 		filter:        session.Options.Filter,
 		sortKey:       session.Options.Sort,
 		sortDesc:      session.Options.SortDesc,
-		resolver: identity.New(session.Client, session.Cache, reportDir,
-			session.Options.Jobs),
+		resolver:      identity.New(session.Client, session.Cache, session.Options.Jobs),
 	}
 }
 
 // forget oublie l'inventaire retenu en mémoire, après une purge du cache.
 func (m *manageSession) forget() {
 	m.repos, m.loaded = nil, false
+}
+
+// suivre répercute sur l'inventaire retenu un changement que « groups » sait
+// décrire, plutôt que de tout relire. Ce que le changement produit est décidé
+// dans le domaine : le navigateur en tire le même inventaire.
+//
+// Sans inventaire chargé, il n'y a rien à corriger : le cache est oublié, et la
+// prochaine lecture partira de GitHub.
+func (m *manageSession) suivre(apply func([]groups.RepoInfo) []groups.RepoInfo) {
+	if !m.loaded {
+		m.session.Cache.Forget(cache.ReposKey(m.org))
+		return
+	}
+	m.repos = apply(m.repos)
+	m.session.Cache.Set(cache.ReposKey(m.org), m.repos)
 }
 
 // ------------------------------------------------------------------ inventaire
@@ -1129,8 +1140,10 @@ func (m *manageSession) deleteRepo(group *groups.Group) error {
 		return nil
 	}
 	console.Success("« %s » supprimé.", repo.Name)
-	_, err = m.loadRepos(true)
-	return err
+	m.suivre(func(repos []groups.RepoInfo) []groups.RepoInfo {
+		return groups.WithoutRepo(repos, repo.Name)
+	})
+	return nil
 }
 
 // -------------------------------------------------- déplacer vers un groupe
@@ -1222,21 +1235,24 @@ func (m *manageSession) appliquerRenommage(lignes []classroom.Move, succes strin
 
 	progress := ui.NewProgress(console, "Renommage", len(lignes))
 	renommes, echecs := 0, 0
+	var suivis []groups.Renamed
 	for index, ligne := range lignes {
-		if _, err := m.session.Client.RenameRepo(m.org, ligne.Repo, ligne.Target); err != nil {
+		apres, err := m.session.Client.RenameRepo(m.org, ligne.Repo, ligne.Target)
+		if err != nil {
 			progress.Clear()
 			console.Failure("%s : %v", ligne.Repo, err)
 			echecs++
 		} else {
 			renommes++
+			suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 		}
 		progress.Update(index+1, ligne.Repo)
 	}
 	progress.Finish("")
 
-	if _, err := m.loadRepos(true); err != nil {
-		return ExitOK, err
-	}
+	m.suivre(func(repos []groups.RepoInfo) []groups.RepoInfo {
+		return groups.WithRenamed(repos, suivis)
+	})
 	if echecs > 0 {
 		console.Warning("%d dépôt(s) renommé(s), %d en échec.", renommes, echecs)
 		return ExitFailure, nil

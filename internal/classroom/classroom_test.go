@@ -41,15 +41,6 @@ func groupe(session, cours, section string, etudiants []roster.Person) classroom
 	}
 }
 
-// heritage déclare un groupe resté à l'ancienne nomenclature.
-func heritage(prefixe string, comptes ...string) classroom.Classroom {
-	return classroom.Classroom{
-		Org: "acme", LegacyPrefix: prefixe,
-		Students: classroom.StudentsOf(comptes),
-		Defaults: classroom.DefaultsFrom(config.Default()),
-	}
-}
-
 func noms(travaux []classroom.Assignment) []string {
 	liste := make([]string, 0, len(travaux))
 	for _, travail := range travaux {
@@ -203,167 +194,9 @@ func TestReglagesDuTravailReprennentLeGroupe(t *testing.T) {
 
 // ------------------------------------------------------- ancienne nomenclature
 
-func TestGroupeHeriteResteLisible(t *testing.T) {
-	inventaire := depots(
-		"a26-5n6-travailsession-emilie-cote", "a26-5n6-travailsession-jlpicard",
-		"a26-5n6-tp1-emilie-cote", "a26-5n6-tp1-jlpicard",
-		"a26-4w6-tp1-jlpicard", "a26-4w6-tp1-aminata-d",
-	)
-	cours := heritage("a26-5n6", "emilie-cote", "jlpicard")
-	if !cours.Legacy() {
-		t.Fatal("le groupe devrait être reconnu comme hérité")
-	}
-
-	travaux := cours.Assignments(inventaire)
-	if len(travaux) != 2 {
-		t.Fatalf("travaux trouvés : %v", noms(travaux))
-	}
-	for _, travail := range travaux {
-		if travail.Repos != 2 || travail.Students != 2 {
-			t.Fatalf("« %s » : %+v", travail.Name, travail)
-		}
-	}
-}
-
-func TestGroupeHeriteRattacheSesDepotsParLeCompte(t *testing.T) {
-	cours := heritage("a26-5n6", "emilie-cote", "jlpicard")
-	cours.Students = personnes("Émilie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard")
-
-	student, inscrit := cours.StudentOf("a26-5n6-tp1-jlpicard")
-	if !inscrit || student.Username != "jlpicard" {
-		t.Fatalf("étudiant retrouvé : %+v (%v)", student, inscrit)
-	}
-}
-
-func TestGroupeAQuatreNiveauxRedevientLisible(t *testing.T) {
-	// Écrit tel que la version sans session l'enregistrait : un cours et un
-	// groupe, mais pas de session.
-	chemin := filepath.Join(t.TempDir(), "groupes.json")
-	contenu := `{"version":1,"classrooms":[{"id":"abc","name":"5n6 a26-01",` +
-		`"org":"acme","session":"","course":"5n6","group":"a26-01",` +
-		`"students":[{"full_name":"Émilie Côté","username":"emilie-cote"}],` +
-		`"defaults":{}}]}`
-	if err := os.WriteFile(chemin, []byte(contenu), 0o600); err != nil {
-		t.Fatalf("écriture : %v", err)
-	}
-
-	cours, ok := classroom.Open(chemin).Find("acme", "5n6.a26-01")
-	if !ok {
-		t.Fatal("groupe introuvable")
-	}
-	if !cours.Legacy() || cours.Scope() != "5n6.a26-01" {
-		t.Fatalf("portée %q (hérité : %v)", cours.Scope(), cours.Legacy())
-	}
-
-	inventaire := depots(
-		"5n6.a26-01.tp1.emilie-cote", "5n6.a26-01.travailsession.emilie-cote",
-		"5n6.a26-01.tp1.inconnu", "4w6.a26-01.tp1.emilie-cote",
-	)
-	travaux := cours.Assignments(inventaire)
-	if len(travaux) != 2 {
-		t.Fatalf("travaux trouvés : %v", noms(travaux))
-	}
-	for _, travail := range travaux {
-		attendu := 1
-		if travail.Name == "tp1" {
-			attendu = 2 // le dépôt « inconnu » compte, sans être inscrit
-		}
-		if travail.Repos != attendu || travail.Students != 1 {
-			t.Fatalf("« %s » : %+v", travail.Name, travail)
-		}
-	}
-
-	id := cours.AssignmentID("tp1")
-	if id != "5n6.a26-01.tp1" {
-		t.Fatalf("identifiant %q", id)
-	}
-	if depots := cours.Repos(id, inventaire); len(depots) != 2 {
-		t.Fatalf("dépôts du travail : %+v", depots)
-	}
-	if servis := cours.Served(id, inventaire); !servis["emilie-cote"] {
-		t.Fatalf("servis : %+v", servis)
-	}
-	student, inscrit := cours.StudentOf("5n6.a26-01.tp1.emilie-cote")
-	if !inscrit || student.Username != "emilie-cote" {
-		t.Fatalf("étudiant retrouvé : %+v (%v)", student, inscrit)
-	}
-}
-
 // --------------------------------------------------------------- candidats
 
-func TestCandidatsDeLaNouvelleNomenclature(t *testing.T) {
-	inventaire := depots(
-		"a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp1.jean-luc-picard",
-		"a26.5n6.02.tp1.aminata-diallo",
-	)
-	candidats := classroom.Candidates(inventaire)
-	if len(candidats) != 2 {
-		t.Fatalf("candidats : %+v", candidats)
-	}
-	trouves := map[string]classroom.Candidate{}
-	for _, candidat := range candidats {
-		if candidat.Legacy {
-			t.Fatalf("un candidat de la nouvelle nomenclature est marqué hérité : %+v", candidat)
-		}
-		trouves[candidat.Prefix] = candidat
-	}
-	premier, present := trouves["a26.5n6.01"]
-	if !present || premier.Session != "a26" || premier.Course != "5n6" || premier.Group != "01" {
-		t.Fatalf("candidat : %+v", premier)
-	}
-	if premier.Repos != 2 || len(premier.Students) != 2 {
-		t.Fatalf("comptage : %+v", premier)
-	}
-}
-
-func TestCandidatsHeritesSignalesCommeTels(t *testing.T) {
-	inventaire := depots(
-		"a26-5n6-travailsession-emilie-cote", "a26-5n6-travailsession-jlpicard",
-		"a26.5n6.02.tp1.aminata-diallo", "a26.5n6.02.tp1.emilie-cote",
-	)
-	candidats := classroom.Candidates(inventaire)
-
-	trouves := map[string]classroom.Candidate{}
-	for _, candidat := range candidats {
-		trouves[candidat.Prefix] = candidat
-	}
-	if ancien, present := trouves["a26-5n6"]; !present || !ancien.Legacy {
-		t.Fatalf("le préfixe hérité n'est pas signalé : %+v", candidats)
-	}
-	if nouveau, present := trouves["a26.5n6.02"]; !present || nouveau.Legacy {
-		t.Fatalf("le candidat courant est mal classé : %+v", candidats)
-	}
-	// Les candidats de la nomenclature courante passent devant.
-	if candidats[0].Legacy {
-		t.Fatalf("ordre des candidats : %+v", candidats)
-	}
-}
-
 // ----------------------------------------------------------------- magasin
-
-func TestCandidatsAQuatreNiveauxSontHerites(t *testing.T) {
-	proposes := classroom.Candidates(depots(
-		"5n6.a26-01.tp1.emilie-cote", "5n6.a26-01.travailsession.emilie-cote",
-		"a26.4w6.01.tp1.jean-luc-picard",
-	))
-	if len(proposes) != 2 {
-		t.Fatalf("candidats : %+v", proposes)
-	}
-	// Celui de la nomenclature courante passe devant.
-	if proposes[0].Legacy || proposes[0].Prefix != "a26.4w6.01" {
-		t.Fatalf("premier candidat : %+v", proposes[0])
-	}
-	ancien := proposes[1]
-	if !ancien.Legacy || ancien.Prefix != "5n6.a26-01" || ancien.Repos != 2 {
-		t.Fatalf("candidat hérité : %+v", ancien)
-	}
-	if strings.Join(ancien.Assignments, ",") != "tp1,travailsession" {
-		t.Fatalf("travaux du candidat : %v", ancien.Assignments)
-	}
-	if strings.Join(ancien.Students, ",") != "emilie-cote" {
-		t.Fatalf("étudiants du candidat : %v", ancien.Students)
-	}
-}
 
 func TestMagasinEcritEtRelit(t *testing.T) {
 	chemin := filepath.Join(t.TempDir(), "groupes.json")
@@ -489,23 +322,20 @@ func TestPlaceOuvreUnGroupeJamaisDeclare(t *testing.T) {
 	if err != nil {
 		t.Fatalf("place : %v", err)
 	}
-	if cours.Legacy() || cours.Session != "a26" || cours.Course != "5n6" || cours.Group != "01" {
+	if cours.Session != "a26" || cours.Course != "5n6" || cours.Group != "01" {
 		t.Fatalf("groupe composé : %+v", cours)
 	}
 	if cours.Label() != "Groupe 01" || cours.SessionName() != "Automne 2026" {
 		t.Fatalf("libellés : %q / %q", cours.Label(), cours.SessionName())
 	}
 
-	// Ce qui ne suit pas la nomenclature reste un préfixe hérité.
-	herite, err := classroom.AtScope("acme", "a26-5n6", classroom.DefaultsFrom(config.Default()))
-	if err != nil || !herite.Legacy() || herite.LegacyPrefix != "a26-5n6" {
-		t.Fatalf("préfixe hérité : %+v (%v)", herite, err)
-	}
-	// Et un gabarit d'adoption se reconnaît à ses champs.
-	adopte, err := classroom.AtScope("acme", "projet-{assignment}-{student}",
-		classroom.DefaultsFrom(config.Default()))
-	if err != nil || adopte.LegacyPattern == "" {
-		t.Fatalf("gabarit : %+v (%v)", adopte, err)
+	// Ce qui ne porte pas trois niveaux n'est pas une place, et le dire vaut
+	// mieux que d'ouvrir un groupe qui ne trouverait aucun dépôt.
+	for _, hors := range []string{"a26-5n6", "a26.5n6", "projet-{assignment}-{student}"} {
+		if _, err := classroom.AtScope("acme", hors,
+			classroom.DefaultsFrom(config.Default())); err == nil {
+			t.Errorf("« %s » a été acceptée comme place", hors)
+		}
 	}
 }
 
@@ -661,8 +491,8 @@ func TestDeuxNomsDifferentsNeSeFondentPas(t *testing.T) {
 	}
 }
 
-// Le dépôt que la marque a fait dévier reste celui de son étudiant : sans cela,
-// corriger la liste le rendrait orphelin. Les trois nomenclatures le disent.
+// Le dépôt que la marque de doublon a fait dévier reste celui de son étudiant :
+// sans cela, corriger la liste le rendrait orphelin.
 func TestDepotMarqueResteRattacheASonEtudiant(t *testing.T) {
 	cas := []struct {
 		nom    string
@@ -670,16 +500,11 @@ func TestDepotMarqueResteRattacheASonEtudiant(t *testing.T) {
 		depot  string
 		compte string
 	}{
-		{"courante", groupe("a26", "5n6", "01", cohorte),
+		{"par le nom", groupe("a26", "5n6", "01", cohorte),
 			"a26.5n6.01.tp1.jean-luc-picard-1", "jlpicard"},
-		{"tout en tirets", heritage("tp1", "jlpicard"),
-			"tp1-jlpicard-1", "jlpicard"},
-		{"quatre niveaux", heritage("5n6.a26-01", "jlpicard"),
-			"5n6.a26-01.tp1.jlpicard-1", "jlpicard"},
-		{"adopté par gabarit", classroom.Classroom{
-			Org: "acme", LegacyPattern: "projet-{assignment}-{student}",
-			Students: classroom.StudentsOf([]string{"jlpicard"}),
-		}, "projet-tp1-jlpicard-1", "jlpicard"},
+		{"par le compte", groupe("a26", "5n6", "01",
+			classroom.StudentsOf([]string{"jlpicard"})),
+			"a26.5n6.01.tp1.jlpicard-1", "jlpicard"},
 	}
 	for _, essai := range cas {
 		t.Run(essai.nom, func(t *testing.T) {
@@ -712,5 +537,48 @@ func TestMagasinCorrigeUnCompteMarqueDUnAutreGroupe(t *testing.T) {
 	}
 	if len(relu.Students) != 1 || relu.Students[0].Username != "aleksilepaj" {
 		t.Fatalf("liste relue : %+v", relu.Students)
+	}
+}
+
+// Publier le registre part de tout ce qu'un poste sait des personnes : les
+// doublons y restent, car un compte nommé de deux façons est ce qu'il faut
+// montrer avant de trancher.
+func TestPersonnesDeTousLesGroupes(t *testing.T) {
+	dossier := t.TempDir()
+	store := classroom.Open(filepath.Join(dossier, "groupes.json"))
+	if _, err := store.Save(classroom.Classroom{
+		Org: "acme", Session: "h27", Course: "5n6", Group: "02",
+		Students: []roster.Person{{FullName: "Emlie Côté", Username: "ecote"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{
+			{FullName: "Émilie Côté", Username: "ecote"},
+			{FullName: "Jean-Luc Picard", Username: "jlpicard"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(classroom.Classroom{
+		Org: "autre", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Ailleurs", Username: "ailleurs"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	gens := store.People("acme")
+	// Rangés par place : « a26… » avant « h27… », quel que soit l'ordre d'écriture.
+	if len(gens) != 3 || gens[0].Username != "ecote" || gens[0].FullName != "Émilie Côté" {
+		t.Fatalf("personnes = %+v", gens)
+	}
+	if gens[2].FullName != "Emlie Côté" {
+		t.Fatalf("le doublon n'a pas été conservé : %+v", gens)
+	}
+	for _, person := range gens {
+		if person.Username == "ailleurs" {
+			t.Error("une autre organisation s'est glissée dans la liste")
+		}
 	}
 }

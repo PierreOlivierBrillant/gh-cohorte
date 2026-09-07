@@ -189,7 +189,7 @@ func (s *Server) handleDeleteRepo(writer http.ResponseWriter, request *http.Requ
 		fail(writer, err)
 		return
 	}
-	s.forget(org)
+	s.deleted(org, repo)
 	writeJSON(writer, http.StatusOK, map[string]string{
 		"message": "« " + repo + " » supprimé.",
 	})

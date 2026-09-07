@@ -30,6 +30,85 @@ type RepoInfo struct {
 	PushedAt string `json:"pushed_at"`
 }
 
+// Service dit qu'un dépôt n'appartient à aucun groupe : c'est un dépôt de
+// service de l'organisation. GitHub en réserve un — « .github », qui porte les
+// gabarits communs — et l'outil y rangera le sien.
+//
+// Le point de tête suffit à les reconnaître, et il ne peut désigner qu'eux : la
+// slugification ne le produit jamais, et un nom de la nomenclature qui
+// commencerait par lui aurait un premier niveau vide.
+func Service(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), ".")
+}
+
+// Ordinary écarte d'un inventaire les dépôts de service. C'est fait une fois,
+// là où l'inventaire est chargé, pour que ni la détection des groupes, ni les
+// listes, ni les décomptes n'aient à s'en préoccuper.
+func Ordinary(repos []RepoInfo) []RepoInfo {
+	gardes := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if !Service(repo.Name) {
+			gardes = append(gardes, repo)
+		}
+	}
+	return gardes
+}
+
+// Une écriture ne périme pas forcément l'inventaire. Renommer ou supprimer un
+// dépôt est un changement qu'on connaît exactement : le répercuter sur
+// l'inventaire déjà en main évite de le relire en entier. À l'échelle d'un
+// département — plusieurs milliers de dépôts, des dizaines de pages —, c'est la
+// différence entre un geste instantané et une attente à chaque fois.
+//
+// Ce que devient un inventaire se décide ici, et non dans les interfaces : le
+// terminal et le navigateur font le même geste et doivent en tirer le même
+// inventaire. Chacun garde en revanche sa façon de retenir sa copie.
+//
+// Une création, elle, oblige à relire. Le dépôt neuf n'est pas dans
+// l'inventaire, et sa date de dernier envoi ne s'invente pas : les fichiers de
+// départ y sont déposés après sa création, si bien que ce que GitHub a répondu
+// à la création est déjà dépassé. Une date inventée fausserait la colonne
+// « dernier envoi » et le filtre des muets.
+
+// Renamed est un dépôt renommé : son ancien nom, et ce qu'il est devenu.
+type Renamed struct {
+	Before string
+	After  RepoInfo
+}
+
+// WithRenamed suit dans un inventaire les dépôts qu'on vient de renommer. Un
+// renommage à moitié fait n'est pas un problème : seuls ceux qui ont abouti
+// sont dans la liste.
+func WithRenamed(repos []RepoInfo, done []Renamed) []RepoInfo {
+	if len(repos) == 0 || len(done) == 0 {
+		return repos
+	}
+	suivis := make(map[string]RepoInfo, len(done))
+	for _, item := range done {
+		suivis[strings.ToLower(item.Before)] = item.After
+	}
+	suivi := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if apres, change := suivis[strings.ToLower(repo.Name)]; change {
+			// La date de dernier envoi ne bouge pas : renommer n'est pas pousser.
+			repo.Name, repo.HTMLURL, repo.Private = apres.Name, apres.HTMLURL, apres.Private
+		}
+		suivi = append(suivi, repo)
+	}
+	return suivi
+}
+
+// WithoutRepo retire d'un inventaire un dépôt qu'on vient de supprimer.
+func WithoutRepo(repos []RepoInfo, name string) []RepoInfo {
+	restants := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if !strings.EqualFold(repo.Name, name) {
+			restants = append(restants, repo)
+		}
+	}
+	return restants
+}
+
 // Repo est un dépôt appartenant à un groupe.
 type Repo struct {
 	Name     string

@@ -36,7 +36,10 @@ type RepoState struct {
 	IsTemplate    bool
 	Template      string // « owner/repo » du modèle utilisé à la création
 	PushedAt      string
-	URLOverride   string // adresse renvoyée à la place de github.com (tests de clonage)
+	// History porte les dates des commits, du plus récent au plus ancien —
+	// l'ordre dans lequel GitHub les rend.
+	History     []string
+	URLOverride string // adresse renvoyée à la place de github.com (tests de clonage)
 }
 
 // FullName renvoie « organisation/depot ».
@@ -56,6 +59,10 @@ type State struct {
 	Scopes         string
 	MembershipRole string
 	PerPage        int // taille de page forcée, pour éprouver la pagination
+	// NoLastLink retire « rel="last" » de l'en-tête Link, comme le font les
+	// points d'API qui paginent par curseur. Le client doit alors retomber sur
+	// le suivi de « rel="next" », page après page.
+	NoLastLink bool
 
 	Orgs map[string]string // login → nom affiché
 	// Rôle du compte connecté par organisation ; à défaut, MembershipRole vaut
@@ -63,9 +70,16 @@ type State struct {
 	OrgRoles map[string]string
 	// Droit accordé aux membres de créer des dépôts, quand il est connu.
 	MembersCanCreate map[string]bool
-	Users            map[string]string // login → nom complet (vide = profil sans nom)
-	Repos            map[string]*RepoState
-	Templates        map[string]bool
+	// Droit que tout membre détient d'office sur les dépôts, quand il est
+	// connu : GitHub ne le montre qu'aux propriétaires.
+	DefaultRepoPermission map[string]string
+	Users                 map[string]string // login → nom complet (vide = profil sans nom)
+	Repos                 map[string]*RepoState
+	Templates             map[string]bool
+
+	// Équipes par organisation, et droit qu'elles ont sur chaque dépôt.
+	Teams     map[string][]string          // organisation → équipes
+	TeamRepos map[string]map[string]string // « org/équipe » → dépôt → droit
 
 	Collaborators map[string]map[string]string // dépôt → compte → droit
 	Invitations   map[string][]invitation
@@ -81,6 +95,12 @@ type State struct {
 	Flaky  map[string]int
 
 	Calls []string
+
+	// Hook, quand il est posé, est appelé au début de chaque requête, hors
+	// verrou et depuis la goroutine qui la traite. C'est par là qu'un test
+	// observe — ou retient — les requêtes en vol : compter les requêtes ne dit
+	// pas si elles ont été menées de front, seule leur simultanéité le dit.
+	Hook func(request *http.Request)
 
 	nextInvitation int64
 }
@@ -99,12 +119,13 @@ type treeEntry struct {
 // NewState prépare un état par défaut : une organisation « acme » et trois comptes.
 func NewState() *State {
 	return &State{
-		Viewer:           "prof",
-		Scopes:           "repo, read:org, delete_repo, workflow",
-		MembershipRole:   "admin",
-		Orgs:             map[string]string{"acme": "ACME Éducation"},
-		OrgRoles:         map[string]string{},
-		MembersCanCreate: map[string]bool{},
+		Viewer:                "prof",
+		Scopes:                "repo, read:org, delete_repo, workflow",
+		MembershipRole:        "admin",
+		Orgs:                  map[string]string{"acme": "ACME Éducation"},
+		OrgRoles:              map[string]string{},
+		MembersCanCreate:      map[string]bool{},
+		DefaultRepoPermission: map[string]string{},
 		Users: map[string]string{
 			"emilie-cote": "Émilie Côté",
 			"jlpicard":    "Jean-Luc Picard",
@@ -113,6 +134,8 @@ func NewState() *State {
 		},
 		Repos:          map[string]*RepoState{},
 		Templates:      map[string]bool{"acme/modele-tp": true},
+		Teams:          map[string][]string{"acme": {"enseignants", "direction"}},
+		TeamRepos:      map[string]map[string]string{},
 		Collaborators:  map[string]map[string]string{},
 		Invitations:    map[string][]invitation{},
 		Blobs:          map[string][]byte{},
@@ -211,6 +234,15 @@ func (s *State) CallCount(fragment string) int {
 	return count
 }
 
+// HasCommits dit si un dépôt porte au moins une branche. Un test s'en sert pour
+// vérifier qu'aucune écriture ne part vers un dépôt encore vide — l'état où
+// GitHub répond « Git Repository is empty. ».
+func (s *State) HasCommits(fullName string) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.hasCommitsLocked(fullName)
+}
+
 // AllCalls renvoie une copie du journal des appels.
 func (s *State) AllCalls() []string {
 	s.mutex.Lock()
@@ -253,6 +285,8 @@ func (s *Server) URL() string { return s.Server.URL }
 
 var (
 	orgRe          = regexp.MustCompile(`^/orgs/([^/]+)$`)
+	orgTeamsRe     = regexp.MustCompile(`^/orgs/([^/]+)/teams$`)
+	teamRepoRe     = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/repos/([^/]+)/([^/]+)$`)
 	orgReposRe     = regexp.MustCompile(`^/orgs/([^/]+)/repos$`)
 	membershipRe   = regexp.MustCompile(`^/orgs/([^/]+)/memberships/([^/]+)$`)
 	userRe         = regexp.MustCompile(`^/users/([^/]+)$`)
@@ -263,12 +297,15 @@ var (
 	invitationsRe  = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/invitations$`)
 	invitationRe   = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/invitations/(\d+)$`)
 	blobsRe        = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/blobs$`)
+	blobRe         = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/blobs/([^/]+)$`)
+	contentsRe     = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/contents/(.+)$`)
 	treesRe        = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/trees$`)
 	commitsRe      = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/commits$`)
 	commitRe       = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/commits/([^/]+)$`)
 	refsRe         = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/refs$`)
 	refRe          = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/ref/heads/(.+)$`)
 	refUpdateRe    = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/refs/heads/(.+)$`)
+	historyRe      = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/commits$`)
 )
 
 func (s *Server) handle(writer http.ResponseWriter, request *http.Request) {
@@ -278,6 +315,13 @@ func (s *Server) handle(writer http.ResponseWriter, request *http.Request) {
 
 	state.mutex.Lock()
 	state.Calls = append(state.Calls, key)
+	hook := state.Hook
+	state.mutex.Unlock()
+	if hook != nil {
+		hook(request)
+	}
+
+	state.mutex.Lock()
 	if remaining, found := state.Flaky[key]; found && remaining > 0 {
 		state.Flaky[key] = remaining - 1
 		state.mutex.Unlock()
@@ -347,6 +391,9 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		if permis, connu := state.MembersCanCreate[match[1]]; connu {
 			payload["members_can_create_repositories"] = permis
 		}
+		if droit, connu := state.DefaultRepoPermission[match[1]]; connu {
+			payload["default_repository_permission"] = droit
+		}
 		s.send(writer, 200, payload)
 		return
 	}
@@ -366,6 +413,19 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 			return
 		}
 		s.send(writer, 200, map[string]any{"login": match[1], "name": name})
+		return
+	}
+	if match := orgTeamsRe.FindStringSubmatch(path); match != nil {
+		if _, found := state.Orgs[match[1]]; !found {
+			s.notFound(writer)
+			return
+		}
+		payload := make([]map[string]any, 0)
+		for _, nom := range state.Teams[match[1]] {
+			payload = append(payload, map[string]any{
+				"name": nom, "slug": nom, "privacy": "closed"})
+		}
+		s.send(writer, 200, payload)
 		return
 	}
 	if match := orgReposRe.FindStringSubmatch(path); match != nil {
@@ -415,6 +475,64 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		s.send(writer, 200, payload)
 		return
 	}
+	if match := blobRe.FindStringSubmatch(path); match != nil {
+		raw, exists := state.Blobs[match[3]]
+		if !exists {
+			s.notFound(writer)
+			return
+		}
+		s.send(writer, 200, map[string]any{
+			"sha":      match[3],
+			"size":     len(raw),
+			"encoding": "base64",
+			"content":  base64.StdEncoding.EncodeToString(raw),
+		})
+		return
+	}
+	if match := contentsRe.FindStringSubmatch(path); match != nil {
+		full, fichier := match[1]+"/"+match[2], match[3]
+		if _, exists := state.Repos[full]; !exists {
+			s.notFound(writer)
+			return
+		}
+		// GitHub ne répond pas 404 sur un dépôt sans aucun commit : il répond
+		// 409. Un fichier absent d'un dépôt garni, lui, donne bien 404. Les
+		// confondre rendrait le faux serveur plus indulgent que le vrai.
+		if !state.hasCommitsLocked(full) {
+			s.send(writer, 409, map[string]string{"message": "Git Repository is empty."})
+			return
+		}
+		entry, trouve := state.entryLocked(full, request.URL.Query().Get("ref"), fichier)
+		if !trouve {
+			s.notFound(writer)
+			return
+		}
+		raw := state.Blobs[entry.Blob]
+		s.send(writer, 200, map[string]any{
+			"name": fichier[strings.LastIndex(fichier, "/")+1:],
+			"path": fichier, "type": "file",
+			"sha": entry.Blob, "size": len(raw),
+			"encoding": "base64",
+			"content":  base64.StdEncoding.EncodeToString(raw),
+		})
+		return
+	}
+	// L'historique d'un dépôt, du plus récent au plus ancien. La pagination
+	// est celle du vrai : c'est par elle qu'on remonte au premier commit.
+	if match := historyRe.FindStringSubmatch(path); match != nil {
+		full := match[1] + "/" + match[2]
+		repo, exists := state.Repos[full]
+		if !exists {
+			s.notFound(writer)
+			return
+		}
+		if len(repo.History) == 0 {
+			s.send(writer, 409, map[string]string{"message": "Git Repository is empty."})
+			return
+		}
+		s.sendHistory(writer, request, repo.History)
+		return
+	}
 	if match := commitRe.FindStringSubmatch(path); match != nil {
 		found, exists := state.Commits[match[3]]
 		if !exists {
@@ -458,6 +576,19 @@ func (s *Server) post(writer http.ResponseWriter, request *http.Request, path st
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
 
+	if match := orgTeamsRe.FindStringSubmatch(path); match != nil {
+		if _, found := state.Orgs[match[1]]; !found {
+			s.notFound(writer)
+			return
+		}
+		payload := make([]map[string]any, 0)
+		for _, nom := range state.Teams[match[1]] {
+			payload = append(payload, map[string]any{
+				"name": nom, "slug": nom, "privacy": "closed"})
+		}
+		s.send(writer, 200, payload)
+		return
+	}
 	if match := orgReposRe.FindStringSubmatch(path); match != nil {
 		org := match[1]
 		name, _ := body["name"].(string)
@@ -545,7 +676,12 @@ func (s *Server) post(writer http.ResponseWriter, request *http.Request, path st
 				}
 			}
 		}
-		sha := digest("commit:" + match[1] + "/" + match[2] + ":" + tree + fmt.Sprint(parents))
+		// Le message entre dans l'empreinte, comme dans un vrai commit : deux
+		// commits de même arbre et mêmes parents ne sont pas le même commit.
+		// Sans cela, un commit orphelin repartant du même arbre que le premier
+		// aurait exactement son SHA.
+		sha := digest("commit:" + match[1] + "/" + match[2] + ":" + tree +
+			fmt.Sprint(parents) + ":" + message)
 		state.Commits[sha] = commit{Tree: tree, Parents: parents, Message: message}
 		s.send(writer, 201, map[string]any{"sha": sha})
 		return
@@ -573,6 +709,84 @@ func (s *Server) put(writer http.ResponseWriter, request *http.Request, path str
 	state.mutex.Lock()
 	defer state.mutex.Unlock()
 
+	if match := contentsRe.FindStringSubmatch(path); match != nil {
+		full, fichier := match[1]+"/"+match[2], match[3]
+		depot, exists := state.Repos[full]
+		if !exists {
+			s.notFound(writer)
+			return
+		}
+		branche, _ := body["branch"].(string)
+		if branche == "" {
+			branche = depot.DefaultBranch
+		}
+		raw, err := base64.StdEncoding.DecodeString(fmt.Sprint(body["content"]))
+		if err != nil {
+			s.send(writer, 422, map[string]string{"message": "Invalid base64 content"})
+			return
+		}
+		message, _ := body["message"].(string)
+		fourni, _ := body["sha"].(string)
+
+		// L'arbre courant est repris : l'API des contenus écrit un fichier,
+		// elle n'efface pas les autres.
+		parent := state.Refs[full+"@"+branche]
+		arbre := map[string]treeEntry{}
+		for chemin, entree := range state.Trees[state.Commits[parent].Tree] {
+			arbre[chemin] = entree
+		}
+		if _, deja := arbre[fichier]; deja && fourni == "" {
+			s.send(writer, 422, map[string]string{
+				"message": fichier + " already exists; \"sha\" wasn't supplied."})
+			return
+		}
+
+		blob := digest("blob:" + fichier + ":" + string(raw))
+		state.Blobs[blob] = raw
+		arbre[fichier] = treeEntry{Mode: "100644", Blob: blob}
+		arbreSHA := digest("tree:" + full + ":" + fmt.Sprint(sortedKeys(arbre)) +
+			fmt.Sprint(len(state.Trees)))
+		state.Trees[arbreSHA] = arbre
+		var parents []string
+		if parent != "" {
+			parents = []string{parent}
+		}
+		commitSHA := digest("commit:" + full + ":" + arbreSHA + fmt.Sprint(parents) + ":" + message)
+		state.Commits[commitSHA] = commit{Tree: arbreSHA, Parents: parents, Message: message}
+		state.Refs[full+"@"+branche] = commitSHA
+		state.touchLocked(full)
+		s.send(writer, 201, map[string]any{
+			"content": map[string]any{"path": fichier, "sha": blob},
+			"commit":  map[string]any{"sha": commitSHA},
+		})
+		return
+	}
+	if match := teamRepoRe.FindStringSubmatch(path); match != nil {
+		org, equipe, depot := match[1], match[2], match[3]+"/"+match[4]
+		connue := false
+		for _, nom := range state.Teams[org] {
+			if nom == equipe {
+				connue = true
+				break
+			}
+		}
+		if !connue {
+			s.notFound(writer)
+			return
+		}
+		if _, existe := state.Repos[depot]; !existe {
+			s.notFound(writer)
+			return
+		}
+		droit, _ := body["permission"].(string)
+		cle := org + "/" + equipe
+		if state.TeamRepos[cle] == nil {
+			state.TeamRepos[cle] = map[string]string{}
+		}
+		state.TeamRepos[cle][depot] = droit
+		writer.WriteHeader(204)
+		return
+	}
 	if match := collaboratorRe.FindStringSubmatch(path); match != nil {
 		full := match[1] + "/" + match[2]
 		login := match[3]
@@ -625,11 +839,21 @@ func (s *Server) patch(writer http.ResponseWriter, request *http.Request, path s
 	if match := refUpdateRe.FindStringSubmatch(path); match != nil {
 		full := match[1] + "/" + match[2]
 		branch := match[3]
-		if _, exists := state.Refs[full+"@"+branch]; !exists {
+		actuel, exists := state.Refs[full+"@"+branch]
+		if !exists {
 			s.notFound(writer)
 			return
 		}
 		sha, _ := body["sha"].(string)
+		// Sans « force », GitHub n'accepte que ce qui descend du commit en
+		// place. C'est ce refus qui sert de verrou à l'outil : deux écritures
+		// parties du même commit ne peuvent pas s'écraser en silence.
+		force, _ := body["force"].(bool)
+		if !force && !state.descendsLocked(sha, actuel) {
+			s.send(writer, 422, map[string]string{
+				"message": "Update is not a fast forward"})
+			return
+		}
 		state.Refs[full+"@"+branch] = sha
 		state.touchLocked(full)
 		s.send(writer, 200, map[string]any{"object": map[string]any{"sha": sha}})
@@ -756,16 +980,63 @@ func (s *Server) sendPage(writer http.ResponseWriter, request *http.Request, rep
 	for _, repo := range repos[start:end] {
 		payload = append(payload, s.repoPayload(repo))
 	}
+	// GitHub annonce à la fois la page suivante et la dernière ; c'est cette
+	// dernière qui permet au client de charger les pages de front. Les omettre
+	// laisserait le parcours parallèle hors des tests.
 	if end < len(repos) {
-		next := *request.URL
-		query := next.Query()
-		query.Set("page", strconv.Itoa(page+1))
-		query.Set("per_page", strconv.Itoa(perPage))
-		next.RawQuery = query.Encode()
-		writer.Header().Set("Link",
-			fmt.Sprintf("<%s%s>; rel=\"next\"", s.Server.URL, next.RequestURI()))
+		liens := []string{fmt.Sprintf("<%s>; rel=\"next\"", s.pageURL(request, page+1, perPage))}
+		if !s.State.NoLastLink {
+			dernier := (len(repos) + perPage - 1) / perPage
+			liens = append(liens,
+				fmt.Sprintf("<%s>; rel=\"last\"", s.pageURL(request, dernier, perPage)))
+		}
+		writer.Header().Set("Link", strings.Join(liens, ", "))
 	}
 	s.send(writer, 200, payload)
+}
+
+// sendHistory rend une page de commits, du plus récent au plus ancien, avec le
+// « Link » qui permet de sauter directement à la dernière — c'est par là qu'on
+// atteint le premier commit sans dérouler tout l'historique.
+func (s *Server) sendHistory(writer http.ResponseWriter, request *http.Request, dates []string) {
+	perPage, _ := strconv.Atoi(request.URL.Query().Get("per_page"))
+	if perPage <= 0 {
+		perPage = 30
+	}
+	page, _ := strconv.Atoi(request.URL.Query().Get("page"))
+	if page <= 0 {
+		page = 1
+	}
+	debut := min((page-1)*perPage, len(dates))
+	fin := min(debut+perPage, len(dates))
+
+	payload := make([]map[string]any, 0, fin-debut)
+	for index, date := range dates[debut:fin] {
+		payload = append(payload, map[string]any{
+			"sha": fmt.Sprintf("commit%d", debut+index),
+			"commit": map[string]any{
+				"author": map[string]any{"date": date},
+			},
+		})
+	}
+	if fin < len(dates) {
+		dernier := (len(dates) + perPage - 1) / perPage
+		writer.Header().Set("Link", strings.Join([]string{
+			fmt.Sprintf("<%s>; rel=\"next\"", s.pageURL(request, page+1, perPage)),
+			fmt.Sprintf("<%s>; rel=\"last\"", s.pageURL(request, dernier, perPage)),
+		}, ", "))
+	}
+	s.send(writer, 200, payload)
+}
+
+// pageURL compose l'adresse absolue d'une page, comme GitHub la met dans « Link ».
+func (s *Server) pageURL(request *http.Request, page, perPage int) string {
+	cible := *request.URL
+	query := cible.Query()
+	query.Set("page", strconv.Itoa(page))
+	query.Set("per_page", strconv.Itoa(perPage))
+	cible.RawQuery = query.Encode()
+	return s.Server.URL + cible.RequestURI()
 }
 
 func (s *Server) send(writer http.ResponseWriter, status int, payload any) {
@@ -812,6 +1083,58 @@ func (s *Server) filesLocked(fullName, branch string) map[string]string {
 		files[path] = string(s.State.Blobs[entry.Blob])
 	}
 	return files
+}
+
+// hasCommitsLocked dit si le dépôt porte au moins une branche.
+func (s *State) hasCommitsLocked(fullName string) bool {
+	for cle := range s.Refs {
+		if strings.HasPrefix(cle, fullName+"@") {
+			return true
+		}
+	}
+	return false
+}
+
+// entryLocked retrouve un fichier dans l'arbre d'une référence. La référence
+// est une branche ou un commit — GitHub accepte les deux dans « ?ref= » —, et
+// son absence vaut la branche par défaut du dépôt.
+func (s *State) entryLocked(fullName, ref, file string) (treeEntry, bool) {
+	if ref == "" {
+		ref = s.Repos[fullName].DefaultBranch
+	}
+	commitSHA, found := s.Refs[fullName+"@"+ref]
+	if !found {
+		if _, connu := s.Commits[ref]; !connu {
+			return treeEntry{}, false
+		}
+		commitSHA = ref
+	}
+	entry, present := s.Trees[s.Commits[commitSHA].Tree][file]
+	return entry, present
+}
+
+// descendsLocked dit si un commit descend d'un autre, en remontant ses parents.
+// C'est ce que GitHub vérifie avant d'accepter une mise à jour de référence qui
+// ne force pas.
+func (s *State) descendsLocked(candidat, ancetre string) bool {
+	if ancetre == "" || candidat == ancetre {
+		return true
+	}
+	vus := map[string]bool{}
+	pile := []string{candidat}
+	for len(pile) > 0 {
+		sha := pile[len(pile)-1]
+		pile = pile[:len(pile)-1]
+		if sha == ancetre {
+			return true
+		}
+		if vus[sha] {
+			continue
+		}
+		vus[sha] = true
+		pile = append(pile, s.Commits[sha].Parents...)
+	}
+	return false
 }
 
 func (s *State) touchLocked(fullName string) {

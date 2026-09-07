@@ -26,6 +26,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -69,10 +70,11 @@ type Server struct {
 	stop       chan struct{}
 	stopOnce   sync.Once
 
-	mutex     sync.Mutex
-	settings  config.Settings
-	inventory map[string][]groups.RepoInfo  // organisation → dépôts connus
-	resolvers map[string]*identity.Resolver // organisation → noms complets
+	mutex      sync.Mutex
+	settings   config.Settings
+	inventory  map[string][]groups.RepoInfo  // organisation → dépôts connus
+	resolvers  map[string]*identity.Resolver // organisation → noms complets
+	registries map[string]*registry.Store    // organisation → registre des étudiants
 }
 
 // New prépare le serveur et réserve son port sur la boucle locale.
@@ -106,7 +108,14 @@ func New(deps Deps) (*Server, error) {
 		settings:   deps.Settings,
 		inventory:  map[string][]groups.RepoInfo{},
 		resolvers:  map[string]*identity.Resolver{},
+		registries: map[string]*registry.Store{},
 	}
+	// Le magasin consulte le registre avant d'écrire : un nom que le registre
+	// porte déjà n'a pas à être redit dans le fichier local.
+	server.classrooms.Resolving(func(org string) classroom.Names {
+		set, _ := server.names(org)
+		return set
+	})
 	server.handler = server.guard(server.routes())
 	return server, nil
 }
@@ -157,9 +166,6 @@ func (s *Server) Serve(lifetime context.Context) error {
 	return nil
 }
 
-// Close libère le port sans avoir servi (erreur au démarrage).
-func (s *Server) Close() error { return s.listener.Close() }
-
 // routes déclare l'API et la page.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
@@ -201,12 +207,18 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move", s.handleRelocate)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/rename/preview", s.handleRenameAssignmentPreview)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/rename", s.handleRenameAssignment)
-	mux.HandleFunc("GET /api/classrooms/{scope}/assignments/{name}", s.handleAssignment)
-	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/access", s.handleAssignmentAccess)
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/preview", s.handleMigrationPreview)
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/apply", s.handleMigrationApply)
-	mux.HandleFunc("GET /api/orgs/{org}/candidates", s.handleCandidates)
-	mux.HandleFunc("POST /api/orgs/{org}/match", s.handleMatchPattern)
+	mux.HandleFunc("GET /api/classrooms/{scope}/assignments/{name}", s.handleAssignment)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/access", s.handleAssignmentAccess)
+	mux.HandleFunc("GET /api/orgs/{org}/foreign", s.handleForeign)
+	mux.HandleFunc("POST /api/orgs/{org}/import/place", s.handleGuessPlace)
+	mux.HandleFunc("POST /api/orgs/{org}/import/preview", s.handleImportPreview)
+	mux.HandleFunc("POST /api/orgs/{org}/import", s.handleImport)
+	mux.HandleFunc("GET /api/orgs/{org}/registry", s.handleRegistryPreview)
+	mux.HandleFunc("POST /api/orgs/{org}/registry", s.handleRegistryPublish)
+	mux.HandleFunc("POST /api/orgs/{org}/registry/history", s.handleRegistryForgetHistory)
+	mux.HandleFunc("POST /api/orgs/{org}/registry/team", s.handleRegistryGrant)
 
 	// --- listes et code de départ
 	mux.HandleFunc("POST /api/roster/parse", s.handleParseRoster)
@@ -227,7 +239,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/clones/find", s.handleFindClones)
 	mux.HandleFunc("POST /api/clones/clone", s.handleClone)
 	mux.HandleFunc("POST /api/clones/pull", s.handlePull)
-	mux.HandleFunc("POST /api/paths/suggest", s.handleSuggestPath)
 	mux.HandleFunc("POST /api/paths/pick", s.handlePickPath)
 	mux.HandleFunc("POST /api/paths/browse", s.handleBrowsePath)
 

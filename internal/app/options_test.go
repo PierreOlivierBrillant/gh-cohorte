@@ -205,3 +205,46 @@ func TestParseRenouvellementDuJeton(t *testing.T) {
 		t.Fatalf("portées = %q", seul.Scopes)
 	}
 }
+
+func TestDrapeauxDePublicationDuRegistre(t *testing.T) {
+	options, err := app.Parse([]string{"--publish-registry", "--prefer-local"}, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse : %v", err)
+	}
+	if !options.PublishRegistry || !options.PreferLocal {
+		t.Fatalf("options = %+v", options)
+	}
+	// Sans eux, rien n'est demandé : publier ne doit jamais arriver par défaut.
+	nues, err := app.Parse(nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nues.PublishRegistry || nues.PreferLocal {
+		t.Fatalf("options = %+v", nues)
+	}
+}
+
+func TestDrapeauxDImportation(t *testing.T) {
+	// « --import » seul demande la liste des travaux repérés.
+	seul, err := app.Parse([]string{"--import"}, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse : %v", err)
+	}
+	if !seul.ImportRequested || seul.Import != "" {
+		t.Fatalf("options = %+v", seul)
+	}
+	// Avec une valeur, séparée ou collée.
+	for _, args := range [][]string{
+		{"--import", "tp1", "--into", "a26.5n6.1030"},
+		{"--import=tp1", "--into=a26.5n6.1030"},
+	} {
+		options, err := app.Parse(args, io.Discard)
+		if err != nil {
+			t.Fatalf("Parse(%v) : %v", args, err)
+		}
+		if !options.ImportRequested || options.Import != "tp1" ||
+			options.Into != "a26.5n6.1030" {
+			t.Fatalf("options = %+v", options)
+		}
+	}
+}

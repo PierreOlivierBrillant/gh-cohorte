@@ -41,7 +41,7 @@ func TestParcoursInteractifDeCreation(t *testing.T) {
 	}
 
 	attendu := []string{"tp1-aminata-d", "tp1-emilie-cote", "tp1-jlpicard"}
-	if noms := h.State.RepoNames("acme"); strings.Join(noms, ",") != strings.Join(attendu, ",") {
+	if noms := h.depots(); strings.Join(noms, ",") != strings.Join(attendu, ",") {
 		t.Fatalf("dépôts = %v", noms)
 	}
 	h.contient("Connecté en tant que", "@prof", "3 personne(s) valide(s)",
@@ -72,7 +72,7 @@ func TestCreationNonInteractive(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 3 {
+	if noms := h.depots(); len(noms) != 3 {
 		t.Fatalf("dépôts = %v", noms)
 	}
 	// Hors terminal, aucune couleur ni retour chariot.
@@ -125,7 +125,7 @@ func TestNonInteractifExigeLaConfirmation(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("--yes")
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Errorf("rien ne devait être créé : %v", noms)
 	}
 }
@@ -148,7 +148,7 @@ func TestConfirmationRefuseeNeCreeRien(t *testing.T) {
 	if code != app.ExitAborted {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Fatalf("des dépôts ont été créés : %v", noms)
 	}
 	h.contient("Annulé")
@@ -163,7 +163,7 @@ func TestSimulationNeCreeRien(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Fatalf("la simulation a créé des dépôts : %v", noms)
 	}
 	h.contient("SIMULATION", "à créer", "rien n'a été créé sur GitHub")
@@ -183,7 +183,7 @@ func TestIdempotenceDeuxExecutions(t *testing.T) {
 		t.Fatalf("seconde exécution : %d\n%s", code, h.texte())
 	}
 	h.contient("3 déjà présent(s)")
-	if noms := h.State.RepoNames("acme"); len(noms) != 3 {
+	if noms := h.depots(); len(noms) != 3 {
 		t.Errorf("dépôts = %v", noms)
 	}
 }
@@ -201,7 +201,7 @@ func TestEchecIsoleDonneLeCodeUn(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("1 en échec", "Relancez la commande")
-	if noms := h.State.RepoNames("acme"); len(noms) != 3 {
+	if noms := h.depots(); len(noms) != 3 {
 		t.Errorf("le lot doit aller à son terme : %v", noms)
 	}
 }
@@ -228,7 +228,7 @@ func TestComptesInexistantsRetires(t *testing.T) {
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 || noms[0] != "tp1-emilie-cote" {
+	if noms := h.depots(); len(noms) != 1 || noms[0] != "tp1-emilie-cote" {
 		t.Fatalf("dépôts = %v", noms)
 	}
 	h.contient("1 compte(s) inexistant(s)", "@fantome")
@@ -284,7 +284,7 @@ func TestLignesRejeteesSignaleesEtIgnorables(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("1 ligne(s) rejetée(s)", "ligne 3")
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 {
+	if noms := h.depots(); len(noms) != 1 {
 		t.Errorf("dépôts = %v", noms)
 	}
 }
@@ -403,7 +403,7 @@ func TestSaisieManuelleEtEnregistrementCSV(t *testing.T) {
 	if !strings.Contains(string(contenu), "Émilie Côté,emilie-cote") {
 		t.Errorf("CSV = %s", contenu)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 2 {
+	if noms := h.depots(); len(noms) != 2 {
 		t.Errorf("dépôts = %v", noms)
 	}
 }
@@ -424,7 +424,7 @@ func TestSaisieManuelleRefuseLesDoublons(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("figure déjà dans la liste")
-	if noms := h.State.RepoNames("acme"); len(noms) != 2 {
+	if noms := h.depots(); len(noms) != 2 {
 		t.Errorf("dépôts = %v", noms)
 	}
 }
@@ -578,7 +578,7 @@ func TestInterruptionPendantLAssistant(t *testing.T) {
 	if code != app.ExitAborted {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Errorf("rien ne devait être créé : %v", noms)
 	}
 }
@@ -618,7 +618,7 @@ func TestReglagesMemorisesReutilises(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, suivant.texte())
 	}
 	if _, existe := h.State.Repos["acme/tp2-jlpicard"]; !existe {
-		t.Errorf("dépôts = %v", h.State.RepoNames("acme"))
+		t.Errorf("dépôts = %v", h.depots())
 	}
 }
 
@@ -662,7 +662,7 @@ func TestGabaritInvalideRefuse(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("{inconnu}")
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Errorf("rien ne devait être créé : %v", noms)
 	}
 }
@@ -695,7 +695,7 @@ func TestCollisionDeNomsRefuseeAvantToutEcrit(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("Collision de noms")
-	if noms := h.State.RepoNames("acme"); len(noms) != 0 {
+	if noms := h.depots(); len(noms) != 0 {
 		t.Errorf("rien ne devait être créé : %v", noms)
 	}
 }
@@ -791,7 +791,7 @@ func TestParcoursEnModeLigneSortieRedirigee(t *testing.T) {
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 2 {
+	if noms := h.depots(); len(noms) != 2 {
 		t.Fatalf("dépôts = %v", noms)
 	}
 	sortie := h.texte()

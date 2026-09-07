@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -52,6 +53,9 @@ func (s *Server) relocation(request *http.Request, body relocateInput) (relocate
 		return plan, err
 	}
 	repos, _, err := s.repos(depart.Org, false)
+	if err == nil {
+		depart = s.enrichi(depart, repos)
+	}
 	if err != nil {
 		return plan, err
 	}
@@ -115,23 +119,26 @@ func (s *Server) handleRelocate(writer http.ResponseWriter, request *http.Reques
 		" vers « " + plan.arrivee.Label() + " »"
 	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []groups.Renamed
 		for index, ligne := range plan.lignes {
 			if job.Canceled() {
 				break
 			}
-			if _, err := s.deps.Client.RenameRepo(
-				plan.depart.Org, ligne.Repo, ligne.Target); err != nil {
+			apres, err := s.deps.Client.RenameRepo(
+				plan.depart.Org, ligne.Repo, ligne.Target)
+			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
 			job.Progress(index+1, len(plan.lignes), ligne.Repo)
 		}
-		s.forget(plan.depart.Org)
+		s.renamed(plan.depart.Org, suivis)
 
 		bilan := map[string]any{
 			"renamed": renommes, "failed": echecs,

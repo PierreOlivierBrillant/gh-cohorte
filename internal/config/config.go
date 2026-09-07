@@ -29,13 +29,8 @@ var PermissionLabels = map[string]string{
 const (
 	DefaultNamePattern        = "{assignment}-{username}"
 	DefaultDescriptionPattern = "{title} — {fullname}"
-	// LegacyDescriptionPattern est le gabarit d'avant la nomenclature à cinq
-	// niveaux. Il collait le chemin complet du travail dans la description —
-	// « a26.5n6.01.tp1 — Émilie Côté » —, ce qui n'apprend rien. Reconnu tel
-	// quel, il est remplacé par le gabarit courant.
-	LegacyDescriptionPattern = "{assignment} — {fullname}"
-	DefaultCommitMessage     = "Fichiers de départ"
-	DefaultDelaySeconds      = 1.0
+	DefaultCommitMessage      = "Fichiers de départ"
+	DefaultDelaySeconds       = 1.0
 )
 
 // Settings rassemble les paramètres d'une campagne de génération.
@@ -128,7 +123,7 @@ func (s Settings) normalized() Settings {
 	if s.NamePattern == "" {
 		s.NamePattern = base.NamePattern
 	}
-	if s.DescriptionPattern == "" || s.DescriptionPattern == LegacyDescriptionPattern {
+	if s.DescriptionPattern == "" {
 		s.DescriptionPattern = base.DescriptionPattern
 	}
 	if !contains(Visibilities, s.Visibility) {

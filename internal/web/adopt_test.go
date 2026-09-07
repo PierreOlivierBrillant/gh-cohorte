@@ -2,7 +2,6 @@ package web_test
 
 import (
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -11,115 +10,6 @@ import (
 )
 
 // ------------------------------------------------------ adoption par gabarit
-
-func TestGabaritConfronteAuxDepots(t *testing.T) {
-	state := fakegh.NewState()
-	for _, nom := range []string{
-		"projet-tp1-jlpicard", "projet-tp1-emilie-cote", "projet-tp2-jlpicard",
-		"angular-equipe-3", // hors gabarit
-	} {
-		state.AddRepo("acme", nom, true)
-	}
-	h := nouveau(t, state)
-
-	var essai struct {
-		Pattern     string   `json:"pattern"`
-		Prefix      string   `json:"prefix"`
-		Matched     int      `json:"matched"`
-		Total       int      `json:"total"`
-		Assignments []string `json:"assignments"`
-		Students    []string `json:"students"`
-		Rows        []struct {
-			Repo       string `json:"repo"`
-			Assignment string `json:"assignment"`
-			Student    string `json:"student"`
-		} `json:"rows"`
-	}
-	h.json(http.MethodPost, "/api/orgs/acme/match",
-		map[string]any{"pattern": "projet-{assignment}-{student}"}, &essai)
-
-	if essai.Matched != 3 || essai.Total != 4 {
-		t.Fatalf("essai : %+v", essai)
-	}
-	if essai.Prefix != "projet" {
-		t.Fatalf("préfixe %q", essai.Prefix)
-	}
-	if strings.Join(essai.Assignments, ",") != "tp1,tp2" {
-		t.Fatalf("travaux : %v", essai.Assignments)
-	}
-	// Sans liste d'étudiants, la découpe la plus longue l'emporte : le nom
-	// avec tiret se coupe mal, et c'est visible avant d'adopter.
-	trouve := map[string]string{}
-	for _, ligne := range essai.Rows {
-		trouve[ligne.Repo] = ligne.Assignment + "/" + ligne.Student
-	}
-	if trouve["projet-tp1-jlpicard"] != "tp1/jlpicard" {
-		t.Fatalf("découpe : %v", trouve)
-	}
-}
-
-func TestGabaritInvalideRefuse(t *testing.T) {
-	h := nouveau(t, nil)
-	reponse, contenu := h.requete(http.MethodPost, "/api/orgs/acme/match",
-		map[string]any{"pattern": "projet-{assignment}"})
-	if reponse.StatusCode != http.StatusBadRequest {
-		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
-	}
-	if !strings.Contains(string(contenu), "{student}") {
-		t.Fatalf("message : %s", contenu)
-	}
-}
-
-func TestGroupeAdopteParGabaritLitSesTravaux(t *testing.T) {
-	state := fakegh.NewState()
-	for _, nom := range []string{
-		"projet-tp1-jlpicard", "projet-tp1-emilie-cote", "projet-tp2-jlpicard",
-	} {
-		state.AddRepo("acme", nom, true)
-	}
-	h := nouveau(t, state)
-
-	var cree struct {
-		Scope   string `json:"scope"`
-		Pattern string `json:"pattern"`
-	}
-	h.json(http.MethodPost, "/api/classrooms", map[string]any{
-		"pattern": "projet-{assignment}-{student}",
-		"students": []map[string]string{
-			{"username": "jlpicard", "full_name": ""},
-			{"username": "emilie-cote", "full_name": ""},
-		},
-	}, &cree)
-	if cree.Pattern != "projet-{assignment}-{student}" {
-		t.Fatalf("gabarit retenu %q", cree.Pattern)
-	}
-
-	var fiche struct {
-		Assignments []struct {
-			ID       string `json:"id"`
-			Name     string `json:"name"`
-			Repos    int    `json:"repos"`
-			Students int    `json:"students"`
-		} `json:"assignments"`
-	}
-	h.json(http.MethodGet, "/api/classrooms/"+url.PathEscape(cree.Scope), nil, &fiche)
-	if len(fiche.Assignments) != 2 {
-		t.Fatalf("travaux : %+v", fiche.Assignments)
-	}
-	for _, travail := range fiche.Assignments {
-		if travail.Name == "tp1" && (travail.Repos != 2 || travail.Students != 2) {
-			t.Fatalf("tp1 : %+v", travail)
-		}
-	}
-
-	// Un groupe adopté ainsi reste à migrer : on ne lui distribue pas.
-	reponse, contenu := h.requete(http.MethodPost,
-		"/api/classrooms/"+url.PathEscape(cree.Scope)+"/assignments/preview",
-		map[string]any{"name": "tp3", "settings": map[string]any{}})
-	if reponse.StatusCode != http.StatusBadRequest {
-		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
-	}
-}
 
 // ---------------------------------------------------- déplacer un étudiant
 
@@ -146,7 +36,7 @@ func TestEtudiantDeplaceAvecSesDepots(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.emilie-cote," +
 		"a26.5n6.02.tp1.jean-luc-picard,a26.5n6.02.travailsession.jean-luc-picard"
@@ -187,32 +77,9 @@ func TestEtudiantDeplaceSansSesDepots(t *testing.T) {
 	if bilan.Count != 1 || bilan.Moved[0] != "jlpicard" || bilan.Renamed != 0 {
 		t.Fatalf("bilan : %+v", bilan)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "a26.5n6.01.tp1.jean-luc-picard" {
 		t.Fatalf("aucun dépôt ne devait bouger : %v", noms)
-	}
-}
-
-func TestDeplacementRefuseUnGroupeQuiNeSaitPasNommer(t *testing.T) {
-	state := fakegh.NewState()
-	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
-	state.AddRepo("acme", "vieux-tp1-jlpicard", true)
-	h := nouveau(t, state)
-	depart := h.groupe("a26", "5n6", "01", "Jean-Luc Picard", "jlpicard")
-	arrivee := h.heritage("vieux", "emilie-cote")
-
-	reponse, contenu := h.requete(http.MethodPost,
-		"/api/classrooms/"+depart+"/students/move",
-		map[string]any{"username": "jlpicard", "target": arrivee, "repos": true})
-	if reponse.StatusCode != http.StatusBadRequest {
-		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
-	}
-	if !strings.Contains(string(contenu), "nomenclature dépassée") {
-		t.Fatalf("message : %s", contenu)
-	}
-	// Rien n'a bougé : ni les dépôts, ni les listes.
-	if noms := h.State.RepoNames("acme"); len(noms) != 2 {
-		t.Fatalf("dépôts : %v", noms)
 	}
 }
 
@@ -242,7 +109,7 @@ func TestPlusieursEtudiantsDeplacesEnsemble(t *testing.T) {
 		t.Fatalf("bilan : %+v", resultat)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendu := "a26.5n6.01.tp1.emilie-cote," +
 		"a26.5n6.02.tp1.aminata-diallo,a26.5n6.02.tp1.jean-luc-picard"
@@ -279,7 +146,7 @@ func TestDeplacementDeclareLeGroupeDArrivee(t *testing.T) {
 	if resultat["created"] != true || resultat["target_scope"] != "a26.5n6.03" {
 		t.Fatalf("bilan : %+v", resultat)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "a26.5n6.03.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)
 	}
@@ -340,7 +207,7 @@ func TestGroupeDeclareSeRenomme(t *testing.T) {
 	if resultat["renamed"] != float64(1) || resultat["switched"] != true {
 		t.Fatalf("bilan : %+v", resultat)
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 ||
+	if noms := h.depots(); len(noms) != 1 ||
 		noms[0] != "h27.5n6.02.tp1.jean-luc-picard" {
 		t.Fatalf("dépôts : %v", noms)
 	}

@@ -222,3 +222,62 @@ func TestParseSelectionListeVide(t *testing.T) {
 		t.Errorf("ParseSelection = %v, %v", indices, err)
 	}
 }
+
+// Les dépôts de service de l'organisation ne sont pas des dépôts d'étudiants :
+// « .github » porte les gabarits communs, et l'outil y rangera le sien.
+func TestDepotsDeServiceEcartes(t *testing.T) {
+	inventaire := []groups.RepoInfo{
+		{Name: ".github"},
+		{Name: "a26.5n6.01.tp1.emilie-cote"},
+		{Name: ".cohorte"},
+		{Name: "tp1-jlpicard"},
+	}
+	restants := groups.Ordinary(inventaire)
+	if len(restants) != 2 ||
+		restants[0].Name != "a26.5n6.01.tp1.emilie-cote" || restants[1].Name != "tp1-jlpicard" {
+		t.Fatalf("inventaire retenu = %+v", restants)
+	}
+	// Un point ailleurs qu'en tête sépare les niveaux : ce n'est pas un service.
+	if groups.Service("a26.5n6.01.tp1.emilie-cote") {
+		t.Error("un nom de la nomenclature n'est pas un dépôt de service")
+	}
+}
+
+// Renommer un dépôt n'est pas y pousser : sa date de dernier envoi ne bouge
+// pas. C'est ce qui permet de suivre l'inventaire au lieu de le relire.
+func TestInventaireSuitUnRenommage(t *testing.T) {
+	inventaire := []groups.RepoInfo{
+		{Name: "a26.5n6.01.tp1.jlpicard", HTMLURL: "https://x/tp1", PushedAt: "2026-09-01"},
+		{Name: "a26.5n6.01.tp2.jlpicard", HTMLURL: "https://x/tp2", PushedAt: "2026-09-02"},
+	}
+	suivi := groups.WithRenamed(inventaire, []groups.Renamed{{
+		Before: "a26.5n6.01.tp1.jlpicard",
+		After: groups.RepoInfo{
+			Name: "a26.5n6.01.projet.jlpicard", HTMLURL: "https://x/projet", Private: true},
+	}})
+	if suivi[0].Name != "a26.5n6.01.projet.jlpicard" || suivi[0].HTMLURL != "https://x/projet" {
+		t.Fatalf("dépôt renommé = %+v", suivi[0])
+	}
+	if suivi[0].PushedAt != "2026-09-01" {
+		t.Errorf("dernier envoi = %q : renommer n'est pas pousser", suivi[0].PushedAt)
+	}
+	if suivi[1] != inventaire[1] {
+		t.Errorf("un dépôt non renommé a bougé : %+v", suivi[1])
+	}
+	// L'inventaire de départ n'est pas touché : deux lecteurs peuvent le partager.
+	if inventaire[0].Name != "a26.5n6.01.tp1.jlpicard" {
+		t.Error("l'inventaire d'origine a été modifié en place")
+	}
+}
+
+func TestInventaireSansUnDepotSupprime(t *testing.T) {
+	inventaire := []groups.RepoInfo{{Name: "tp1-a"}, {Name: "TP1-B"}, {Name: "tp1-c"}}
+	// La casse d'un nom de dépôt n'en fait pas un autre dépôt.
+	restants := groups.WithoutRepo(inventaire, "tp1-b")
+	if len(restants) != 2 || restants[0].Name != "tp1-a" || restants[1].Name != "tp1-c" {
+		t.Fatalf("inventaire restant = %+v", restants)
+	}
+	if len(groups.WithoutRepo(inventaire, "absent")) != 3 {
+		t.Error("retirer un dépôt absent ne doit rien changer")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -245,6 +246,11 @@ type Org struct {
 	Login                        string `json:"login"`
 	Name                         string `json:"name"`
 	MembersCanCreateRepositories *bool  `json:"members_can_create_repositories"`
+	// DefaultRepositoryPermission est le droit que tout membre de
+	// l'organisation détient d'office sur ses dépôts — « none », « read »,
+	// « write » ou « admin ». GitHub ne le montre qu'aux propriétaires : une
+	// chaîne vide veut dire « on ne sait pas », non « aucun ».
+	DefaultRepositoryPermission string `json:"default_repository_permission"`
 }
 
 // Membership décrit l'appartenance du compte connecté à une organisation.
@@ -268,6 +274,17 @@ type Repo struct {
 	TemplateRepository *struct {
 		FullName string `json:"full_name"`
 	} `json:"template_repository"`
+}
+
+// Info ne retient du dépôt que ce qu'un inventaire en garde. C'est par là qu'un
+// dépôt créé ou renommé rejoint l'inventaire sans qu'on ait à le relire.
+func (r *Repo) Info() groups.RepoInfo {
+	if r == nil {
+		return groups.RepoInfo{}
+	}
+	return groups.RepoInfo{
+		Name: r.Name, Private: r.Private, HTMLURL: r.HTMLURL, PushedAt: r.PushedAt,
+	}
 }
 
 // Collaborator décrit un collaborateur d'un dépôt.
@@ -465,42 +482,168 @@ func (c *Client) DeleteRepo(owner, repo string) error {
 
 // ------------------------------------------------------------------ inventaire
 
-var nextLinkRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
+var (
+	nextLinkRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
+	lastLinkRe = regexp.MustCompile(`<([^>]+)>;\s*rel="last"`)
+	pageNumRe  = regexp.MustCompile(`[?&]page=(\d+)`)
+)
 
-// paginate parcourt toutes les pages d'une collection en suivant l'en-tête Link.
+// PageSize est le nombre d'éléments demandés par page ; c'est le maximum que
+// GitHub accorde.
+const PageSize = 100
+
+// ParallelPages borne le nombre de pages chargées de front. Une volée suffit à
+// effacer l'attente ; en charger davantage n'apporterait qu'un pic de mémoire
+// et les limites secondaires de GitHub, dont l'attente coûte plus cher que le
+// parallélisme ne rapporte.
+const ParallelPages = 8
+
+// paginate parcourt toutes les pages d'une collection.
+//
+// GitHub annonce dès la première page combien il y en a — « Link: rel="last" ».
+// Les suivantes se chargent donc de front plutôt qu'à la file : une
+// organisation de plusieurs milliers de dépôts en compte des dizaines, et les
+// enchaîner une par une y coûtait une quinzaine de secondes.
+//
+// Elles restent lues dans l'ordre où GitHub les rend. C'est ce qui permet à
+// « collect » d'accumuler sans être sûr d'emploi depuis plusieurs goroutines,
+// et ce qui garde d'une exécution à l'autre le même ordre de départ.
+//
+// Un point d'API qui n'annonce pas de dernière page — une collection qui tient
+// sur une seule, une pagination par curseur — retombe sur le suivi de
+// « rel="next" », page après page.
 func (c *Client) paginate(path string, onPage func(total int), collect func([]byte) (int, error)) error {
 	separator := "?"
 	if strings.Contains(path, "?") {
 		separator = "&"
 	}
-	next := c.url(path + separator + "per_page=100")
-	total := 0
+	base := path + separator + "per_page=" + strconv.Itoa(PageSize)
+
+	content, link, err := c.fetchPage(c.url(base + "&page=1"))
+	if err != nil {
+		return err
+	}
+	total, err := absorb(collect, onPage, content, 0)
+	if err != nil {
+		return err
+	}
+	if last := lastPage(link); last > 1 {
+		return c.parallelPages(base, last, total, onPage, collect)
+	}
+	return c.followNext(nextLink(link), total, onPage, collect)
+}
+
+// fetchPage télécharge une page et rend son corps avec son en-tête « Link ».
+// L'adresse est prise telle quelle : celle qu'on compose comme celle que
+// GitHub annonce dans « Link », qui est absolue.
+func (c *Client) fetchPage(address string) ([]byte, string, error) {
+	response, err := c.client().Request(http.MethodGet, address, nil)
+	if err != nil {
+		return nil, "", convert(err)
+	}
+	content, readErr := io.ReadAll(response.Body)
+	c.rememberScopes(response.Header)
+	link := response.Header.Get("Link")
+	response.Body.Close()
+	if readErr != nil {
+		return nil, "", &Error{
+			Status: response.StatusCode, Message: "Réponse illisible : " + readErr.Error()}
+	}
+	return content, link, nil
+}
+
+// absorb confie une page à l'appelant et rend le total cumulé.
+func absorb(collect func([]byte) (int, error), onPage func(total int),
+	content []byte, total int) (int, error) {
+	count, err := collect(content)
+	if err != nil {
+		return total, &Error{Message: "Réponse inattendue de GitHub : " + err.Error()}
+	}
+	total += count
+	if onPage != nil {
+		onPage(total)
+	}
+	return total, nil
+}
+
+// followNext enchaîne les pages une par une, en suivant « rel="next" ».
+func (c *Client) followNext(next string, total int,
+	onPage func(total int), collect func([]byte) (int, error)) error {
 	for next != "" {
-		response, err := c.client().Request(http.MethodGet, next, nil)
+		content, link, err := c.fetchPage(next)
 		if err != nil {
-			return convert(err)
+			return err
 		}
-		content, readErr := io.ReadAll(response.Body)
-		c.rememberScopes(response.Header)
-		link := response.Header.Get("Link")
-		response.Body.Close()
-		if readErr != nil {
-			return &Error{Status: response.StatusCode, Message: "Réponse illisible : " + readErr.Error()}
+		if total, err = absorb(collect, onPage, content, total); err != nil {
+			return err
 		}
-		count, err := collect(content)
-		if err != nil {
-			return &Error{Message: "Réponse inattendue de GitHub : " + err.Error()}
+		next = nextLink(link)
+	}
+	return nil
+}
+
+// parallelPages charge les pages restantes par volées, et lit chaque volée
+// dans l'ordre avant d'entamer la suivante. Rien n'est retenu au-delà d'une
+// volée : la mémoire ne dépend pas du nombre de pages, seulement de leur
+// taille.
+func (c *Client) parallelPages(base string, last, total int,
+	onPage func(total int), collect func([]byte) (int, error)) error {
+	for first := 2; first <= last; first += ParallelPages {
+		volee := ParallelPages
+		if reste := last - first + 1; reste < volee {
+			volee = reste
 		}
-		total += count
-		if onPage != nil {
-			onPage(total)
+		contenus := make([][]byte, volee)
+		echecs := make([]error, volee)
+
+		var groupe sync.WaitGroup
+		for offset := 0; offset < volee; offset++ {
+			groupe.Add(1)
+			go func(offset int) {
+				defer groupe.Done()
+				contenus[offset], _, echecs[offset] = c.fetchPage(
+					c.url(base + "&page=" + strconv.Itoa(first+offset)))
+			}(offset)
 		}
-		next = ""
-		if match := nextLinkRe.FindStringSubmatch(link); match != nil {
-			next = match[1]
+		groupe.Wait()
+
+		for offset, content := range contenus {
+			if echecs[offset] != nil {
+				return echecs[offset]
+			}
+			var err error
+			if total, err = absorb(collect, onPage, content, total); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// nextLink extrait de l'en-tête « Link » l'adresse de la page suivante.
+func nextLink(header string) string {
+	if match := nextLinkRe.FindStringSubmatch(header); match != nil {
+		return match[1]
+	}
+	return ""
+}
+
+// lastPage lit le rang de la dernière page annoncé par l'en-tête « Link ».
+// Zéro dit que GitHub ne l'annonce pas, et qu'il faut suivre « rel="next" ».
+func lastPage(header string) int {
+	match := lastLinkRe.FindStringSubmatch(header)
+	if match == nil {
+		return 0
+	}
+	rang := pageNumRe.FindStringSubmatch(match[1])
+	if rang == nil {
+		return 0
+	}
+	number, err := strconv.Atoi(rang[1])
+	if err != nil {
+		return 0
+	}
+	return number
 }
 
 // ListOrgRepos liste tous les dépôts de l'organisation.
@@ -535,6 +678,43 @@ func (c *Client) ListOrgMemberships(onPage func(total int)) ([]Membership, error
 		return len(page), nil
 	})
 	return all, err
+}
+
+// Team est une équipe de l'organisation.
+type Team struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	// Privacy vaut « secret » ou « closed » ; les équipes secrètes ne sont
+	// visibles que de leurs membres.
+	Privacy string `json:"privacy"`
+}
+
+// ListOrgTeams énumère les équipes de l'organisation. La portée « read:org »
+// est nécessaire, et un compte qui n'est pas membre n'en voit aucune.
+func (c *Client) ListOrgTeams(org string) ([]Team, error) {
+	var all []Team
+	err := c.paginate("orgs/"+url.PathEscape(org)+"/teams", nil, func(content []byte) (int, error) {
+		var page []Team
+		if err := json.Unmarshal(content, &page); err != nil {
+			return 0, err
+		}
+		all = append(all, page...)
+		return len(page), nil
+	})
+	return all, err
+}
+
+// GrantTeamRepo donne à une équipe un droit sur un dépôt de l'organisation.
+//
+// Cela ouvre un accès, cela n'en ferme aucun : ce qui restreint réellement un
+// dépôt, c'est la permission de base de l'organisation. Le dire au bon endroit
+// est la seule façon de ne pas laisser croire le contraire.
+func (c *Client) GrantTeamRepo(org, team, owner, repo, permission string) error {
+	_, err := c.do(http.MethodPut,
+		"orgs/"+url.PathEscape(org)+"/teams/"+url.PathEscape(team)+
+			"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo),
+		map[string]any{"permission": permission})
+	return err
 }
 
 // ListCollaborators renvoie les collaborateurs directs du dépôt. Sans
@@ -681,11 +861,115 @@ func (c *Client) SetBranchHead(owner, repo, branch, commitSHA string, create boo
 	if create {
 		_, err := c.do(http.MethodPost, base,
 			map[string]any{"ref": "refs/heads/" + branch, "sha": commitSHA})
-		return err
+		return notFastForward(err)
 	}
 	_, err := c.do(http.MethodPatch, base+"/heads/"+url.PathEscape(branch),
 		map[string]any{"sha": commitSHA, "force": false})
+	return notFastForward(err)
+}
+
+// File est un fichier relu dans un dépôt.
+type File struct {
+	// SHA est celui du blob, non du commit : c'est lui qui dit si le contenu a
+	// changé depuis la dernière lecture.
+	SHA     string
+	Content []byte
+}
+
+// ReadFile relit un fichier d'un dépôt, à une référence donnée — une branche ou
+// un commit ; vide, c'est la branche par défaut.
+//
+// Un fichier absent rend nil sans erreur : un dépôt qu'on n'a pas encore rempli
+// n'est pas une panne. GitHub le dit de deux façons — 404 quand le fichier
+// manque d'un dépôt garni, 409 « Git Repository is empty. » quand le dépôt n'a
+// aucun commit —, et les deux répondent la même chose à qui demande un
+// fichier : il n'y est pas.
+func (c *Client) ReadFile(owner, repo, file, ref string) (*File, error) {
+	path := repoPath(owner, repo) + "/contents/" + escapePath(file)
+	if ref != "" {
+		path += "?ref=" + url.QueryEscape(ref)
+	}
+	response, err := c.do(http.MethodGet, path, nil,
+		http.StatusNotFound, http.StatusConflict)
+	if err != nil {
+		return nil, err
+	}
+	if response.Status != http.StatusOK {
+		return nil, nil
+	}
+	var payload struct {
+		SHA      string `json:"sha"`
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+	}
+	if err := response.JSON(&payload); err != nil {
+		return nil, &Error{Message: "Contenu illisible : " + err.Error()}
+	}
+	if payload.Encoding != "base64" {
+		return nil, &Error{Message: "Contenu illisible : encodage « " + payload.Encoding + " »."}
+	}
+	// GitHub coupe le base64 en lignes ; le décodeur strict les refuserait.
+	raw, err := base64.StdEncoding.DecodeString(
+		strings.NewReplacer("\n", "", "\r", "").Replace(payload.Content))
+	if err != nil {
+		return nil, &Error{Message: "Contenu illisible : " + err.Error()}
+	}
+	return &File{SHA: payload.SHA, Content: raw}, nil
+}
+
+// escapePath échappe un chemin niveau par niveau : les barres obliques y
+// séparent des dossiers et doivent survivre à l'échappement.
+func escapePath(file string) string {
+	niveaux := strings.Split(file, "/")
+	for index, niveau := range niveaux {
+		niveaux[index] = url.PathEscape(niveau)
+	}
+	return strings.Join(niveaux, "/")
+}
+
+// ResetBranchHead fait pointer la branche sur un commit sans exiger d'avance
+// rapide.
+//
+// C'est la seule écriture qui abandonne le verrou : elle sert à réécrire une
+// branche, non à la faire avancer. Tout ce qui n'est pas atteignable depuis le
+// nouveau commit cesse de l'être.
+func (c *Client) ResetBranchHead(owner, repo, branch, commitSHA string) error {
+	_, err := c.do(http.MethodPatch,
+		repoPath(owner, repo)+"/git/refs/heads/"+url.PathEscape(branch),
+		map[string]any{"sha": commitSHA, "force": true})
 	return err
+}
+
+// PutFile crée un fichier par l'API des contenus et rend le SHA du commit.
+//
+// C'est la seule façon de déposer le premier commit d'un dépôt qui n'en a
+// aucun : GitHub ne tient pas encore un tel dépôt pour un dépôt git, et son API
+// Git y répond « Git Repository is empty. ».
+//
+// Un fichier déjà présent est refusé — le SHA du blob serait exigé —, et ce
+// refus vaut ici pour ce qu'il dit : quelqu'un est arrivé avant.
+func (c *Client) PutFile(owner, repo, file, branch, message string, content []byte) (string, error) {
+	body := map[string]any{
+		"message": message,
+		"content": base64.StdEncoding.EncodeToString(content),
+	}
+	if branch != "" {
+		body["branch"] = branch
+	}
+	response, err := c.do(http.MethodPut,
+		repoPath(owner, repo)+"/contents/"+escapePath(file), body)
+	if err != nil {
+		return "", notFastForward(err)
+	}
+	var payload struct {
+		Commit struct {
+			SHA string `json:"sha"`
+		} `json:"commit"`
+	}
+	if err := response.JSON(&payload); err != nil {
+		return "", &Error{Message: "Réponse illisible : " + err.Error()}
+	}
+	return payload.Commit.SHA, nil
 }
 
 // PushFile est un fichier à déposer dans un dépôt.
@@ -697,39 +981,57 @@ type PushFile struct {
 
 // PushFiles dépose tous les fichiers en un seul commit et renvoie leur nombre.
 func (c *Client) PushFiles(owner, repo string, files []PushFile, message, branch string) (int, error) {
-	entries := make([]TreeEntry, 0, len(files))
-	for _, file := range files {
-		sha, err := c.CreateBlob(owner, repo, file.Content)
-		if err != nil {
-			return 0, err
-		}
-		entries = append(entries, TreeEntry{Path: file.Path, Mode: file.Mode, Type: "blob", SHA: sha})
-	}
-
 	head, err := c.BranchHead(owner, repo, branch)
 	if err != nil {
 		return 0, err
 	}
+	if _, err := c.PushFilesOnto(owner, repo, files, message, branch, head); err != nil {
+		return 0, err
+	}
+	return len(files), nil
+}
+
+// PushFilesOnto dépose les fichiers dans un commit qui descend de « parent »,
+// puis ne fait avancer la branche que si elle en est toujours là ; un parent
+// vide la crée. Le SHA du commit est rendu.
+//
+// C'est un échange conditionnel. Celui qui écrit lit d'abord la tête, puis
+// l'annonce ici : GitHub refuse alors tout ce qui n'est pas une avance rapide,
+// et ce refus tient lieu de verrou entre deux personnes qui écrivent en même
+// temps. Relire la tête ici même le lèverait — le commit descendrait de ce que
+// l'autre vient d'écrire, et l'écraserait sans que rien ne le signale.
+func (c *Client) PushFilesOnto(owner, repo string, files []PushFile,
+	message, branch, parent string) (string, error) {
+	entries := make([]TreeEntry, 0, len(files))
+	for _, file := range files {
+		sha, err := c.CreateBlob(owner, repo, file.Content)
+		if err != nil {
+			return "", err
+		}
+		entries = append(entries, TreeEntry{Path: file.Path, Mode: file.Mode, Type: "blob", SHA: sha})
+	}
+
 	baseTree := ""
 	var parents []string
-	if head != "" {
-		if baseTree, err = c.CommitTree(owner, repo, head); err != nil {
-			return 0, err
+	if parent != "" {
+		var err error
+		if baseTree, err = c.CommitTree(owner, repo, parent); err != nil {
+			return "", err
 		}
-		parents = []string{head}
+		parents = []string{parent}
 	}
 	tree, err := c.CreateTree(owner, repo, entries, baseTree)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	commit, err := c.CreateCommit(owner, repo, message, tree, parents)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	if err := c.SetBranchHead(owner, repo, branch, commit, head == ""); err != nil {
-		return 0, err
+	if err := c.SetBranchHead(owner, repo, branch, commit, parent == ""); err != nil {
+		return "", err
 	}
-	return len(entries), nil
+	return commit, nil
 }
 
 func repoPath(owner, repo string) string {
@@ -737,3 +1039,53 @@ func repoPath(owner, repo string) string {
 }
 
 func itoa(value int64) string { return strconv.FormatInt(value, 10) }
+
+// FirstCommit rend la date du premier commit d'un dépôt.
+//
+// GitHub ne sait rendre les commits que du plus récent au plus ancien : le
+// premier est donc le dernier de la dernière page. Une page d'un seul commit
+// fait tenir la recherche en deux requêtes, quel que soit l'historique — c'est
+// ce que coûte une date qui sert à deviner, pas à décider.
+//
+// Un dépôt vide n'a pas de premier commit : GitHub répond 409, et la date
+// rendue est nulle sans que ce soit une erreur.
+func (c *Client) FirstCommit(owner, repo string) (time.Time, error) {
+	base := c.url(repoPath(owner, repo) + "/commits?per_page=1")
+	moment, link, err := c.commitPage(base + "&page=1")
+	if err != nil || moment.IsZero() {
+		return moment, err
+	}
+	if dernier := lastPage(link); dernier > 1 {
+		moment, _, err = c.commitPage(base + "&page=" + strconv.Itoa(dernier))
+	}
+	return moment, err
+}
+
+// commitPage lit une page de commits et rend la date du premier qu'elle porte.
+func (c *Client) commitPage(address string) (time.Time, string, error) {
+	content, link, err := c.fetchPage(address)
+	if err != nil {
+		var echec *Error
+		// Un dépôt vide, ou dont on ne voit pas l'historique, ne dit rien —
+		// et ne devoir rien dire n'est pas un échec.
+		if errors.As(err, &echec) &&
+			(echec.Status == http.StatusConflict || echec.Status == http.StatusNotFound) {
+			return time.Time{}, "", nil
+		}
+		return time.Time{}, "", err
+	}
+	var commits []struct {
+		Commit struct {
+			Author struct {
+				Date time.Time `json:"date"`
+			} `json:"author"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(content, &commits); err != nil {
+		return time.Time{}, "", &Error{Message: "Historique illisible : " + err.Error()}
+	}
+	if len(commits) == 0 {
+		return time.Time{}, link, nil
+	}
+	return commits[0].Commit.Author.Date, link, nil
+}

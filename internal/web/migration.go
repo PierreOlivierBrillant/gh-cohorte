@@ -5,14 +5,13 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
 // Déplacer un groupe, c'est renommer ses dépôts pour qu'ils tiennent à une
-// autre place : la nomenclature courante quand ils viennent d'une ancienne, ou
-// une autre session, un autre cours, un autre numéro de groupe. Le mécanisme
-// est le même dans les deux cas — c'est pourquoi il n'y en a qu'un.
+// autre place : une autre session, un autre cours, un autre numéro de groupe.
 //
 // GitHub garde une redirection depuis l'ancien nom : les clones et les liens
 // déjà distribués continuent de fonctionner.
@@ -69,13 +68,15 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 		return cours, vide, nil, err
 	}
 	cible.Session, cible.Course, cible.Group = session, course, group
-	cible.LegacyPrefix, cible.LegacyPattern = "", ""
-	if !cours.Legacy() && strings.EqualFold(cours.Scope(), cible.Scope()) {
+	if strings.EqualFold(cours.Scope(), cible.Scope()) {
 		return cours, vide, nil, valid.Errorf(
 			"« %s » est déjà à cette place.", cours.Label())
 	}
 
 	repos, _, err := s.repos(cours.Org, false)
+	if err == nil {
+		cours = s.enrichi(cours, repos)
+	}
 	if err != nil {
 		return cours, vide, nil, err
 	}
@@ -136,7 +137,7 @@ func (s *Server) handleMigrationPreview(writer http.ResponseWriter, request *htt
 		fail(writer, err)
 		return
 	}
-	cours, cible, lignes, err := s.migrationPlan(request, body)
+	_, cible, lignes, err := s.migrationPlan(request, body)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -150,7 +151,7 @@ func (s *Server) handleMigrationPreview(writer http.ResponseWriter, request *htt
 		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"prefix": cours.LegacyPrefix, "scope": cible.Scope(),
+		"scope":   cible.Scope(),
 		"session": cible.Session, "course": cible.Course, "group": cible.Group,
 		"rows": lignes, "ready": prets, "blocked": bloques,
 		"switch": bascule(bloques, 0),
@@ -194,17 +195,19 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 	label := "Déplacement de « " + cours.Label() + " » vers " + cible.Scope()
 	job := s.jobs.Start("migration", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []groups.Renamed
 		for index, ligne := range prets {
 			if job.Canceled() {
 				break
 			}
-			_, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target)
+			apres, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target)
 			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
@@ -213,7 +216,7 @@ func (s *Server) handleMigrationApply(writer http.ResponseWriter, request *http.
 		for _, ligne := range bloques {
 			job.Warn(ligne.Repo + " laissé en place : " + ligne.Problem)
 		}
-		s.forget(cours.Org)
+		s.renamed(cours.Org, suivis)
 
 		suit := bascule(len(bloques), echecs) && !job.Canceled()
 		if suit {

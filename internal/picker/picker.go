@@ -94,12 +94,6 @@ func sessionGraphique() bool {
 	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 }
 
-// Available dit si le système peut ouvrir une fenêtre de sélection.
-func Available() bool {
-	_, _, trouve := disponible()
-	return trouve
-}
-
 // Name nomme le sélecteur qui servira, pour que l'interface puisse le dire.
 func Name() string {
 	choisi, _, trouve := disponible()

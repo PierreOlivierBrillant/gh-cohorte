@@ -149,13 +149,21 @@ func TestLoadAvecBOM(t *testing.T) {
 	}
 }
 
-func TestLoadEncodageInvalide(t *testing.T) {
+// Une liste écrite sous Windows arrive en Windows-1252, et la refuser
+// obligerait à la convertir à la main avant de s'en servir.
+func TestLoadAccepteWindows1252(t *testing.T) {
 	chemin := filepath.Join(t.TempDir(), "latin1.csv")
-	if err := os.WriteFile(chemin, []byte("nom,github\n\xc9milie,emilie\n"), 0o644); err != nil {
+	// « Émilie Côté » en Windows-1252 : un octet par lettre accentuée.
+	contenu := []byte("nom,github\r\n\xc9milie C\xf4t\xe9,emilie-cote\r\n")
+	if err := os.WriteFile(chemin, contenu, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := roster.Load(chemin); err == nil {
-		t.Error("un fichier non UTF-8 doit être refusé")
+	liste, err := roster.Load(chemin)
+	if err != nil {
+		t.Fatalf("Load : %v", err)
+	}
+	if len(liste.People) != 1 || liste.People[0].FullName != "Émilie Côté" {
+		t.Fatalf("liste = %+v", liste.People)
 	}
 }
 

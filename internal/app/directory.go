@@ -40,6 +40,9 @@ func (s *Session) orgRepos(org string, force bool) ([]groups.RepoInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Les dépôts de service sont écartés ici, une fois : rien de ce qui suit
+	// n'a alors à se demander si « .github » est un groupe.
+	repos = groups.Ordinary(repos)
 	s.Console.Printf("  %s dépôt(s) dans l'organisation.", s.Console.OK(itoa(len(repos))))
 	s.Cache.Set(key, repos)
 	return repos, nil
@@ -70,6 +73,9 @@ type directorySession struct {
 	filter    students.Filter
 	sortKey   students.Key
 	sortDesc  bool
+	// avis dit ce qu'il faut savoir du registre : illisible, périmé, troué.
+	// Une liste de noms incomplète qu'on prend pour entière égare.
+	avis string
 }
 
 func newDirectorySession(session *Session) *directorySession {
@@ -104,8 +110,10 @@ func (d *directorySession) load(force bool) error {
 		return err
 	}
 	store := classroom.Open(classroom.PathNextTo(d.session.ConfigFile))
+	set, avis := d.session.names(d.org)
+	d.avis = avis
 	visibles := store.Visible(d.org, repos,
-		classroom.DefaultsFrom(d.session.Settings))
+		classroom.DefaultsFrom(d.session.Settings), set)
 	d.rows = students.Directory(visibles, repos)
 	d.orphelins = students.Unmatched(visibles, repos)
 	d.loaded = true
@@ -122,6 +130,9 @@ func (d *directorySession) show() {
 		titre += ", " + itoa(len(visibles)) + " affichée(s)"
 	}
 	console.Heading(titre)
+	if d.avis != "" {
+		console.Print(console.Warn(d.avis))
+	}
 
 	rows := make([][]string, 0, len(visibles))
 	for index, ligne := range visibles {

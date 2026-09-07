@@ -17,7 +17,11 @@ const (
 	ReposTTL   = 6 * time.Hour
 	OrgsTTL    = 12 * time.Hour
 	ProfileTTL = 30 * 24 * time.Hour
-	fileName   = "cache.json"
+	// RegistryTTL est longue à dessein : ce n'est pas le temps qui dit si le
+	// registre a bougé, c'est le commit relevé sur sa branche. La péremption
+	// n'est là que pour ne pas garder indéfiniment ce qui ne sert plus.
+	RegistryTTL = 90 * 24 * time.Hour
+	fileName    = "cache.json"
 )
 
 // ReposKey est la clé de la liste des dépôts d'une organisation.
@@ -26,28 +30,11 @@ func ReposKey(org string) string { return "repos:" + strings.ToLower(org) }
 // OrgsKey est la clé des organisations accessibles à un compte.
 func OrgsKey(viewer string) string { return "orgs:" + strings.ToLower(viewer) }
 
+// RegistryKey est la clé du registre des étudiants d'une organisation.
+func RegistryKey(org string) string { return "registry:" + strings.ToLower(org) }
+
 // ProfileKey est la clé du nom complet associé à un compte GitHub.
 func ProfileKey(login string) string { return "profile:" + strings.ToLower(login) }
-
-// legacyName est le nom du dossier de cache des versions précédentes de
-// l'outil, écrites en Python : leur contenu a exactement la même forme.
-const legacyName = "classroom"
-
-// marker retient qu'un cache hérité a déjà été repris, pour qu'une purge
-// volontaire ne soit pas défaite au lancement suivant.
-const marker = "reprise-classroom"
-
-// LegacyPath renvoie l'emplacement du cache de la version précédente de l'outil.
-func LegacyPath() string {
-	if base := os.Getenv("XDG_CACHE_HOME"); base != "" {
-		return filepath.Join(base, legacyName, fileName)
-	}
-	base, err := os.UserCacheDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(base, legacyName, fileName)
-}
 
 // Dir renvoie l'emplacement du cache, conforme au standard du système.
 func Dir() string {
@@ -232,44 +219,6 @@ func (c *Cache) Clear() int {
 	c.entries = map[string]entry{}
 	_ = os.Remove(c.Path())
 	return count
-}
-
-// Adopt reprend le cache d'une version précédente de l'outil : les inventaires
-// et les noms de profils déjà connus restent valables. L'ancien fichier n'est
-// pas touché, et la reprise n'a lieu qu'une fois.
-func (c *Cache) Adopt(legacyPath string) int {
-	if !c.Enabled || legacyPath == "" {
-		return 0
-	}
-	content, err := os.ReadFile(legacyPath)
-	if err != nil {
-		return 0
-	}
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-	if _, err := os.Stat(filepath.Join(c.Directory, marker)); err == nil {
-		return 0 // déjà repris : une purge volontaire doit le rester
-	}
-
-	var inherited map[string]entry
-	if err := json.Unmarshal(content, &inherited); err != nil {
-		return 0
-	}
-	entries := c.load()
-	adopted := 0
-	for key, item := range inherited {
-		// Ce qui a été appris depuis l'emporte sur ce qui a été hérité.
-		if _, found := entries[key]; found || len(item.Value) == 0 {
-			continue
-		}
-		entries[key] = item
-		adopted++
-	}
-	c.save()
-	if err := os.MkdirAll(c.Directory, 0o700); err == nil {
-		_ = os.WriteFile(filepath.Join(c.Directory, marker), []byte(legacyPath+"\n"), 0o600)
-	}
-	return adopted
 }
 
 // Age met une durée sous une forme lisible.

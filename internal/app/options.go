@@ -27,7 +27,32 @@ type Options struct {
 	// StudentsRequested ouvre l'annuaire : les étudiants de l'organisation
 	// entière, avec les cours que chacun a suivis.
 	StudentsRequested bool
-	Roster            string
+	// Import reprend des dépôts nommés autrement — « travail-compte », ce que
+	// GitHub Classroom produit — et les fait entrer dans la nomenclature. Sans
+	// valeur, il montre les travaux que ces dépôts dessinent.
+	Import          string
+	ImportRequested bool
+	// Into est la place d'arrivée d'une importation : « a26.5n6.1030 ».
+	Into string
+	// NamedOnly laisse où ils sont les dépôts d'une importation dont on ne
+	// connaît pas la personne, plutôt que de les reprendre sous le compte
+	// qu'ils portent.
+	NamedOnly bool
+	// PublishRegistry verse au registre de l'organisation les noms que ce
+	// poste a accumulés, puis quitte. Avec --dry-run, il montre seulement ce
+	// qu'il ferait ; avec --yes, il ne demande pas confirmation.
+	PublishRegistry bool
+	// PreferLocal fait gagner les noms de ce poste sur ceux du registre quand
+	// les deux diffèrent. Sans lui, le registre garde les siens.
+	PreferLocal bool
+	// ForgetRegistryHistory réécrit la branche du registre en un commit sans
+	// passé, puis quitte. Le nom du dépôt doit être retapé : aucune option,
+	// « --yes » compris, ne court-circuite cette confirmation.
+	ForgetRegistryHistory bool
+	// RegistryTeam donne à une équipe de l'organisation accès au registre,
+	// puis quitte.
+	RegistryTeam string
+	Roster       string
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
@@ -91,6 +116,9 @@ Utilisation :
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
   gh cohorte --students --session a26         étudiants de la session a26
+  gh cohorte --import                         reprendre des dépôts nommés autrement
+  gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+  gh cohorte --publish-registry --dry-run     ce que publier les noms ferait
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
   gh cohorte --refresh-token --scopes delete_repo
@@ -101,6 +129,12 @@ Drapeaux :
   --org ORG                organisation GitHub cible
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
   --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
+  --import [TRAVAIL]       reprendre des dépôts « travail-compte » ; vide, les lister
+  --into PLACE             place d'arrivée d'une importation (« a26.5n6.1030 »)
+  --publish-registry       verser au registre de l'organisation les noms de ce poste
+  --prefer-local           en cas de désaccord, garder le nom de ce poste
+  --registry-team EQUIPE   donner à une équipe accès au registre
+  --forget-registry-history  réécrire le registre sans son historique
   --session COURT          ne lister que les étudiants d'une session (« a26 »)
   --course SIGLE           ne lister que les étudiants d'un cours (« 5n6 »)
   --filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
@@ -109,6 +143,7 @@ Drapeaux :
   --never-pushed           ne lister que les dépôts sans aucun envoi
   --sort nom|compte|envoi  colonne de tri de la liste (défaut : nom)
   --sort-desc              trier du plus grand au plus petit
+  --named-only             ne reprendre que les dépôts dont l'étudiant est connu
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
   --move-to PLACE          déplacer le travail géré vers « session.cours.groupe »
@@ -165,6 +200,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.Usage = func() {}
 
 	manage := set.String("manage", unset, "gérer un groupe existant")
+	importer := set.String("import", unset, "reprendre des dépôts nommés autrement")
 	template := set.String("template", unset, "dépôt modèle")
 	starter := set.String("starter", unset, "dossier de fichiers de départ")
 	delay := set.Float64("delay", -1, "marge entre deux créations")
@@ -172,6 +208,14 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.StringVar(&options.Org, "org", "", "organisation GitHub cible")
 	set.BoolVar(&options.StudentsRequested, "students", false,
 		"lister les étudiants de l'organisation")
+	set.BoolVar(&options.PublishRegistry, "publish-registry", false,
+		"verser au registre les noms de ce poste")
+	set.BoolVar(&options.PreferLocal, "prefer-local", false,
+		"garder les noms de ce poste en cas de désaccord")
+	set.BoolVar(&options.ForgetRegistryHistory, "forget-registry-history", false,
+		"réécrire le registre sans son historique")
+	set.StringVar(&options.RegistryTeam, "registry-team", "",
+		"donner à une équipe accès au registre")
 	session := set.String("session", "", "ne lister qu'une session")
 	sigle := set.String("course", "", "ne lister qu'un cours")
 	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")
@@ -181,6 +225,9 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	tri := set.String("sort", "", "colonne de tri de la liste")
 	set.BoolVar(&options.SortDesc, "sort-desc", false, "trier du plus grand au plus petit")
 
+	set.StringVar(&options.Into, "into", "", "place d'arrivée d'une importation")
+	set.BoolVar(&options.NamedOnly, "named-only", false,
+		"ne reprendre que les dépôts dont l'étudiant est connu")
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
 	set.StringVar(&options.MoveTo, "move-to", "", "place d'arrivée du travail géré")
@@ -242,6 +289,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.ManageRequested = true
 		options.Manage = *manage
 	}
+	if *importer != unset {
+		options.ImportRequested = true
+		options.Import = *importer
+	}
 	if *template != unset {
 		options.TemplateSet = true
 		options.Template = *template
@@ -283,7 +334,9 @@ func translateFlagError(err error) error {
 // « --manage » seul comme « --manage= ». Le paquet flag ne sait pas gérer seul
 // un drapeau dont la valeur est facultative.
 func normalizeArgs(args []string) []string {
-	optional := map[string]bool{"-manage": true, "--manage": true}
+	optional := map[string]bool{
+		"-manage": true, "--manage": true, "-import": true, "--import": true,
+	}
 	normalized := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
 		argument := args[index]

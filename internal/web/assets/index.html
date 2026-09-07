@@ -88,19 +88,152 @@
   <section id="vue-parcours" class="vue" hidden>
     <div class="boite" id="parcours-liste"></div>
 
-    <div id="candidats-accueil" hidden>
-      <div class="barre-outils">
-        <div>
-          <h2>Groupes repérés dans l'organisation</h2>
-          <p class="note">Déduits des dépôts déjà présents. En adopter un reprend sa place et
-            les comptes qu'on y trouve — rien n'est renommé.</p>
+  </section>
+
+  <!-- ----------------------------------------------- reprise de dépôts -->
+  <!-- Des dépôts qu'une autre convention a nommés — « travail-compte », ce que
+       GitHub Classroom produit. Les étapes sont empilées et repliées : une
+       seule est ouverte à la fois, et la page ne s'allonge donc pas avec le
+       nombre d'étudiants. Les longues listes défilent chez elles. -->
+  <section id="vue-import" class="vue" hidden>
+    <ol class="stepper" id="import-stepper">
+
+      <li class="etape" data-etape="travail">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">1</span>
+          <span class="etape-titre">Le travail à reprendre</span>
+          <span class="etape-resume" id="resume-travail"></span>
+        </button>
+        <div class="etape-corps">
+          <p class="note" id="import-resume"></p>
+          <div id="import-travaux" class="liste-choix"></div>
         </div>
-        <div class="actions">
-          <button type="button" id="adoption-ouvrir" class="bouton">Adopter par gabarit…</button>
+      </li>
+
+      <li class="etape" data-etape="liste">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">2</span>
+          <span class="etape-titre">La liste des étudiants</span>
+          <span class="etape-resume" id="resume-liste"></span>
+        </button>
+        <div class="etape-corps">
+          <details id="import-aide">
+            <summary>Où prendre cette liste dans Omnivox ?</summary>
+            <pre class="aide-omnivox" id="import-aide-texte"></pre>
+          </details>
+          <div class="depot" data-depot data-titre="Choisir la liste des étudiants"
+            tabindex="0" role="button">
+            <input type="hidden" id="import-liste">
+            <span class="depot-texte"></span>
+          </div>
         </div>
-      </div>
-      <div class="boite" id="accueil-candidats"></div>
-    </div>
+      </li>
+
+      <li class="etape" data-etape="place">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">3</span>
+          <span class="etape-titre">La place d'arrivée</span>
+          <span class="etape-resume" id="resume-place"></span>
+        </button>
+        <div class="etape-corps">
+          <p class="note" id="import-place-note"></p>
+          <div class="ligne-champs">
+            <label class="champ-bloc etroit-champ">
+              <span class="etiquette">Session</span>
+              <input type="text" id="import-session" class="champ" placeholder="a26">
+            </label>
+            <label class="champ-bloc etroit-champ">
+              <span class="etiquette">Cours</span>
+              <input type="text" id="import-cours" class="champ" placeholder="5N6">
+            </label>
+            <label class="champ-bloc etroit-champ">
+              <span class="etiquette">Groupe</span>
+              <input type="text" id="import-groupe" class="champ" placeholder="1030">
+            </label>
+            <label class="champ-bloc etroit-champ">
+              <span class="etiquette">Nom du travail à l'arrivée</span>
+              <input type="text" id="import-nom" class="champ">
+            </label>
+          </div>
+          <div class="actions">
+            <button type="button" id="import-apercu" class="bouton">Vérifier</button>
+            <span class="note" id="import-etat"></span>
+          </div>
+        </div>
+      </li>
+
+      <li class="etape" data-etape="verifier">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">4</span>
+          <span class="etape-titre">Vérifier les rapprochements</span>
+          <span class="etape-resume" id="resume-verifier"></span>
+        </button>
+        <div class="etape-corps">
+          <div id="import-avis" class="avis-pile"></div>
+          <div class="barre-filtre">
+            <label class="ligne-champ">
+              <span class="note">Afficher</span>
+              <select id="import-filtre" class="champ">
+                <option value="tout">tous les dépôts</option>
+                <option value="verifier">ce qui reste à vérifier</option>
+                <option value="connu">ceux dont l'étudiant est connu</option>
+              </select>
+            </label>
+            <span class="note" id="import-compte"></span>
+          </div>
+          <!-- Le tableau défile chez lui : la page garde la même hauteur, que
+               le groupe compte cinq personnes ou cinquante. -->
+          <div class="tableau-defile">
+            <table class="tableau" id="import-rapprochements">
+              <thead><tr>
+                <th>Compte GitHub</th><th>Étudiant</th><th>Reconnu par</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </li>
+
+      <!-- Le renommage découle de l'étape du dessus : il se lit d'un bloc, une
+           fois les rapprochements arrêtés, pas à chaque correction. -->
+      <li class="etape" data-etape="noms">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">5</span>
+          <span class="etape-titre">Les noms que les dépôts prendront</span>
+          <span class="etape-resume" id="resume-noms"></span>
+        </button>
+        <div class="etape-corps">
+          <p class="note">Les dépôts prendront le <strong>nom complet</strong> de
+            l'étudiant. Un compte laissé sans personne gardera le sien.</p>
+          <label class="case"><input type="checkbox" id="import-nommes">
+            <span>Ne reprendre que les dépôts dont l'étudiant est connu ; laisser
+              les autres où ils sont</span></label>
+          <div class="tableau-defile">
+            <table class="tableau" id="import-renommages">
+              <thead><tr><th>Dépôt</th><th>Deviendra</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="actions">
+            <button type="button" id="import-appliquer" class="bouton vert">
+              Reprendre ces dépôts</button>
+          </div>
+        </div>
+      </li>
+
+      <li class="etape" data-etape="journal">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">6</span>
+          <span class="etape-titre">Journal</span>
+          <span class="etape-resume" id="resume-journal"></span>
+        </button>
+        <div class="etape-corps">
+          <progress id="import-barre" max="100" value="0"></progress>
+          <div class="journal" id="import-journal"></div>
+        </div>
+      </li>
+
+    </ol>
   </section>
 
   <!-- ------------------------------- annuaire : les étudiants de l'organisation -->
@@ -200,12 +333,12 @@
       <div class="boite-corps">
         <label class="champ-bloc">
           <span class="etiquette">Fichier CSV de la machine</span>
+          <div class="depot" data-depot data-titre="Choisir la liste des étudiants"
+            tabindex="0" role="button">
+            <input type="hidden" id="nouveau-chemin">
+            <span class="depot-texte"></span>
+          </div>
           <span class="ligne-champ">
-            <input type="text" id="nouveau-chemin" class="champ" placeholder="cohorte.csv"
-              list="suggestions-roster">
-            <datalist id="suggestions-roster"></datalist>
-            <button type="button" class="bouton" data-parcourir="nouveau-chemin"
-              data-titre="Choisir la liste des étudiants">Parcourir…</button>
             <button type="button" id="nouveau-charger" class="bouton">Charger</button>
           </span>
         </label>
@@ -227,67 +360,6 @@
       <div class="boite-pied">
         <span class="espace"></span>
         <button type="button" id="nouveau-creer" class="bouton vert">Créer le groupe</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ----------------------------------------------- adoption par gabarit -->
-  <section id="vue-adoption" class="vue" hidden>
-    <div class="boite">
-      <div class="boite-entete"><strong>Lire les dépôts</strong></div>
-      <div class="boite-corps">
-        <p class="note">Toutes les organisations n'ont pas suivi de convention. Écrivez comment
-          leurs noms sont faits : le reste s'en déduit, et aucun dépôt n'est renommé.</p>
-        <label class="champ-bloc">
-          <span class="etiquette">Gabarit des noms de dépôts</span>
-          <span class="ligne-champ">
-            <input type="text" id="adoption-gabarit" class="champ"
-              placeholder="projet-{assignment}-{student}">
-            <button type="button" id="adoption-essayer" class="bouton">Essayer</button>
-          </span>
-          <span class="aide"><code>{assignment}</code> est le travail, <code>{student}</code> la
-            personne — son compte GitHub, ou son nom. Le reste est pris à la lettre. Sans
-            <code>{assignment}</code>, tous les dépôts trouvés forment un seul travail.</span>
-        </label>
-        <div class="actions" id="adoption-exemples"></div>
-        <div id="adoption-avis" class="avis-pile"></div>
-        <p class="note" id="adoption-resume"></p>
-        <table class="tableau" id="adoption-table" hidden>
-          <thead><tr><th>Dépôt</th><th>Travail</th><th>Personne</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="boite" id="adoption-suite" hidden>
-      <div class="boite-entete"><strong>Le groupe à déclarer</strong></div>
-      <div class="boite-corps">
-        <p class="note">Adopter ces dépôts, c'est les réunir sous un groupe qui saura les lire
-          avec ce gabarit. Sur GitHub, rien n'est créé, renommé ni supprimé : le groupe est une
-          fiche gardée sur cette machine, et l'oublier ne touche aucun dépôt.</p>
-        <fieldset class="groupe-radio">
-          <legend class="etiquette">Ce que le gabarit a lu à la place de <code>{student}</code></legend>
-          <p class="aide" id="adoption-exemple"></p>
-          <label class="case"><input type="radio" name="adoption-comptes" value="comptes" checked>
-            <span><strong>Des comptes GitHub</strong>
-            <span class="aide">Ces textes deviennent la liste des étudiants du groupe : chaque
-              dépôt est aussitôt rattaché à quelqu'un, et le bouton « Retrouver les noms
-              complets » ira chercher leurs vrais noms sur GitHub.</span></span></label>
-          <label class="case"><input type="radio" name="adoption-comptes" value="noms">
-            <span><strong>Autre chose : des noms, des équipes, des numéros</strong>
-            <span class="aide">Un nom écrit dans un dépôt ne dit pas à quel compte GitHub il
-              appartient : le groupe est alors déclaré sans liste d'étudiants. Ses travaux et ses
-              dépôts s'affichent quand même, mais tant qu'une liste « nom complet, compte
-              GitHub » n'est pas importée depuis « Étudiants », aucun dépôt n'est rattaché à
-              quelqu'un et aucun travail ne peut être distribué.</span></span></label>
-        </fieldset>
-        <p class="note">Rien n'est définitif : la liste s'importe ou se corrige plus tard. Le
-          gabarit, lui, sert tant que les dépôts gardent ces noms — « Réglages du groupe »
-          propose ensuite de les renommer vers la nomenclature courante.</p>
-      </div>
-      <div class="boite-pied">
-        <span class="espace"></span>
-        <button type="button" id="adoption-creer" class="bouton vert">Adopter ces dépôts</button>
       </div>
     </div>
   </section>
@@ -464,11 +536,12 @@
 
         <label class="champ-bloc">
           <span class="etiquette">Dossier de fichiers de départ</span>
+          <div class="depot" data-depot data-dossier="1"
+            data-titre="Choisir le dossier de départ" tabindex="0" role="button">
+            <input type="hidden" id="reglage-starter">
+            <span class="depot-texte"></span>
+          </div>
           <span class="ligne-champ">
-            <input type="text" id="reglage-starter" class="champ" list="suggestions-starter">
-            <datalist id="suggestions-starter"></datalist>
-            <button type="button" class="bouton" data-parcourir="reglage-starter"
-              data-dossier="1" data-titre="Choisir le dossier de départ">Parcourir…</button>
             <button type="button" id="starter-inspecter" class="bouton">Inspecter</button>
           </span>
           <span class="aide">Un dossier de cette machine, déposé dans chaque dépôt en un seul commit.</span>
@@ -704,6 +777,41 @@
       </div>
     </div>
 
+    <!-- Le registre des étudiants vit dans l'organisation. Ce qu'un poste a
+         accumulé avant lui ne monte pas tout seul : cette boîte le montre puis
+         le verse. -->
+    <div class="boite">
+      <div class="boite-entete"><strong>Registre des étudiants</strong></div>
+      <div class="boite-corps">
+        <p class="note">Les noms complets vivent dans un dépôt privé de
+          l'organisation, pour que vos collègues les voient aussi. Ce que ce
+          poste sait et que le registre ignore encore se publie ici.</p>
+        <div id="registre-resume" class="avis-pile"></div>
+        <div id="registre-detail"></div>
+        <label class="case" id="registre-prefer-local-bloc" hidden>
+          <input type="checkbox" id="registre-prefer-local">
+          <span>En cas de désaccord, garder le nom de ce poste</span>
+        </label>
+        <div id="registre-equipe-bloc" hidden>
+          <label class="champ-bloc etroit-champ">
+            <span class="etiquette">Donner accès à une équipe</span>
+            <span class="ligne-champ">
+              <select id="registre-equipe" class="champ"></select>
+              <button type="button" id="registre-donner" class="bouton">Donner accès</button>
+            </span>
+            <span class="aide">Cela ouvre un accès sans en fermer aucun : c'est la
+              permission de base de l'organisation qui restreint le reste.</span>
+          </label>
+        </div>
+      </div>
+      <div class="boite-pied">
+        <button type="button" id="registre-apercu" class="bouton">Voir ce qui monterait</button>
+        <button type="button" id="registre-publier" class="bouton vert" hidden>Publier</button>
+        <button type="button" id="registre-oublier" class="bouton rouge">Effacer l'historique</button>
+        <span class="note" id="registre-etat"></span>
+      </div>
+    </div>
+
     <div class="boite">
       <div class="boite-entete"><strong>Fichiers</strong></div>
       <table class="tableau" id="chemins">
@@ -726,11 +834,11 @@
         </label>
         <label class="champ-bloc">
           <span class="etiquette">Dossier des clones</span>
-          <span class="ligne-champ">
-            <input type="text" id="reglage-clone-dir" class="champ" placeholder=".">
-            <button type="button" class="bouton" data-parcourir="reglage-clone-dir"
-              data-dossier="1" data-titre="Choisir le dossier des clones">Parcourir…</button>
-          </span>
+          <div class="depot" data-depot data-dossier="1"
+            data-titre="Choisir le dossier des clones" tabindex="0" role="button">
+            <input type="hidden" id="reglage-clone-dir">
+            <span class="depot-texte"></span>
+          </div>
           <span class="aide">Là où « Cloner » proposera de déposer les dépôts.</span>
         </label>
         <p class="note" id="reglages-selecteur"></p>

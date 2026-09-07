@@ -48,6 +48,15 @@ func (s *Session) create() (int, error) {
 		}
 	}
 
+	// La liste monte au registre juste après la confirmation, et avant le
+	// premier dépôt : c'est lui qui dira, depuis n'importe quel poste, à qui
+	// appartient chacun d'eux. Rien n'est écrit tant que la confirmation n'est
+	// pas donnée — le registre ne fait pas exception.
+	if !s.Options.DryRun {
+		if err := s.apprendre(s.Settings.Org, people); err != nil {
+			return ExitOK, err
+		}
+	}
 	return s.execute(items)
 }
 

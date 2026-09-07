@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -43,6 +44,9 @@ func (s *Server) renommage(request *http.Request, body renameInput) (
 		return cours, "", nil, err
 	}
 	repos, _, err := s.repos(cours.Org, false)
+	if err == nil {
+		cours = s.enrichi(cours, repos)
+	}
 	if err != nil {
 		return cours, "", nil, err
 	}
@@ -91,23 +95,26 @@ func (s *Server) handleRenameAssignment(writer http.ResponseWriter, request *htt
 	label := "Renommage de « " + avant + " » en « " + apres + " »"
 	job := s.jobs.Start("renommage", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []groups.Renamed
 		for index, ligne := range lignes {
 			if job.Canceled() {
 				break
 			}
-			if _, err := s.deps.Client.RenameRepo(
-				cours.Org, ligne.Repo, ligne.Target); err != nil {
+			apres, err := s.deps.Client.RenameRepo(
+				cours.Org, ligne.Repo, ligne.Target)
+			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
 			job.Progress(index+1, len(lignes), ligne.Repo)
 		}
-		s.forget(cours.Org)
+		s.renamed(cours.Org, suivis)
 
 		// Un renommage à moitié fait laisse deux travaux là où il n'y en avait
 		// qu'un : le dire vaut mieux que de le taire.
