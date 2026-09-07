@@ -225,6 +225,67 @@ func note(login, profil string, entree Entry) (int, string) {
 	return 0, ""
 }
 
+// FindName retrouve dans une liste la personne qu'un nom désigne, même écrit
+// autrement.
+//
+// Le registre d'une organisation retient le nom du profil GitHub, la liste
+// d'Omnivox le nom officiel : « Ahmad Loudin » d'un côté, « Ahmad Walid Loudin »
+// de l'autre. C'est la même personne, et l'égalité stricte des deux écritures la
+// comptait deux fois — associée sous l'une, absente sous l'autre.
+//
+// L'un des deux noms doit tenir entièrement dans l'autre, sans qu'aucun mot
+// manque, et il doit en porter au moins deux : un prénom seul ne désigne
+// personne. Deux personnes qui s'y prêteraient ne se départagent pas — mieux
+// vaut n'en nommer aucune que la mauvaise.
+func FindName(entries []Entry, name string) (Entry, bool) {
+	voulu := valid.Slugify(name)
+	if voulu == "" {
+		return Entry{}, false
+	}
+	for _, entree := range entries {
+		if valid.Slugify(entree.FullName) == voulu {
+			return entree, true
+		}
+	}
+
+	mots := nameTokens(name)
+	var candidate Entry
+	trouvees := 0
+	for _, entree := range entries {
+		if !memePersonne(mots, nameTokens(entree.FullName)) {
+			continue
+		}
+		trouvees++
+		candidate = entree
+	}
+	if trouvees != 1 {
+		return Entry{}, false
+	}
+	return candidate, true
+}
+
+// memePersonne dit que deux suites de mots désignent la même personne : la plus
+// courte tient entièrement dans l'autre, et elle en compte au moins deux.
+func memePersonne(gauche, droite []string) bool {
+	if len(gauche) > len(droite) {
+		gauche, droite = droite, gauche
+	}
+	if len(gauche) < 2 {
+		return false
+	}
+	reste := make(map[string]int, len(droite))
+	for _, mot := range droite {
+		reste[mot]++
+	}
+	for _, mot := range gauche {
+		if reste[mot] == 0 {
+			return false
+		}
+		reste[mot]--
+	}
+	return true
+}
+
 // nameTokens découpe un nom en mots comparables, accents et traits d'union
 // effacés : « Sauvé-Labonté » donne « sauve » et « labonte ».
 func nameTokens(name string) []string {
