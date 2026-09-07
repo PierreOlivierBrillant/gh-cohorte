@@ -3061,14 +3061,14 @@ async function preparerImport() {
 // viennent du serveur plutôt que d'un filtrage à l'écran : savoir quels dépôts
 // portent un préfixe est une règle de lecture des noms, et elle n'a pas à être
 // réécrite ici.
-async function chargerDepots(prefixe) {
+async function chargerDepots(prefixe, ouvrir = true) {
   const vue = await tenter(() => api('POST',
     `/api/orgs/${encode(etat.organisation)}/import/repos`, { prefix: prefixe }), 'Dépôts');
   if (!vue) return;
   importDepots = vue.repos || [];
   importRetenus = new Set(importDepots.map((depot) => depot.name));
   dessinerDepots();
-  ouvrirEtape('depots');
+  if (ouvrir) ouvrirEtape('depots');
 }
 
 function dessinerDepots() {
@@ -3357,14 +3357,18 @@ function montrerTravauxCaches(plan) {
 // reprendreTravail refait la lecture pour un seul des travaux révélés. Le nom
 // d'arrivée le suit quand rien d'autre n'a été tapé : c'est celui-là qu'on vient
 // de choisir.
-function reprendreTravail(prefixe) {
+async function reprendreTravail(prefixe) {
   const ancien = importTravail;
   importTravail = prefixe;
   marquerEtape('travail', prefixe);
   if (!$('import-nom').value.trim() || $('import-nom').value.trim() === ancien) {
     $('import-nom').value = prefixe;
   }
-  verifier(true);
+  // Les dépôts de l'étape des dépôts étaient ceux du fourre-tout : les garder
+  // ferait dire « 3 dépôts, tous repris » à une reprise qui n'en emporte que
+  // deux, et laisserait cochés des dépôts d'un autre travail.
+  await chargerDepots(prefixe, false);
+  await verifier(true);
 }
 
 // lireNoms retient tout ce que la liste portait : ceux qu'un dépôt a trouvés,

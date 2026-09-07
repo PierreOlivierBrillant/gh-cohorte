@@ -341,3 +341,15 @@ func TestOwnerNeTranchePasEntreDeuxInconnus(t *testing.T) {
 		t.Fatalf("Owner = %q, %v : aucun accès ne mène à personne", compte, sur)
 	}
 }
+
+func TestSplitNeGardePasLeSeparateurEnTrop(t *testing.T) {
+	// GitHub Classroom double parfois le tiret : un seul sépare.
+	travail, coupe := groups.Split("TP3-H23-4204N6-KickMyB--alice", "alice")
+	if !coupe || travail != "TP3-H23-4204N6-KickMyB" {
+		t.Fatalf("Split = %q, %v", travail, coupe)
+	}
+	// Un nom qui ne serait que des séparateurs et un compte ne dit aucun travail.
+	if travail, coupe := groups.Split("--alice", "alice"); coupe {
+		t.Fatalf("Split = %q, %v", travail, coupe)
+	}
+}

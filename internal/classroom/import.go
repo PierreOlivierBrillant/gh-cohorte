@@ -253,7 +253,8 @@ type depotLu struct {
 func lire(groupe groups.Group, proprietaires, connus map[string]string) []depotLu {
 	lus := make([]depotLu, 0, groupe.Len())
 	for _, depot := range groupe.Repos {
-		lu := depotLu{repo: depot, login: depot.Suffix, travail: groupe.Prefix}
+		lu := depotLu{repo: depot}
+		lu.login, lu.travail = sansAccord(depot, groupe.Prefix)
 		if login := strings.TrimSpace(proprietaires[depot.Name]); login != "" {
 			lu.login, lu.sur = login, true
 			if travail, coupe := groups.Split(depot.Name, login); coupe {
@@ -265,6 +266,30 @@ func lire(groupe groups.Group, proprietaires, connus map[string]string) []depotL
 		lus = append(lus, lu)
 	}
 	return lus
+}
+
+// sansAccord lit un dépôt que les accès n'éclairent pas : son nom seul dit
+// alors le compte et le travail.
+//
+// Le nom est relu tel qu'il s'écrit, et non tel que le préfixe demandé
+// s'écrivait : ce dernier a été mis en minuscules pour être comparé, et le
+// reprendre ferait deux travaux d'un seul dès qu'un dépôt du même lot a, lui,
+// livré son compte. Les séparateurs en trop tombent des deux côtés — un compte
+// GitHub ne commence pas par un tiret, un travail ne finit pas par un.
+func sansAccord(depot groups.Repo, prefixe string) (login, travail string) {
+	login = strings.TrimLeft(depot.Suffix, groups.Separators)
+	if login == "" {
+		return depot.Suffix, strings.TrimRight(prefixe, groups.Separators)
+	}
+	coupe := len(depot.Name) - len(login)
+	if coupe <= 0 || !strings.EqualFold(depot.Name[coupe:], login) {
+		return login, strings.TrimRight(prefixe, groups.Separators)
+	}
+	travail = strings.TrimRight(depot.Name[:coupe], groups.Separators)
+	if travail == "" {
+		travail = strings.TrimRight(prefixe, groups.Separators)
+	}
+	return login, travail
 }
 
 // parTravail range les dépôts par le travail que leur nom porte, du plus fourni
