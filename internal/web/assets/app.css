@@ -701,6 +701,62 @@ dialog h3 { margin-top: 0; font-size: 1.05rem; }
 dialog menu { display: flex; justify-content: flex-end; gap: .5rem; padding: 0; margin: 1.25rem 0 0; }
 dialog .corps-dialogue > * + * { margin-top: .75rem; }
 
+/* ------------------------------------------- choix d'un groupe d'arrivée */
+
+/* Une liste déroulante n'y suffisait plus : une session apporte une dizaine de
+   groupes, l'organisation en garde plusieurs sessions, et rien ne s'y
+   retrouvait. Les groupes se rangent donc comme dans le parcours — par session,
+   puis par cours —, dans une liste qu'une recherche réduit à mesure qu'on
+   tape. */
+.choix-arrivee > * + * { margin-top: .5rem; }
+
+.choix-places {
+  border: 1px solid var(--bord);
+  border-radius: var(--rayon);
+  max-height: 14rem;
+  overflow: auto;
+}
+
+.choix-place {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .4rem .6rem;
+  border: 0;
+  border-bottom: 1px solid var(--bord);
+  background: none;
+  color: var(--texte);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.choix-place:last-child { border-bottom: 0; }
+.choix-place:hover { background: var(--fond-doux); }
+.choix-place.choisi { background: var(--fond-creux); }
+.choix-place.choisi .titre { font-weight: 600; }
+.choix-infos { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.choix-place .titre { color: var(--lien); }
+.choix-place .detail { color: var(--texte-doux); font-size: .8125rem; }
+
+/* Déclarer un groupe au passage reste hors de la liste filtrée : une recherche
+   qui ne rend rien est précisément le moment où cette ligne sert. */
+.choix-place.neuf { border: 1px solid var(--bord); border-radius: var(--rayon); }
+
+/* La session colle en haut pendant qu'on fait défiler : sans elle, un
+   « Groupe 02 » ne dirait plus d'où il vient. */
+.choix-section {
+  position: sticky;
+  top: 0;
+  padding: .3rem .6rem;
+  background: var(--fond-doux);
+  border-bottom: 1px solid var(--bord);
+  color: var(--texte-doux);
+  font-size: .8125rem;
+  font-weight: 600;
+}
+
 /* ------------------------------------------------- listes à cases à cocher */
 
 .liste-cases {
