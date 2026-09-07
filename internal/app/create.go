@@ -53,6 +53,15 @@ func (s *Session) create() (int, error) {
 		}
 	}
 
+	// La liste monte au registre juste après la confirmation, et avant le
+	// premier dépôt : c'est lui qui dira, depuis n'importe quel poste, à qui
+	// appartient chacun d'eux. Rien n'est écrit tant que la confirmation n'est
+	// pas donnée — le registre ne fait pas exception.
+	if !s.Options.DryRun {
+		if err := s.apprendre(s.Settings.Org, people); err != nil {
+			return ExitOK, err
+		}
+	}
 	return s.execute(items)
 }
 
@@ -587,10 +596,10 @@ func (s *Session) configureStarter() error {
 			"Un dépôt modèle (--template) serait plus rapide.")
 	}
 	if s.Starter.NeedsWorkflowScope() {
-		if present, known := s.Client.HasScope("workflow"); known && !present {
-			s.Console.Warning("Des fichiers visent .github/workflows : la portée « workflow » " +
-				"est requise (gh auth refresh -s workflow).")
-		}
+		// Sans cette portée, GitHub refuse le commit entier des fichiers de
+		// départ. Le dire — et le corriger — ici vaut mieux qu'à la dernière
+		// étape ; un refus, lui, n'empêche pas de poursuivre la création.
+		_ = s.ensureScope("workflow", "l'envoi des fichiers de départ serait refusé")
 	}
 
 	if s.Options.CommitMessage != "" {

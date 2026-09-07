@@ -1,13 +1,14 @@
-// Package identity retrouve le nom complet de la personne derrière un dépôt.
-// Les sources sont interrogées du moins cher au plus cher : bilans d'exécution
-// déjà présents sur le disque, cache local, puis profil GitHub.
+// Package identity retrouve le nom complet de la personne derrière un compte
+// GitHub, quand personne ne l'a jamais donné : le cache local d'abord, le
+// profil GitHub ensuite.
+//
+// Ce n'est plus la source des noms — le registre de l'organisation l'est. Il ne
+// sert qu'à combler ce que le registre ignore : un compte adopté depuis des
+// dépôts hérités, que rien n'a encore nommé.
 package identity
 
 import (
-	"encoding/json"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -15,11 +16,8 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 )
 
-// Au-delà, on ne relit pas tout l'historique des bilans.
-const (
-	MaxReports  = 200
-	DefaultJobs = 8
-)
+// DefaultJobs borne les profils demandés de front.
+const DefaultJobs = 8
 
 // Pair associe un nom de dépôt au compte GitHub qu'il concerne.
 type Pair struct {
@@ -29,19 +27,17 @@ type Pair struct {
 
 // Resolver retrouve les noms complets et mémorise ce qu'il apprend.
 type Resolver struct {
-	client     *ghapi.Client
-	store      *cache.Cache
-	reportsDir string
-	jobs       int
+	client *ghapi.Client
+	store  *cache.Cache
+	jobs   int
 
-	mutex         sync.Mutex
-	byRepo        map[string]string
-	byLogin       map[string]string
-	reportsLoaded bool
+	mutex   sync.Mutex
+	byRepo  map[string]string
+	byLogin map[string]string
 }
 
-// New construit un résolveur ; client peut être nil pour s'en tenir au disque.
-func New(client *ghapi.Client, store *cache.Cache, reportsDir string, jobs int) *Resolver {
+// New construit un résolveur ; client peut être nil pour s'en tenir au cache.
+func New(client *ghapi.Client, store *cache.Cache, jobs int) *Resolver {
 	if jobs < 1 {
 		jobs = DefaultJobs
 	}
@@ -49,82 +45,14 @@ func New(client *ghapi.Client, store *cache.Cache, reportsDir string, jobs int) 
 		store = cache.NewIn(os.TempDir(), false)
 	}
 	return &Resolver{
-		client: client, store: store, reportsDir: reportsDir, jobs: jobs,
+		client: client, store: store, jobs: jobs,
 		byRepo: map[string]string{}, byLogin: map[string]string{},
-	}
-}
-
-// reportEntry ne retient du bilan que ce qui sert à nommer les personnes.
-type reportEntry struct {
-	Username string `json:"username"`
-	FullName string `json:"full_name"`
-	Repo     string `json:"repo"`
-}
-
-type reportFile struct {
-	Results []reportEntry `json:"results"`
-}
-
-// LoadReports relit les bilans d'exécution : ils portent déjà les noms complets.
-func (r *Resolver) LoadReports() {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-	r.loadReportsLocked()
-}
-
-func (r *Resolver) loadReportsLocked() {
-	if r.reportsLoaded {
-		return
-	}
-	r.reportsLoaded = true
-	if r.reportsDir == "" {
-		return
-	}
-	matches, err := filepath.Glob(filepath.Join(r.reportsDir, "*.json"))
-	if err != nil || len(matches) == 0 {
-		return
-	}
-	// Du plus ancien au plus récent : les informations fraîches l'emportent.
-	sort.Slice(matches, func(i, j int) bool {
-		left, errLeft := os.Stat(matches[i])
-		right, errRight := os.Stat(matches[j])
-		if errLeft != nil || errRight != nil {
-			return matches[i] < matches[j]
-		}
-		return left.ModTime().Before(right.ModTime())
-	})
-	if len(matches) > MaxReports {
-		matches = matches[len(matches)-MaxReports:]
-	}
-
-	for _, path := range matches {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var report reportFile
-		if err := json.Unmarshal(content, &report); err != nil {
-			continue
-		}
-		for _, entry := range report.Results {
-			fullName := strings.TrimSpace(entry.FullName)
-			if fullName == "" {
-				continue
-			}
-			if entry.Repo != "" {
-				r.byRepo[strings.ToLower(entry.Repo)] = fullName
-			}
-			if entry.Username != "" {
-				r.byLogin[strings.ToLower(entry.Username)] = fullName
-			}
-		}
 	}
 }
 
 // Known renvoie un nom déjà connu sans le moindre appel réseau.
 func (r *Resolver) Known(repoName, login string) (string, bool) {
 	r.mutex.Lock()
-	r.loadReportsLocked()
 	if found, ok := r.byRepo[strings.ToLower(repoName)]; ok {
 		r.mutex.Unlock()
 		return found, true

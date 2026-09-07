@@ -4,10 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
@@ -64,7 +62,7 @@ func (d *desk) reload() error {
 	var infos []teams.Info
 	var err error
 	ui.Await(d.session.Console, "Lecture des équipes de "+d.cours.Org+"…", func() {
-		infos, err = d.session.Client.LoadOrgTeams(d.cours.Org, d.session.Options.Jobs, nil)
+		infos, err = d.session.Client.LoadOrgTeams(d.cours.Org, d.session.Options.Jobs)
 	})
 	if err != nil {
 		return err
@@ -300,30 +298,6 @@ func (d *desk) members(usernames []string) ([]string, error) {
 	return propres, nil
 }
 
-// ---------------------------------------------------------------- inventaire
-
-// orgRepos charge les dépôts de l'organisation : cache, puis API. C'est le même
-// chemin que celui du mode gestion, dit une fois de plus parce qu'une session
-// d'équipe n'ouvre pas de groupe de dépôts.
-func (s *Session) orgRepos() ([]groups.RepoInfo, error) {
-	key := cache.ReposKey(s.Settings.Org)
-	var cached []groups.RepoInfo
-	if s.Cache.Get(key, cache.ReposTTL, &cached) && len(cached) > 0 {
-		return cached, nil
-	}
-	spin := ui.NewSpinner(s.Console, "Chargement des dépôts de "+s.Settings.Org+"…")
-	spin.Start()
-	repos, err := s.Client.ListOrgRepos(s.Settings.Org, func(total int) {
-		spin.Detail(itoa(total) + " lus")
-	})
-	spin.Stop()
-	if err != nil {
-		return nil, err
-	}
-	s.Cache.Set(key, repos)
-	return repos, nil
-}
-
 // ------------------------------------------------------------ ligne de commande
 
 // wantsTeams dit si les drapeaux demandent une opération sur les équipes.
@@ -354,7 +328,7 @@ func (s *Session) askPlace() (string, error) {
 	if !s.Interactive() {
 		return s.require("", "--manage a26.5n6.01", "Groupe")
 	}
-	repos, err := s.orgRepos()
+	repos, err := s.orgRepos(s.Settings.Org, false)
 	if err != nil {
 		return "", err
 	}
@@ -657,7 +631,7 @@ func (s *Session) createTeams() (int, error) {
 // C'est ce qui achève l'adoption d'un travail fait en équipe avant l'outil :
 // les dépôts sont déjà là et bien nommés, mais rien ne les a jamais partagés.
 func (s *Session) shareTeamRepos(bureau *desk, travail string) (int, error) {
-	repos, err := s.orgRepos()
+	repos, err := s.orgRepos(s.Settings.Org, false)
 	if err != nil {
 		return ExitOK, err
 	}
@@ -677,7 +651,7 @@ func (s *Session) shareTeamRepos(bureau *desk, travail string) (int, error) {
 			faits++
 			continue
 		}
-		if err := s.Client.AddTeamRepo(bureau.cours.Org, equipe.Slug,
+		if err := s.Client.GrantTeamRepo(bureau.cours.Org, equipe.Slug,
 			bureau.cours.Org, depot.Name, droit); err != nil {
 			echecs++
 			s.Console.Failure("%s : %v", depot.Name, err)
@@ -741,14 +715,15 @@ func (s *Session) summarizeTeams(items []plan.PlannedRepo, retenues []teams.Team
 }
 
 // splitAssignment sépare la place du groupe et le nom du travail dans un
-// identifiant complet : « a26.5n6.01.tp1 » donne « a26.5n6.01 » et « tp1 ».
+// identifiant complet : « a26.5n6.01.tp1 » donne « a26.5n6.01 » et « tp1 ». La
+// découpe vient de « naming » ; le refus, lui, dit ce qu'on attendait.
 func splitAssignment(id string) (string, string, error) {
-	niveaux := strings.Split(strings.TrimSpace(id), naming.Separator)
-	if len(niveaux) != naming.TeamLevels {
+	scope, nom, ok := naming.SplitAssignment(id)
+	if !ok {
 		return "", "", valid.Errorf(
 			"Travail d'équipe : « %s » doit nommer un groupe et un travail — "+
 				"« session%[2]scours%[2]sgroupe%[2]stravail », « a26.5n6.01.tp1 » par exemple.",
 			strings.TrimSpace(id), naming.Separator)
 	}
-	return strings.Join(niveaux[:3], naming.Separator), niveaux[3], nil
+	return scope, nom, nil
 }

@@ -2,7 +2,6 @@ package web
 
 import (
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -13,83 +12,9 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
-// Adopter des dépôts que rien n'organise. La détection automatique propose ce
-// qu'elle sait deviner ; quand elle ne devine rien — et beaucoup
-// d'organisations n'ont jamais suivi de convention —, un gabarit écrit à la
-// main dit où lire le travail et la personne. Cette route ne fait qu'essayer :
-// rien n'est déclaré tant que le groupe n'est pas créé.
-
-// matchRow est un dépôt lu par le gabarit.
-type matchRow struct {
-	Repo       string `json:"repo"`
-	Assignment string `json:"assignment"`
-	Student    string `json:"student"`
-}
-
-// handleMatchPattern confronte un gabarit aux dépôts de l'organisation.
-func (s *Server) handleMatchPattern(writer http.ResponseWriter, request *http.Request) {
-	var body struct {
-		Pattern string `json:"pattern"`
-	}
-	if err := decode(request, &body); err != nil {
-		fail(writer, err)
-		return
-	}
-	gabarit, err := classroom.ParsePattern(body.Pattern)
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-	repos, source, err := s.repos(request.PathValue("org"),
-		request.URL.Query().Get("refresh") == "1")
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-
-	noms := make([]string, 0, len(repos))
-	for _, repo := range repos {
-		noms = append(noms, repo.Name)
-	}
-	// Les noms s'éclairent les uns les autres : un travail reconnu ailleurs
-	// tranche là où un nom seul resterait ambigu.
-	decoupes := gabarit.Resolve(noms)
-
-	lignes := make([]matchRow, 0, len(decoupes))
-	travaux := map[string]bool{}
-	etudiants := map[string]bool{}
-	for _, decoupe := range decoupes {
-		lignes = append(lignes, matchRow{
-			Repo: decoupe.Repo, Assignment: decoupe.Assignment, Student: decoupe.Student,
-		})
-		if decoupe.Assignment != "" {
-			travaux[decoupe.Assignment] = true
-		}
-		etudiants[decoupe.Student] = true
-	}
-	sort.Slice(lignes, func(i, j int) bool {
-		return strings.ToLower(lignes[i].Repo) < strings.ToLower(lignes[j].Repo)
-	})
-
-	writeJSON(writer, http.StatusOK, map[string]any{
-		"pattern": gabarit.String(), "prefix": gabarit.Prefix(),
-		"rows": lignes, "matched": len(lignes), "total": len(repos),
-		"assignments": triees(travaux), "students": triees(etudiants),
-		"source": source,
-	})
-}
-
-// triees rend un ensemble en liste ordonnée.
-func triees(ensemble map[string]bool) []string {
-	liste := make([]string, 0, len(ensemble))
-	for valeur := range ensemble {
-		liste = append(liste, valeur)
-	}
-	sort.Slice(liste, func(i, j int) bool {
-		return strings.ToLower(liste[i]) < strings.ToLower(liste[j])
-	})
-	return liste
-}
+// Déplacer des personnes d'un groupe à l'autre. Leurs dépôts suivent toujours :
+// c'est leur nom qui dit à quel groupe ils appartiennent, et une fiche qui
+// prétendrait le contraire ne serait vraie que sur cette machine.
 
 // movePlace décrit un groupe d'arrivée qui n'existe pas encore : le
 // déplacement le déclare au passage, plutôt que d'obliger à le créer d'abord
@@ -110,14 +35,15 @@ type moveInput struct {
 	Target string `json:"target"`
 	// NewGroup, à sa place, décrit un groupe à déclarer pour l'occasion.
 	NewGroup *movePlace `json:"new_group"`
-	// Repos demande de renommer aussi les dépôts des personnes déplacées pour
-	// qu'ils rejoignent le groupe d'arrivée.
-	Repos bool `json:"repos"`
 }
 
 // handleMoveStudent déplace une ou plusieurs personnes d'un groupe vers un
-// autre — existant, ou déclaré pour l'occasion. Leurs fiches suivent ; leurs
-// dépôts, eux, ne bougent que si on le demande.
+// autre — existant, ou déclaré pour l'occasion.
+//
+// Les dépôts sont renommés d'abord, les listes n'écoutent qu'ensuite. C'est
+// GitHub qui dit à quel groupe un dépôt appartient : une liste qui aurait bougé
+// sans lui décrirait un rangement qui n'a pas eu lieu, et le groupe de départ
+// continuerait de montrer la personne que ses dépôts lui rattachent encore.
 func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Request) {
 	var body moveInput
 	if err := decode(request, &body); err != nil {
@@ -131,6 +57,9 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	repos, _, err := s.repos(depart.Org, false)
+	if err == nil {
+		depart = s.enrichi(depart, repos)
+	}
 	if err != nil {
 		fail(writer, err)
 		return
@@ -151,32 +80,28 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
-	// Les dépôts sont relevés avant de toucher aux listes : après, le groupe
-	// de départ ne reconnaîtrait plus les siens.
-	var renommages []classroom.Move
-	if body.Repos {
-		renommages, err = classroom.PlanMove(depart, arrivee, personnes, repos)
-		if err != nil {
-			fail(writer, err)
-			return
-		}
-	}
-
-	if _, err := s.classrooms.Save(depart.Without(comptes(personnes)...)); err != nil {
-		fail(writer, err)
-		return
-	}
-	if _, err := s.classrooms.Save(arrivee.With(personnes...)); err != nil {
+	// Le plan se compose entièrement avant le premier renommage : une collision
+	// refuse le déplacement au lieu de l'interrompre à mi-chemin.
+	renommages, err := classroom.PlanMove(depart, arrivee, personnes, repos)
+	if err != nil {
 		fail(writer, err)
 		return
 	}
 
 	bilan := map[string]any{
-		"moved": comptes(personnes), "count": len(personnes),
+		"moved": []string{}, "count": 0,
 		"target": arrivee.Label(), "target_scope": arrivee.Scope(),
-		"created": neuf, "renamed": 0,
+		"created": neuf, "renamed": 0, "failed": 0,
 	}
+
+	// Une personne sans dépôt n'existe que dans la liste : il n'y a rien à
+	// renommer, et rien qui puisse contredire ce qu'on y écrit.
 	if len(renommages) == 0 {
+		if err := s.suivent(depart, arrivee, personnes); err != nil {
+			fail(writer, err)
+			return
+		}
+		bilan["moved"], bilan["count"] = comptes(personnes), len(personnes)
 		writeJSON(writer, http.StatusOK, bilan)
 		return
 	}
@@ -185,26 +110,48 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		" vers « " + arrivee.Label() + " »"
 	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []groups.Renamed
 		for index, ligne := range renommages {
 			if job.Canceled() {
 				break
 			}
-			if _, err := s.deps.Client.RenameRepo(depart.Org, ligne.Repo, ligne.Target); err != nil {
+			apres, err := s.deps.Client.RenameRepo(depart.Org, ligne.Repo, ligne.Target)
+			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
 			job.Progress(index+1, len(renommages), ligne.Repo)
 		}
-		s.forget(depart.Org)
+		s.renamed(depart.Org, suivis)
 		bilan["renamed"], bilan["failed"] = renommes, echecs
+
+		if echecs > 0 || job.Canceled() {
+			job.Warn("Les listes n'ont pas bougé : tous les dépôts n'ont pas suivi.")
+			return bilan, nil
+		}
+		if err := s.suivent(depart, arrivee, personnes); err != nil {
+			return nil, err
+		}
+		bilan["moved"], bilan["count"] = comptes(personnes), len(personnes)
 		return bilan, nil
 	})
 	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
+// suivent fait suivre les fiches une fois les dépôts arrivés : elles quittent
+// la liste du départ et rejoignent celle de l'arrivée.
+func (s *Server) suivent(depart, arrivee classroom.Classroom, personnes []roster.Person) error {
+	if _, err := s.classrooms.Save(depart.Without(comptes(personnes)...)); err != nil {
+		return err
+	}
+	_, err := s.classrooms.Save(arrivee.With(personnes...))
+	return err
 }
 
 // moveTarget résout le groupe d'arrivée : une place déjà occupée, ou une place

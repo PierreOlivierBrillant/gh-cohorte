@@ -101,6 +101,28 @@ Les lignes vides et celles commençant par `#` sont ignorées ; chaque ligne
 rejetée est signalée avec son numéro et la raison, et le reste du fichier
 continue d'être lu.
 
+**La liste d'Omnivox se lit telle quelle**, sans rien convertir : son encodage
+Windows-1252, ses champs `="…"` et ses colonnes séparées « Nom » et « Prénom »
+sont reconnus. Dans Léa : *Liste des étudiants › Paramètres d'affichage*, mode
+« Pour Excel », séparateur `;`, et cochez **Numéro d'étudiant**, **Nom de
+l'étudiant** et **Code permanent**.
+
+Elle ne dit pas les comptes GitHub. Ajoutez-lui une colonne `GitHub` si vous les
+connaissez ; sinon l'outil les rapproche des noms et des numéros d'étudiant, et
+montre chaque rapprochement — avec ce qui l'a produit — avant d'écrire.
+
+## Reprendre des dépôts existants
+
+Des dépôts nommés `travail-compte`, comme GitHub Classroom les laisse, se
+reprennent d'un bloc : l'outil lit les travaux que leurs préfixes dessinent,
+rapproche les comptes des étudiants de la liste, puis renomme vers la
+nomenclature. GitHub garde une redirection depuis chaque ancien nom.
+
+```bash
+gh cohorte --import                                    # lister les travaux repérés
+gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+```
+
 ## Nommage des dépôts
 
 Un dépôt porte **cinq niveaux, séparés par un point** :
@@ -128,17 +150,23 @@ nom d'équipe donné, et sans cette place deux groupes ne pourraient pas avoir
 chacun leur « eq1 ». Un travail est donc d'équipe ou individuel selon ce que son
 dernier niveau nomme, et rien n'est déclaré ailleurs.
 
-**GitHub reste la seule source de vérité** : sessions, cours, groupes, travaux
-et étudiants se lisent tous dans le nom des dépôts. Un groupe n'a rien à
-déclarer pour exister, et le fichier local ne retient que des choix déjà faits —
-la liste importée d'un CSV, les réglages du dernier travail — jamais une
-information qui ne serait pas déjà sur GitHub.
+**GitHub reste la seule source de vérité.** Sessions, cours, groupes et travaux
+se lisent dans le nom des dépôts : un groupe n'a rien à déclarer pour exister.
 
-Une organisation en cours d'année n'a rien à renommer : les dépôts nommés
-autrement sont repérés par préfixe ou décrits par un gabarit
-(`projet-{assignment}-{student}`), puis adoptés tels quels. Les renommer reste
-possible ensuite, avec un aperçu avant écriture ; GitHub garde une redirection
-depuis chaque ancien nom.
+Le dernier niveau, lui, est un nom slugifié — rien n'y dit à quel compte il
+appartient. C'est ce que retient le **registre** : un fichier unique dans un
+dépôt privé `.cohorte` de l'organisation, un nom complet par compte, écrit une
+fois pour tout le monde. Vos collègues voient donc les mêmes noms que vous sans
+rien avoir déclaré, et corriger une orthographe ne détache pas les dépôts créés
+sous l'ancienne. Les noms déjà accumulés sur un poste s'y versent en une fois
+(`gh cohorte --publish-registry`). Le fichier local ne garde plus que ce qui n'a
+de sens que sur cette machine : les groupes déclarés ici, les réglages du
+dernier travail.
+
+Un groupe se déplace d'une place à l'autre — une autre session, un autre cours,
+un autre numéro — en renommant ses dépôts, avec un aperçu avant écriture.
+GitHub garde une redirection depuis chaque ancien nom : les clones et les liens
+déjà distribués continuent de fonctionner.
 
 ## Ce que fait l'outil
 
@@ -156,8 +184,8 @@ depuis chaque ancien nom.
 - **Filtrer, trier, chercher** les listes d'étudiants et de travaux, à
   l'identique dans les trois interfaces (`--filter`, `--pushed-after`,
   `--pushed-before`, `--never-pushed`, `--sort`).
-- **Déplacer un travail ou des étudiants** d'un groupe à l'autre, en renommant
-  les dépôts si on le demande.
+- **Déplacer un travail ou des étudiants** d'un groupe à l'autre : leurs dépôts
+  sont renommés, puisque c'est leur nom qui dit à quel groupe ils appartiennent.
 - **Distribuer un travail en équipe** : un dépôt par équipe, partagé avec elle
   plutôt qu'avec chacun de ses membres — changer sa composition suffit donc à
   changer qui y accède. Les équipes se créent, se renomment, se suppriment, et
@@ -202,7 +230,10 @@ Les inventaires d'organisation sont mis en cache dans le répertoire du système
   dépôt exige d'en retaper le nom exact, et aucune option, `--yes` compris, ne
   court-circuite cette confirmation.
 - Les données d'étudiants (bilans, listes, clones) sont exclues du dépôt par le
-  `.gitignore`.
+  `.gitignore`. Le registre, lui, vit dans un dépôt privé de l'organisation :
+  l'outil refuse d'y écrire s'il devient public, signale une permission de base
+  qui l'ouvrirait aux étudiants membres, sait en donner l'accès à une équipe
+  enseignante et en réécrire l'historique.
 
 ## Options
 
@@ -216,6 +247,8 @@ Les plus courantes :
 | `--manage [PREFIXE]` | gérer un groupe existant au lieu d'en créer un |
 | `--teams` | travail d'équipe ; avec `--manage`, les équipes du groupe |
 | `--team NOM` | équipe visée, ou équipes à servir |
+| `--import [TRAVAIL]` | reprendre des dépôts nommés « travail-compte » |
+| `--into PLACE` | place d'arrivée d'une reprise (« a26.5n6.1030 ») |
 | `--template ORG/DEPOT` | dépôt modèle |
 | `--starter DOSSIER` | dossier local déposé dans chaque dépôt, en un commit |
 | `--dry-run` | simuler sans rien créer |
@@ -243,9 +276,11 @@ dépôts git locaux (`file://`) : rien ne sort de la machine.
 
 La logique vit dans les paquets du domaine — `internal/naming` (la
 nomenclature), `internal/classroom` (les groupes), `internal/teams` (les
-équipes), `internal/plan`, `internal/groups`, `internal/roster`,
+équipes), `internal/registry` (le
+registre des étudiants), `internal/plan`, `internal/groups`, `internal/roster`,
 `internal/students`, `internal/runner`, `internal/clone` — et les trois
-interfaces (`internal/web`, `internal/app`) n'en sont que des façades. C'est ce qui garantit qu'elles ne divergent pas.
+interfaces (`internal/web`, `internal/app`) n'en sont que des façades. C'est ce
+qui garantit qu'elles ne divergent pas.
 [`CLAUDE.md`](CLAUDE.md) énonce les règles à ne pas perdre de vue.
 
 Publication : pousser une étiquette `vX.Y.Z` déclenche le workflow

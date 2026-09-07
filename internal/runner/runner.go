@@ -276,7 +276,7 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 	// L'équipe reçoit le dépôt, pas ses membres : c'est ce qui fait qu'un
 	// changement de composition suffit ensuite à changer qui y accède.
 	if item.ForTeam() {
-		if err := e.client.AddTeamRepo(org, item.TeamSlug, org, item.Name,
+		if err := e.client.GrantTeamRepo(org, item.TeamSlug, org, item.Name,
 			e.settings.Permission); err != nil {
 			previous := result.Status
 			result.Status = Failed

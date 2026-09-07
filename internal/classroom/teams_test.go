@@ -137,12 +137,15 @@ func TestDescribeSepareLesMembresConnusDesEtrangers(t *testing.T) {
 	}
 }
 
-// Un groupe hérité n'a pas de place où nommer ses équipes.
-func TestUnGroupeHeriteNAPasDEquipes(t *testing.T) {
-	cours := classroom.Classroom{Org: "acme", LegacyPrefix: "vieux"}
-	if equipes := cours.Teams([]teams.Info{
-		{Slug: "vieux-eq1", Name: "vieux.eq1"},
-	}); len(equipes) != 0 {
-		t.Fatalf("aucune équipe ne devrait lui être rattachée : %v", equipes)
+// Une équipe d'un autre groupe ne se rattache pas à celui-ci : c'est la place
+// inscrite dans son nom qui les distingue.
+func TestUneEquipeDUnAutreGroupeNestPasRetenue(t *testing.T) {
+	cours, _, _ := avecEquipes()
+	equipes := cours.Teams([]teams.Info{
+		{Slug: "a26-5n6-02-eq1", Name: "a26.5n6.02.eq1"},
+		{Slug: "les-anciens", Name: "Les anciens"},
+	})
+	if len(equipes) != 0 {
+		t.Fatalf("aucune ne devrait lui être rattachée : %v", teams.Names(equipes))
 	}
 }

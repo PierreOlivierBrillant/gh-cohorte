@@ -24,11 +24,6 @@ import (
 
 // Teams retient les équipes du groupe parmi celles de l'organisation.
 func (c Classroom) Teams(infos []teams.Info) []teams.Team {
-	if c.Legacy() {
-		// Un groupe sans place ne peut pas nommer ses équipes : la
-		// nomenclature les y rattacherait à un préfixe qui n'en est pas un.
-		return nil
-	}
 	return teams.In(c.Session, c.Course, c.Group, infos)
 }
 
@@ -39,9 +34,6 @@ func (c Classroom) TeamName(short string) string {
 
 // TeamOf retrouve l'équipe à laquelle un dépôt du groupe appartient.
 func (c Classroom) TeamOf(repoName string, equipes []teams.Team) (teams.Team, bool) {
-	if c.Legacy() {
-		return teams.Team{}, false
-	}
 	parts, reconnu := naming.Parse(repoName)
 	if !reconnu || !naming.Belongs(parts, c.Session, c.Course, c.Group) {
 		return teams.Team{}, false
@@ -55,9 +47,6 @@ func (c Classroom) TeamOf(repoName string, equipes []teams.Team) (teams.Team, bo
 func (c Classroom) ServedTeams(assignmentID string, repos []groups.RepoInfo,
 	equipes []teams.Team) map[string]bool {
 	servis := map[string]bool{}
-	if c.Legacy() {
-		return servis
-	}
 	for _, repo := range repos {
 		parts, reconnu := naming.Parse(repo.Name)
 		if !reconnu {

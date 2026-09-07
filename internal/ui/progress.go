@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
 )
@@ -76,16 +75,4 @@ func truncate(text string, width int) string {
 		return string(runes[:width])
 	}
 	return string(runes[:width-1]) + "…"
-}
-
-// Spinnerless indique une progression sans total connu (chargement de pages).
-func (p *Progress) Line(text string) {
-	if p.console.TTY {
-		fmt.Fprintf(p.console.Out, "\r\033[K  %s", p.console.Dim(text))
-		p.active = true
-		return
-	}
-	if strings.TrimSpace(text) != "" {
-		p.console.Note("%s", text)
-	}
 }

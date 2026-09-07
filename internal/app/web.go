@@ -19,17 +19,19 @@ func (s *Session) serveWeb() (int, error) {
 	}
 
 	server, err := web.New(web.Deps{
-		Client:     s.Client,
-		Cache:      s.Cache,
-		Settings:   s.Settings,
-		ConfigFile: s.ConfigFile,
-		Viewer:     s.Viewer,
-		Host:       s.Client.Host(),
-		Version:    Version,
-		ReportDir:  reportDir,
-		Jobs:       s.Options.Jobs,
-		Depth:      s.Options.Depth,
-		SaveConfig: !s.Options.NoSaveConfig,
+		Client:      s.Client,
+		Cache:       s.Cache,
+		Settings:    s.Settings,
+		ConfigFile:  s.ConfigFile,
+		Viewer:      s.Viewer,
+		Host:        s.Client.Host(),
+		TokenOrigin: s.tokenOrigin,
+		Refresher:   s.Refresher,
+		Version:     Version,
+		ReportDir:   reportDir,
+		Jobs:        s.Options.Jobs,
+		Depth:       s.Options.Depth,
+		SaveConfig:  !s.Options.NoSaveConfig,
 	})
 	if err != nil {
 		return ExitFailure, err

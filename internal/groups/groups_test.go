@@ -2,6 +2,7 @@ package groups_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
@@ -132,6 +133,31 @@ func TestBuildGroupe(t *testing.T) {
 	}
 }
 
+// Un préfixe se saisit sans avoir à dire ce qui le termine : le tiret des noms
+// qu'aucune convention n'organise, ou le point de la nomenclature à cinq
+// niveaux. Sans cela, l'assistant du terminal ne pourrait ouvrir aucun travail
+// nommé comme l'outil les nomme.
+func TestBuildLitLesDeuxNomenclatures(t *testing.T) {
+	repos := []groups.RepoInfo{
+		{Name: "a26.5n6.01.tp1.emilie-cote"},
+		{Name: "a26.5n6.01.tp1.jlpicard"},
+		{Name: "a26.5n6.01.tp2.jlpicard"},
+		{Name: "a26.5n6.02.tp1.jlpicard"},
+	}
+	travail := groups.Build("a26.5n6.01.tp1", repos)
+	if travail.Len() != 2 || travail.Repos[0].Suffix != "emilie-cote" {
+		t.Fatalf("travail = %+v", travail)
+	}
+	// Le préfixe d'un groupe retient tous ses travaux, et rien du groupe voisin.
+	if groupe := groups.Build("a26.5n6.01", repos); groupe.Len() != 3 {
+		t.Fatalf("groupe = %+v", groupe)
+	}
+	// Un préfixe qui s'arrête au milieu d'un niveau ne retient rien.
+	if partiel := groups.Build("a26.5n6.01.tp", repos); partiel.Len() != 0 {
+		t.Fatalf("préfixe partiel = %+v", partiel)
+	}
+}
+
 func TestBuildPrefixeVide(t *testing.T) {
 	if groupe := groups.Build("  ", []groups.RepoInfo{{Name: "tp1-a"}}); groupe.Len() != 0 {
 		t.Errorf("un préfixe vide ne doit rien retenir : %+v", groupe)
@@ -195,5 +221,158 @@ func TestDetectListeVideOuUnique(t *testing.T) {
 func TestParseSelectionListeVide(t *testing.T) {
 	if indices, err := groups.ParseSelection("tous", 0, nil); err != nil || len(indices) != 0 {
 		t.Errorf("ParseSelection = %v, %v", indices, err)
+	}
+}
+
+// Les dépôts de service de l'organisation ne sont pas des dépôts d'étudiants :
+// « .github » porte les gabarits communs, et l'outil y rangera le sien.
+func TestDepotsDeServiceEcartes(t *testing.T) {
+	inventaire := []groups.RepoInfo{
+		{Name: ".github"},
+		{Name: "a26.5n6.01.tp1.emilie-cote"},
+		{Name: ".cohorte"},
+		{Name: "tp1-jlpicard"},
+	}
+	restants := groups.Ordinary(inventaire)
+	if len(restants) != 2 ||
+		restants[0].Name != "a26.5n6.01.tp1.emilie-cote" || restants[1].Name != "tp1-jlpicard" {
+		t.Fatalf("inventaire retenu = %+v", restants)
+	}
+	// Un point ailleurs qu'en tête sépare les niveaux : ce n'est pas un service.
+	if groups.Service("a26.5n6.01.tp1.emilie-cote") {
+		t.Error("un nom de la nomenclature n'est pas un dépôt de service")
+	}
+}
+
+// Renommer un dépôt n'est pas y pousser : sa date de dernier envoi ne bouge
+// pas. C'est ce qui permet de suivre l'inventaire au lieu de le relire.
+func TestInventaireSuitUnRenommage(t *testing.T) {
+	inventaire := []groups.RepoInfo{
+		{Name: "a26.5n6.01.tp1.jlpicard", HTMLURL: "https://x/tp1", PushedAt: "2026-09-01"},
+		{Name: "a26.5n6.01.tp2.jlpicard", HTMLURL: "https://x/tp2", PushedAt: "2026-09-02"},
+	}
+	suivi := groups.WithRenamed(inventaire, []groups.Renamed{{
+		Before: "a26.5n6.01.tp1.jlpicard",
+		After: groups.RepoInfo{
+			Name: "a26.5n6.01.projet.jlpicard", HTMLURL: "https://x/projet", Private: true},
+	}})
+	if suivi[0].Name != "a26.5n6.01.projet.jlpicard" || suivi[0].HTMLURL != "https://x/projet" {
+		t.Fatalf("dépôt renommé = %+v", suivi[0])
+	}
+	if suivi[0].PushedAt != "2026-09-01" {
+		t.Errorf("dernier envoi = %q : renommer n'est pas pousser", suivi[0].PushedAt)
+	}
+	if suivi[1] != inventaire[1] {
+		t.Errorf("un dépôt non renommé a bougé : %+v", suivi[1])
+	}
+	// L'inventaire de départ n'est pas touché : deux lecteurs peuvent le partager.
+	if inventaire[0].Name != "a26.5n6.01.tp1.jlpicard" {
+		t.Error("l'inventaire d'origine a été modifié en place")
+	}
+}
+
+func TestInventaireSansUnDepotSupprime(t *testing.T) {
+	inventaire := []groups.RepoInfo{{Name: "tp1-a"}, {Name: "TP1-B"}, {Name: "tp1-c"}}
+	// La casse d'un nom de dépôt n'en fait pas un autre dépôt.
+	restants := groups.WithoutRepo(inventaire, "tp1-b")
+	if len(restants) != 2 || restants[0].Name != "tp1-a" || restants[1].Name != "tp1-c" {
+		t.Fatalf("inventaire restant = %+v", restants)
+	}
+	if len(groups.WithoutRepo(inventaire, "absent")) != 3 {
+		t.Error("retirer un dépôt absent ne doit rien changer")
+	}
+}
+
+func TestSplitRetireLeCompteQuiTermineLeNom(t *testing.T) {
+	cas := []struct {
+		nom, compte, travail string
+		coupe                bool
+	}{
+		// Le cas qui motive la fonction : deux tirets dans le travail, un dans
+		// le nom du compte, et rien dans le nom seul ne dit où couper.
+		{"kickmyb-firebase-Walid7Akk", "Walid7Akk", "kickmyb-firebase", true},
+		{"tp1-jlpicard", "jlpicard", "tp1", true},
+		{"tp1-JLPicard", "jlpicard", "tp1", true},
+		{"a26.5n6.01.tp1.emilie-cote", "emilie-cote", "a26.5n6.01.tp1", true},
+		// Le compte doit terminer le nom, et être détaché.
+		{"tp1-jlpicard-bis", "jlpicard", "", false},
+		{"tp1jlpicard", "jlpicard", "", false},
+		{"jlpicard", "jlpicard", "", false},
+		{"tp1-jlpicard", "", "", false},
+	}
+	for _, essai := range cas {
+		travail, coupe := groups.Split(essai.nom, essai.compte)
+		if coupe != essai.coupe || travail != essai.travail {
+			t.Errorf("Split(%q, %q) = %q, %v ; attendu %q, %v",
+				essai.nom, essai.compte, travail, coupe, essai.travail, essai.coupe)
+		}
+	}
+}
+
+func TestOwnerPrefereLeCompteQueLeNomPorte(t *testing.T) {
+	// L'enseignant a aussi accès au dépôt : c'est le nom qui tranche.
+	compte, sur := groups.Owner("kickmyb-firebase-Walid7Akk",
+		[]string{"prof-cegep", "Walid7Akk"})
+	if !sur || compte != "Walid7Akk" {
+		t.Fatalf("Owner = %q, %v", compte, sur)
+	}
+}
+
+func TestOwnerPrendLeCompteLePlusLong(t *testing.T) {
+	compte, sur := groups.Owner("tp1-walid7akk", []string{"akk", "walid7akk"})
+	if !sur || compte != "walid7akk" {
+		t.Fatalf("Owner = %q, %v", compte, sur)
+	}
+}
+
+func TestOwnerSeContenteDunAccesUnique(t *testing.T) {
+	// Rien dans « projet-equipe-3 » ne nomme personne : l'accès seul suffit.
+	compte, sur := groups.Owner("projet-equipe-3", []string{"emilie-cote"})
+	if !sur || compte != "emilie-cote" {
+		t.Fatalf("Owner = %q, %v", compte, sur)
+	}
+}
+
+func TestOwnerNeTranchePasEntreDeuxInconnus(t *testing.T) {
+	if compte, sur := groups.Owner("projet-equipe-3",
+		[]string{"emilie-cote", "jlpicard"}); sur {
+		t.Fatalf("Owner = %q, %v : rien ne désigne l'un plutôt que l'autre", compte, sur)
+	}
+	if compte, sur := groups.Owner("tp1-personne", nil); sur {
+		t.Fatalf("Owner = %q, %v : aucun accès ne mène à personne", compte, sur)
+	}
+}
+
+func TestSplitNeGardePasLeSeparateurEnTrop(t *testing.T) {
+	// GitHub Classroom double parfois le tiret : un seul sépare.
+	travail, coupe := groups.Split("TP3-H23-4204N6-KickMyB--alice", "alice")
+	if !coupe || travail != "TP3-H23-4204N6-KickMyB" {
+		t.Fatalf("Split = %q, %v", travail, coupe)
+	}
+	// Un nom qui ne serait que des séparateurs et un compte ne dit aucun travail.
+	if travail, coupe := groups.Split("--alice", "alice"); coupe {
+		t.Fatalf("Split = %q, %v", travail, coupe)
+	}
+}
+
+func TestBuildNeGardePasLeSeparateurEnTeteDuSuffixe(t *testing.T) {
+	// GitHub Classroom double parfois le tiret : le second n'est à personne.
+	depots := []groups.RepoInfo{
+		{Name: "TP3-H23-4204N6-KickMyB--ahmadloudin"},
+		{Name: "TP3-H23-4204N6-KickMyB--felixb"},
+	}
+	// Le préfixe arrive tel que la détection le propose, tiret final compris.
+	groupe := groups.Build("tp3-h23-4204n6-kickmyb-", depots)
+	if groupe.Len() != 2 {
+		t.Fatalf("dépôts = %+v", groupe.Repos)
+	}
+	for _, depot := range groupe.Repos {
+		if strings.HasPrefix(depot.Suffix, "-") {
+			t.Fatalf("suffixe = %q : un compte GitHub ne commence pas par un tiret",
+				depot.Suffix)
+		}
+	}
+	if _, _, trouve := groupe.Find("ahmadloudin"); !trouve {
+		t.Fatalf("le dépôt ne se retrouve pas par son compte : %+v", groupe.Repos)
 	}
 }

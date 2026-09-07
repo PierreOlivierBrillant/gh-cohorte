@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -18,8 +19,8 @@ import (
 //
 // Rien n'oblige à connaître les personnes pour cela : un dépôt dont l'étudiant
 // reste inconnu garde le dernier niveau de son nom. Il arrive à la bonne place,
-// le groupe le reconnaît, et le nom complet se corrige ensuite — « Renommer… »
-// dans la liste des étudiants.
+// le groupe le reconnaît, et le nom complet se corrige ensuite — le crayon
+// « Renommer… » de la liste des étudiants.
 
 // relocateInput est ce que l'interface envoie pour déplacer des travaux.
 type relocateInput struct {
@@ -52,6 +53,9 @@ func (s *Server) relocation(request *http.Request, body relocateInput) (relocate
 		return plan, err
 	}
 	repos, _, err := s.repos(depart.Org, false)
+	if err == nil {
+		depart = s.enrichi(depart, repos)
+	}
 	if err != nil {
 		return plan, err
 	}
@@ -115,23 +119,26 @@ func (s *Server) handleRelocate(writer http.ResponseWriter, request *http.Reques
 		" vers « " + plan.arrivee.Label() + " »"
 	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []groups.Renamed
 		for index, ligne := range plan.lignes {
 			if job.Canceled() {
 				break
 			}
-			if _, err := s.deps.Client.RenameRepo(
-				plan.depart.Org, ligne.Repo, ligne.Target); err != nil {
+			apres, err := s.deps.Client.RenameRepo(
+				plan.depart.Org, ligne.Repo, ligne.Target)
+			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
 			job.Progress(index+1, len(plan.lignes), ligne.Repo)
 		}
-		s.forget(plan.depart.Org)
+		s.renamed(plan.depart.Org, suivis)
 
 		bilan := map[string]any{
 			"renamed": renommes, "failed": echecs,

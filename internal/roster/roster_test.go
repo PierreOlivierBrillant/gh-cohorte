@@ -149,12 +149,57 @@ func TestLoadAvecBOM(t *testing.T) {
 	}
 }
 
-func TestLoadEncodageInvalide(t *testing.T) {
+// Une liste écrite sous Windows arrive en Windows-1252, et la refuser
+// obligerait à la convertir à la main avant de s'en servir.
+func TestLoadAccepteWindows1252(t *testing.T) {
 	chemin := filepath.Join(t.TempDir(), "latin1.csv")
-	if err := os.WriteFile(chemin, []byte("nom,github\n\xc9milie,emilie\n"), 0o644); err != nil {
+	// « Émilie Côté » en Windows-1252 : un octet par lettre accentuée.
+	contenu := []byte("nom,github\r\n\xc9milie C\xf4t\xe9,emilie-cote\r\n")
+	if err := os.WriteFile(chemin, contenu, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := roster.Load(chemin); err == nil {
-		t.Error("un fichier non UTF-8 doit être refusé")
+	liste, err := roster.Load(chemin)
+	if err != nil {
+		t.Fatalf("Load : %v", err)
+	}
+	if len(liste.People) != 1 || liste.People[0].FullName != "Émilie Côté" {
+		t.Fatalf("liste = %+v", liste.People)
+	}
+}
+
+func TestMarqueDeDoublonRetiree(t *testing.T) {
+	cas := []struct {
+		compte string
+		base   string
+		marque bool
+	}{
+		{"aleksilepaj-1", "aleksilepaj", true},
+		{"emilie-cote-12", "emilie-cote", true},
+		// Un compte peut légitimement finir par un nombre : rien dans le nom
+		// seul ne dit lequel des deux on lit.
+		{"LT-9", "LT", true},
+		{"jlpicard", "jlpicard", false},
+		// Rien à retirer : il ne resterait rien.
+		{"2149656", "2149656", false},
+		{"-1", "-1", false},
+	}
+	for _, essai := range cas {
+		base, marque := roster.WithoutDuplicateMarker(essai.compte)
+		if base != essai.base || marque != essai.marque {
+			t.Errorf("%q → %q (%v), attendu %q (%v)",
+				essai.compte, base, marque, essai.base, essai.marque)
+		}
+	}
+}
+
+func TestDeuxNomsCompletsPeuventEtreLaMemePersonne(t *testing.T) {
+	if !roster.SameName("Alexis Lepage", "alexis lepage") {
+		t.Error("la casse ne fait pas deux personnes")
+	}
+	if !roster.SameName("", "Alexis Lepage") || !roster.SameName("Alexis Lepage", "  ") {
+		t.Error("un nom encore inconnu ne contredit rien")
+	}
+	if roster.SameName("Alexis Lepage", "Émilie Côté") {
+		t.Error("deux noms différents sont deux personnes")
 	}
 }

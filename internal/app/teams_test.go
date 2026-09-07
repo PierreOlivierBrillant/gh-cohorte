@@ -13,6 +13,19 @@ import (
 // notion de groupe ; « --manage a26.5n6.01 » lui sert donc de place, et c'est
 // sur elle que portent les drapeaux d'équipe.
 
+// equipesDuGroupe rend les équipes d'un groupe parmi celles de l'organisation.
+// Le faux GitHub en porte d'autres d'office — « enseignants », « direction » —,
+// qui ne relèvent d'aucun groupe.
+func equipesDuGroupe(h *harnais, place string) []string {
+	trouvees := make([]string, 0)
+	for _, nom := range h.State.TeamNames("acme") {
+		if strings.HasPrefix(nom, place+".") {
+			trouvees = append(trouvees, nom)
+		}
+	}
+	return trouvees
+}
+
 // composer déclare une équipe en une commande scriptée, et rend les drapeaux
 // tels qu'ils étaient : ces tests en enchaînent plusieurs.
 func (h *harnais) composer(place, equipe string, membres ...string) int {
@@ -33,7 +46,7 @@ func TestTerminalComposeUneEquipe(t *testing.T) {
 	if code := h.composer("a26.5n6.01", "eq1", "emilie-cote", "jlpicard"); code != app.ExitOK {
 		t.Fatalf("code de retour %d :\n%s", code, h.texte())
 	}
-	if noms := h.State.TeamNames("acme"); strings.Join(noms, ",") != "a26.5n6.01.eq1" {
+	if noms := equipesDuGroupe(h, "a26.5n6.01"); strings.Join(noms, ",") != "a26.5n6.01.eq1" {
 		t.Fatalf("équipe attendue sur GitHub : %v", noms)
 	}
 	membres := h.State.TeamMembers("acme", fakegh.TeamSlug("a26.5n6.01.eq1"))
@@ -76,7 +89,7 @@ func TestTerminalRenommeEtSupprimeUneEquipe(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("renommage : code %d\n%s", code, h.texte())
 	}
-	if noms := h.State.TeamNames("acme"); strings.Join(noms, ",") != "a26.5n6.01.rouge" {
+	if noms := equipesDuGroupe(h, "a26.5n6.01"); strings.Join(noms, ",") != "a26.5n6.01.rouge" {
 		t.Fatalf("équipe renommée attendue : %v", noms)
 	}
 
@@ -88,7 +101,7 @@ func TestTerminalRenommeEtSupprimeUneEquipe(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("suppression : code %d\n%s", code, h.texte())
 	}
-	if noms := h.State.TeamNames("acme"); len(noms) != 0 {
+	if noms := equipesDuGroupe(h, "a26.5n6.01"); len(noms) != 0 {
 		t.Fatalf("l'équipe devrait avoir disparu : %v", noms)
 	}
 }
@@ -104,7 +117,7 @@ func TestTerminalAdopteUneEquipeExistante(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("adoption : code %d\n%s", code, h.texte())
 	}
-	if noms := h.State.TeamNames("acme"); strings.Join(noms, ",") != "a26.5n6.01.eq1" {
+	if noms := equipesDuGroupe(h, "a26.5n6.01"); strings.Join(noms, ",") != "a26.5n6.01.eq1" {
 		t.Fatalf("l'équipe devrait avoir rejoint le groupe : %v", noms)
 	}
 	membres := h.State.TeamMembers("acme", fakegh.TeamSlug("a26.5n6.01.eq1"))
@@ -252,7 +265,7 @@ func TestAssistantMeneAuxEquipes(t *testing.T) {
 	if _, propose := scripte.MenuFor("Que faire des équipes"); !propose {
 		t.Fatalf("le menu des équipes n'a pas été proposé :\n%s", h.texte())
 	}
-	if noms := h.State.TeamNames("acme"); strings.Join(noms, ",") != "a26.5n6.01.eq1" {
+	if noms := equipesDuGroupe(h, "a26.5n6.01"); strings.Join(noms, ",") != "a26.5n6.01.eq1" {
 		t.Fatalf("l'équipe devrait avoir été créée : %v", noms)
 	}
 	membres := h.State.TeamMembers("acme", fakegh.TeamSlug("a26.5n6.01.eq1"))

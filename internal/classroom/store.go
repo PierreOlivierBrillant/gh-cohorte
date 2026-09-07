@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -44,9 +45,27 @@ func PathNextTo(configFile string) string {
 // il est écrit en 0600, comme les réglages.
 type Store struct {
 	path string
+	// names dit ce que le registre d'une organisation sait des personnes. Le
+	// magasin s'en sert pour ne pas réécrire un nom que le registre porte
+	// déjà. Nil, il écrit tout : c'est ce que fait un poste hors ligne.
+	names func(org string) Names
 
 	mutex sync.Mutex
 	items []Classroom
+}
+
+// Resolving branche le magasin sur les registres des organisations.
+func (s *Store) Resolving(names func(org string) Names) *Store {
+	s.names = names
+	return s
+}
+
+// lighten allège un groupe de ce que le registre porte déjà.
+func (s *Store) lighten(classroom Classroom) Classroom {
+	if s.names == nil {
+		return classroom
+	}
+	return classroom.Trimmed(s.names(classroom.Org))
 }
 
 // Open lit le fichier des groupes ; son absence donne un magasin vide.
@@ -65,23 +84,42 @@ func Open(path string) *Store {
 		// Les réglages sont remis en forme à la lecture, pas seulement à
 		// l'écriture : un gabarit dépassé doit être corrigé avant d'être montré.
 		item.Defaults = item.Defaults.normalized()
-		store.items = append(store.items, awaitingSession(item))
+		store.items = append(store.items, item)
 	}
+	store.items = sansMarques(store.items)
 	return store
 }
 
-// awaitingSession ramène au rang de préfixe hérité un groupe déclaré sous la
-// nomenclature à quatre niveaux, avant que la session n'existe. Sans cela il
-// viserait « .cours.groupe » — une session vide —, et ses dépôts seraient
-// introuvables. Ainsi rangé, il s'affiche et se migre comme les autres.
-func awaitingSession(item Classroom) Classroom {
-	if strings.TrimSpace(item.Session) != "" || strings.TrimSpace(item.Course) == "" {
-		return item
+// sansMarques ramène à leur compte les étudiants qu'une marque de doublon de
+// GitHub a fait dévier, en confrontant entre eux les groupes d'une même
+// organisation. GitHub n'ajoute « -1 » à un nom de dépôt que parce que celui
+// qu'on demandait était déjà pris, et celui qui l'avait pris est le plus souvent
+// le même étudiant dans un autre groupe — une session précédente, un autre
+// cours. Le rapprochement se fait donc à l'échelle de l'organisation, comme la
+// collision qui l'a provoqué.
+//
+// La correction est faite à la lecture, comme celle des réglages dépassés :
+// lire n'écrit rien. Le fichier étant réécrit d'un bloc, le premier
+// enregistrement venu — n'importe quel groupe — la porte sur le disque.
+func sansMarques(items []Classroom) []Classroom {
+	comptes := map[string]map[string]string{}
+	for _, item := range items {
+		org := strings.ToLower(item.Org)
+		if comptes[org] == nil {
+			comptes[org] = map[string]string{}
+		}
+		for login, nom := range comptesDe(item.Students) {
+			if comptes[org][login] == "" {
+				comptes[org][login] = nom
+			}
+		}
 	}
-	item.LegacyPrefix = strings.Trim(
-		item.Course+naming.Separator+item.Group, naming.Separator)
-	item.Course, item.Group = "", ""
-	return item
+	corriges := make([]Classroom, 0, len(items))
+	for _, item := range items {
+		item.Students = dedupe(sansMarque(item.Students, comptes[strings.ToLower(item.Org)]))
+		corriges = append(corriges, item)
+	}
+	return corriges
 }
 
 // SessionName rend le nom long d'une session. Il se déduit de son nom court —
@@ -103,9 +141,6 @@ func (s *Store) Sessions(org string) []Session {
 	}
 	return SessionsOf(courts)
 }
-
-// Path renvoie l'emplacement du fichier.
-func (s *Store) Path() string { return s.path }
 
 // detach copie la liste des étudiants : sans cela, le groupe rendu partagerait
 // sa tranche avec le magasin, et le modifier écrirait dans son dos.
@@ -131,6 +166,107 @@ func (s *Store) List(org string) []Classroom {
 	return copie
 }
 
+// Visible rassemble les groupes d'une organisation : ceux qu'on a déclarés, et
+// ceux que les dépôts dessinent sans qu'on ait rien eu à déclarer. Un groupe
+// existe parce que ses dépôts existent ; le fichier local n'ajoute que ce
+// qu'eux ne savent pas dire, et le registre de l'organisation ce que ni les
+// uns ni l'autre ne disent — le nom derrière chaque compte.
+//
+// Les trois interfaces partent de cette liste : ce que l'une montre comme
+// groupe, les autres doivent le montrer aussi.
+func (s *Store) Visible(org string, repos []groups.RepoInfo, defauts Defaults,
+	names Names) []Classroom {
+	declares := s.List(org)
+	vus := map[string]bool{}
+	for _, cours := range declares {
+		vus[NormalizeScope(cours.Scope())] = true
+	}
+	for _, place := range Places(repos) {
+		if vus[NormalizeScope(place)] {
+			continue
+		}
+		cours, err := AtScope(org, place, defauts)
+		if err != nil {
+			continue
+		}
+		vus[NormalizeScope(place)] = true
+		declares = append(declares, cours)
+	}
+	// Le registre est versé ici, une fois : ce que les trois interfaces voient
+	// d'un groupe ne doit pas dépendre de celle par laquelle on l'a ouvert.
+	for position, cours := range declares {
+		declares[position] = cours.Enrich(names, repos)
+	}
+	return declares
+}
+
+// People rassemble les personnes de tous les groupes déclarés dans une
+// organisation, groupe par groupe et dans l'ordre des places.
+//
+// Les doublons y restent. Un compte nommé de deux façons dans deux groupes est
+// précisément ce qu'il faut montrer avant de publier : c'est à qui reçoit la
+// liste de dire ce que cela veut dire, non à ce magasin de le deviner.
+func (s *Store) People(org string) []roster.Person {
+	var gens []roster.Person
+	for _, cours := range s.List(org) {
+		gens = append(gens, cours.Students...)
+	}
+	return gens
+}
+
+// Backup recopie le fichier des groupes à côté de lui et rend le chemin de la
+// copie. Elle est faite avant d'alléger : ce qu'on retire du fichier vit
+// désormais dans le registre, mais rien n'oblige à croire un outil sur parole.
+func (s *Store) Backup(suffix string) (string, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	contenu, err := os.ReadFile(s.path)
+	if err != nil {
+		return "", nil // rien à sauvegarder : le fichier n'existe pas encore
+	}
+	copie := s.path + "." + suffix
+	if err := os.WriteFile(copie, contenu, 0o600); err != nil {
+		return "", valid.Errorf("Sauvegarde impossible : %v", err)
+	}
+	return copie, nil
+}
+
+// Trim retire d'un coup, de tous les groupes d'une organisation, les noms que
+// le registre porte déjà. Rend le nombre de noms retirés.
+//
+// C'est le geste qui suit une publication : ce qui vient de monter n'a plus à
+// être redit ici. Ceux que le registre ignore restent en place.
+func (s *Store) Trim(org string, names Names) (int, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	retires := 0
+	for position, item := range s.items {
+		if !strings.EqualFold(item.Org, org) {
+			continue
+		}
+		avant := nommes(item.Students)
+		allege := item.Trimmed(names)
+		retires += avant - nommes(allege.Students)
+		s.items[position] = allege
+	}
+	if retires == 0 {
+		return 0, nil
+	}
+	return retires, s.saveLocked()
+}
+
+// nommes compte les personnes dont le nom complet est écrit ici.
+func nommes(people []roster.Person) int {
+	total := 0
+	for _, person := range people {
+		if strings.TrimSpace(person.FullName) != "" {
+			total++
+		}
+	}
+	return total
+}
+
 // Find retrouve un groupe par sa place dans une organisation. C'est la seule
 // façon de le désigner : un identifiant tiré au hasard ne voudrait rien dire
 // hors de cette machine, alors que la place est dans le nom des dépôts.
@@ -149,7 +285,10 @@ func (s *Store) Find(org, scope string) (Classroom, bool) {
 // rien à créer ni à mettre à jour séparément — un groupe est à sa place, ou il
 // n'y est pas.
 func (s *Store) Save(classroom Classroom) (Classroom, error) {
-	valide, err := classroom.Validate()
+	// Ce que le registre a révélé n'est pas écrit ici, ni ce qu'il porte déjà :
+	// le fichier local dit ce qu'on a déclaré sur cette machine, et rien que
+	// le registre sache mieux que lui.
+	valide, err := s.lighten(classroom.declared()).Validate()
 	if err != nil {
 		return classroom, err
 	}
@@ -170,7 +309,7 @@ func (s *Store) Save(classroom Classroom) (Classroom, error) {
 // Move suit un groupe qui change de place : ses dépôts viennent d'être
 // renommés, et ce qu'on retient de lui doit les suivre.
 func (s *Store) Move(org, scope string, cible Classroom) (Classroom, error) {
-	valide, err := cible.Validate()
+	valide, err := s.lighten(cible.declared()).Validate()
 	if err != nil {
 		return cible, err
 	}

@@ -16,31 +16,22 @@ import (
 // fait que traduire des requêtes en écritures ; ce qui est permis, ce qui se
 // heurte, ce qui doit précéder quoi, tout cela se décide dans « teams ».
 
-// teamsOf résout le groupe demandé et ses équipes.
-func (s *Server) teamsOf(request *http.Request) (classroom.Classroom, []teams.Team, error) {
+// squadOf résout le groupe demandé et ses équipes.
+func (s *Server) squadOf(request *http.Request) (classroom.Classroom, []teams.Team, error) {
 	cours, err := s.place(request)
 	if err != nil {
 		return cours, nil, err
 	}
-	if cours.Legacy() {
-		return cours, nil, valid.Errorf(
-			"« %s » suit une nomenclature dépassée : ses équipes ne peuvent pas être nommées. "+
-				"Renommez d'abord ses dépôts.", cours.Label())
-	}
-	infos, err := s.squadsOf(cours.Org, request.URL.Query().Get("refresh") == "1")
+	infos, err := s.orgTeams(cours.Org, request.URL.Query().Get("refresh") == "1")
 	if err != nil {
 		return cours, nil, err
 	}
 	return cours, cours.Teams(infos), nil
 }
 
-// teamsIn renvoie les équipes d'un groupe sans exiger qu'il en ait. Un groupe
-// hérité n'en a jamais : il n'a pas de place où les nommer.
+// teamsIn renvoie les équipes d'un groupe.
 func (s *Server) teamsIn(cours classroom.Classroom) ([]teams.Team, error) {
-	if cours.Legacy() {
-		return nil, nil
-	}
-	infos, err := s.squadsOf(cours.Org, false)
+	infos, err := s.orgTeams(cours.Org, false)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +41,7 @@ func (s *Server) teamsIn(cours classroom.Classroom) ([]teams.Team, error) {
 // handleTeams liste les équipes du groupe, leurs membres nommés, et les
 // étudiants qu'aucune équipe n'accueille encore.
 func (s *Server) handleTeams(writer http.ResponseWriter, request *http.Request) {
-	cours, equipes, err := s.teamsOf(request)
+	cours, equipes, err := s.squadOf(request)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -69,7 +60,7 @@ func (s *Server) handleLooseTeams(writer http.ResponseWriter, request *http.Requ
 		fail(writer, err)
 		return
 	}
-	infos, err := s.squadsOf(org, request.URL.Query().Get("refresh") == "1")
+	infos, err := s.orgTeams(org, request.URL.Query().Get("refresh") == "1")
 	if err != nil {
 		fail(writer, err)
 		return
@@ -91,7 +82,7 @@ type teamInput struct {
 // qui échoue laisse une équipe vide, qu'on complète — jamais une équipe qu'on
 // ne saurait pas retrouver.
 func (s *Server) handleCreateTeam(writer http.ResponseWriter, request *http.Request) {
-	cours, equipes, err := s.teamsOf(request)
+	cours, equipes, err := s.squadOf(request)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -122,7 +113,7 @@ func (s *Server) handleCreateTeam(writer http.ResponseWriter, request *http.Requ
 		fail(writer, err)
 		return
 	}
-	s.forgetSquads(cours.Org)
+	s.forgetTeams(cours.Org)
 
 	neuve, _ := teams.Read(*cree)
 	etapes, err := teams.PlanAssign(append(equipes, neuve), short, membres)
@@ -139,7 +130,7 @@ func (s *Server) handleCreateTeam(writer http.ResponseWriter, request *http.Requ
 // handleRenameTeam renomme une équipe du groupe. Le nom court change ; la place,
 // elle, ne bouge pas — une équipe ne change pas de groupe.
 func (s *Server) handleRenameTeam(writer http.ResponseWriter, request *http.Request) {
-	cours, equipes, err := s.teamsOf(request)
+	cours, equipes, err := s.squadOf(request)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -163,7 +154,7 @@ func (s *Server) handleRenameTeam(writer http.ResponseWriter, request *http.Requ
 		fail(writer, err)
 		return
 	}
-	s.forgetSquads(cours.Org)
+	s.forgetTeams(cours.Org)
 	lue, _ := teams.Read(*renommee)
 	lue.Members = equipe.Members
 	writeJSON(writer, http.StatusOK, map[string]any{
@@ -174,7 +165,7 @@ func (s *Server) handleRenameTeam(writer http.ResponseWriter, request *http.Requ
 // handleDeleteTeam supprime une équipe. Ses dépôts restent : c'est l'accès qui
 // disparaît, et le travail qu'elle a rendu reste lisible sous son nom.
 func (s *Server) handleDeleteTeam(writer http.ResponseWriter, request *http.Request) {
-	cours, equipes, err := s.teamsOf(request)
+	cours, equipes, err := s.squadOf(request)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -189,7 +180,7 @@ func (s *Server) handleDeleteTeam(writer http.ResponseWriter, request *http.Requ
 		fail(writer, err)
 		return
 	}
-	s.forgetSquads(cours.Org)
+	s.forgetTeams(cours.Org)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"team": equipe.Short,
 		"message": "« " + equipe.Label() + " » supprimée. Ses dépôts restent sur GitHub ; " +
@@ -201,7 +192,7 @@ func (s *Server) handleDeleteTeam(writer http.ResponseWriter, request *http.Requ
 // l'organisation, en la renommant. Elle garde ses membres et ses accès : c'est
 // ce qui permet de reprendre un travail d'équipe commencé sans l'outil.
 func (s *Server) handleAdoptTeam(writer http.ResponseWriter, request *http.Request) {
-	cours, equipes, err := s.teamsOf(request)
+	cours, equipes, err := s.squadOf(request)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -214,7 +205,7 @@ func (s *Server) handleAdoptTeam(writer http.ResponseWriter, request *http.Reque
 		fail(writer, err)
 		return
 	}
-	infos, err := s.squadsOf(cours.Org, false)
+	infos, err := s.orgTeams(cours.Org, false)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -232,7 +223,7 @@ func (s *Server) handleAdoptTeam(writer http.ResponseWriter, request *http.Reque
 		fail(writer, err)
 		return
 	}
-	s.forgetSquads(cours.Org)
+	s.forgetTeams(cours.Org)
 	lue, _ := teams.Read(*adoptee)
 	lue.Members = source.Members
 	writeJSON(writer, http.StatusOK, map[string]any{
@@ -281,7 +272,7 @@ func (s *Server) handleLeaveTeam(writer http.ResponseWriter, request *http.Reque
 func (s *Server) applyMembership(writer http.ResponseWriter, request *http.Request,
 	target string, usernames []string,
 	planifier func([]teams.Team, string, []string) ([]teams.Step, error)) {
-	cours, equipes, err := s.teamsOf(request)
+	cours, equipes, err := s.squadOf(request)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -304,7 +295,7 @@ func (s *Server) applyMembership(writer http.ResponseWriter, request *http.Reque
 		})
 		return
 	}
-	infos, err := s.squadsOf(cours.Org, false)
+	infos, err := s.orgTeams(cours.Org, false)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -335,7 +326,7 @@ func (s *Server) applyTeamSteps(org string, etapes []teams.Step) ([]teams.Step, 
 		applied = append(applied, etape)
 	}
 	if len(applied) > 0 {
-		s.forgetSquads(org)
+		s.forgetTeams(org)
 	}
 	return applied, echecs
 }
@@ -410,7 +401,7 @@ func (s *Server) handleShareAssignment(writer http.ResponseWriter, request *http
 			if job.Canceled() {
 				break
 			}
-			err := s.deps.Client.AddTeamRepo(cours.Org, item.Slug, cours.Org, item.Repo, droit)
+			err := s.deps.Client.GrantTeamRepo(cours.Org, item.Slug, cours.Org, item.Repo, droit)
 			if err != nil {
 				echecs++
 				job.Line(item.Repo+" : échec — "+err.Error(), map[string]string{"status": "échec"})

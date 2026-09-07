@@ -30,6 +30,85 @@ type RepoInfo struct {
 	PushedAt string `json:"pushed_at"`
 }
 
+// Service dit qu'un dépôt n'appartient à aucun groupe : c'est un dépôt de
+// service de l'organisation. GitHub en réserve un — « .github », qui porte les
+// gabarits communs — et l'outil y rangera le sien.
+//
+// Le point de tête suffit à les reconnaître, et il ne peut désigner qu'eux : la
+// slugification ne le produit jamais, et un nom de la nomenclature qui
+// commencerait par lui aurait un premier niveau vide.
+func Service(name string) bool {
+	return strings.HasPrefix(strings.TrimSpace(name), ".")
+}
+
+// Ordinary écarte d'un inventaire les dépôts de service. C'est fait une fois,
+// là où l'inventaire est chargé, pour que ni la détection des groupes, ni les
+// listes, ni les décomptes n'aient à s'en préoccuper.
+func Ordinary(repos []RepoInfo) []RepoInfo {
+	gardes := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if !Service(repo.Name) {
+			gardes = append(gardes, repo)
+		}
+	}
+	return gardes
+}
+
+// Une écriture ne périme pas forcément l'inventaire. Renommer ou supprimer un
+// dépôt est un changement qu'on connaît exactement : le répercuter sur
+// l'inventaire déjà en main évite de le relire en entier. À l'échelle d'un
+// département — plusieurs milliers de dépôts, des dizaines de pages —, c'est la
+// différence entre un geste instantané et une attente à chaque fois.
+//
+// Ce que devient un inventaire se décide ici, et non dans les interfaces : le
+// terminal et le navigateur font le même geste et doivent en tirer le même
+// inventaire. Chacun garde en revanche sa façon de retenir sa copie.
+//
+// Une création, elle, oblige à relire. Le dépôt neuf n'est pas dans
+// l'inventaire, et sa date de dernier envoi ne s'invente pas : les fichiers de
+// départ y sont déposés après sa création, si bien que ce que GitHub a répondu
+// à la création est déjà dépassé. Une date inventée fausserait la colonne
+// « dernier envoi » et le filtre des muets.
+
+// Renamed est un dépôt renommé : son ancien nom, et ce qu'il est devenu.
+type Renamed struct {
+	Before string
+	After  RepoInfo
+}
+
+// WithRenamed suit dans un inventaire les dépôts qu'on vient de renommer. Un
+// renommage à moitié fait n'est pas un problème : seuls ceux qui ont abouti
+// sont dans la liste.
+func WithRenamed(repos []RepoInfo, done []Renamed) []RepoInfo {
+	if len(repos) == 0 || len(done) == 0 {
+		return repos
+	}
+	suivis := make(map[string]RepoInfo, len(done))
+	for _, item := range done {
+		suivis[strings.ToLower(item.Before)] = item.After
+	}
+	suivi := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if apres, change := suivis[strings.ToLower(repo.Name)]; change {
+			// La date de dernier envoi ne bouge pas : renommer n'est pas pousser.
+			repo.Name, repo.HTMLURL, repo.Private = apres.Name, apres.HTMLURL, apres.Private
+		}
+		suivi = append(suivi, repo)
+	}
+	return suivi
+}
+
+// WithoutRepo retire d'un inventaire un dépôt qu'on vient de supprimer.
+func WithoutRepo(repos []RepoInfo, name string) []RepoInfo {
+	restants := make([]RepoInfo, 0, len(repos))
+	for _, repo := range repos {
+		if !strings.EqualFold(repo.Name, name) {
+			restants = append(restants, repo)
+		}
+	}
+	return restants
+}
+
 // Repo est un dépôt appartenant à un groupe.
 type Repo struct {
 	Name     string
@@ -189,15 +268,20 @@ func Detect(names []string, minimum int) []Detected {
 	return detected
 }
 
+// Separators sont les caractères qui peuvent suivre un préfixe : le tiret des
+// noms qu'aucune convention n'organise, et le point de la nomenclature à cinq
+// niveaux. Un préfixe se saisit sans dire lequel des deux le termine.
+const Separators = Separator + "."
+
 // Build retient les dépôts du préfixe donné, à partir des données de l'API.
 func Build(prefix string, repos []RepoInfo) Group {
-	wanted := strings.TrimRight(strings.ToLower(strings.TrimSpace(prefix)), Separator)
+	wanted := strings.TrimRight(strings.ToLower(strings.TrimSpace(prefix)), Separators)
 	group := Group{Prefix: wanted}
 	if wanted == "" {
 		return group
 	}
 	for _, raw := range repos {
-		if !strings.HasPrefix(strings.ToLower(raw.Name), wanted+Separator) {
+		if !suit(strings.ToLower(raw.Name), wanted) {
 			continue
 		}
 		pushed := raw.PushedAt
@@ -205,8 +289,11 @@ func Build(prefix string, repos []RepoInfo) Group {
 			pushed = pushed[:10]
 		}
 		group.Repos = append(group.Repos, Repo{
-			Name:     raw.Name,
-			Suffix:   raw.Name[len(wanted)+1:],
+			Name: raw.Name,
+			// Les séparateurs en trop ne sont à personne : « TP3-KickMyB--alice »
+			// désigne « alice », pas « -alice ». Un compte GitHub ne commence
+			// pas par un tiret, un nom slugifié non plus.
+			Suffix:   strings.TrimLeft(raw.Name[len(wanted)+1:], Separators),
 			Private:  raw.Private,
 			URL:      raw.HTMLURL,
 			PushedAt: pushed,
@@ -216,6 +303,98 @@ func Build(prefix string, repos []RepoInfo) Group {
 		return strings.ToLower(group.Repos[i].Name) < strings.ToLower(group.Repos[j].Name)
 	})
 	return group
+}
+
+// suit dit si un nom commence par le préfixe donné suivi d'un séparateur. Les
+// deux nomenclatures se lisent ainsi sans que l'appelant ait à choisir : « tp1 »
+// retrouve « tp1-emilie-cote », et « a26.5n6.01.tp1 » retrouve
+// « a26.5n6.01.tp1.emilie-cote ».
+func suit(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) || len(name) <= len(prefix) {
+		return false
+	}
+	return strings.ContainsRune(Separators, rune(name[len(prefix)]))
+}
+
+// ------------------------------------------ à qui un dépôt appartient-il ?
+
+// Un nom de dépôt ne dit pas de façon fiable où finit le travail et où commence
+// la personne : « kickmyb-firebase-Walid7Akk » se lit aussi bien « kickmyb » +
+// « firebase-Walid7Akk ». Le découper au jugé donne alors un compte GitHub qui
+// n'existe pas, et le nom qu'on rapproche ensuite est faux.
+//
+// Les accès, eux, ne se devinent pas : la personne qui travaille dans un dépôt
+// y a été ajoutée. Son compte connu, le nom se découpe sans ambiguïté — ce qui
+// reste devant est le travail, quel que soit le nombre de tirets qu'il porte.
+
+// Split retire d'un nom de dépôt le compte qui le termine et rend le travail
+// qui précède. Le compte doit finir le nom et être détaché par un séparateur :
+// « kickmyb-firebase-Walid7Akk » et « Walid7Akk » donnent « kickmyb-firebase ».
+//
+// Les séparateurs en trop sont retirés avec lui. GitHub Classroom nomme parfois
+// « TP3-H23-4204N6-KickMyB--alice » : deux tirets, dont un seul sépare. Garder
+// le premier ferait un travail « …-KickMyB- » que rien d'autre n'écrit ainsi,
+// et le même travail se dédoublerait selon que son compte a été trouvé ou non.
+func Split(name, login string) (string, bool) {
+	name = strings.TrimSpace(name)
+	login = strings.TrimSpace(login)
+	if login == "" || len(name) <= len(login)+1 {
+		return "", false
+	}
+	coupe := len(name) - len(login)
+	if !strings.EqualFold(name[coupe:], login) {
+		return "", false
+	}
+	if !strings.ContainsRune(Separators, rune(name[coupe-1])) {
+		return "", false
+	}
+	travail := strings.TrimRight(name[:coupe-1], Separators)
+	if travail == "" {
+		return "", false
+	}
+	return travail, true
+}
+
+// Owner choisit, parmi les comptes qui ont accès à un dépôt, celui de la
+// personne à qui il appartient.
+//
+// Le nom tranche en premier : un dépôt qui finit par le compte de quelqu'un est
+// le sien, et cela reste vrai quand l'enseignant ou un correcteur figure aussi
+// dans les accès. Le compte le plus long gagne, pour que « walid7akk » l'emporte
+// sur un « akk » qui terminerait le même nom.
+//
+// Sans cet indice, un accès unique suffit : c'est le cas d'un dépôt que rien
+// dans son nom ne rattache à personne. Au-delà, rien n'est sûr, et rien n'est
+// rendu — mieux vaut le dire que se tromper.
+func Owner(name string, candidates []string) (string, bool) {
+	choisi := ""
+	for _, candidat := range candidates {
+		candidat = strings.TrimSpace(candidat)
+		if _, porte := Split(name, candidat); !porte {
+			continue
+		}
+		if len(candidat) > len(choisi) {
+			choisi = candidat
+		}
+	}
+	if choisi != "" {
+		return choisi, true
+	}
+
+	uniques := make([]string, 0, len(candidates))
+	vus := map[string]bool{}
+	for _, candidat := range candidates {
+		candidat = strings.TrimSpace(candidat)
+		if candidat == "" || vus[strings.ToLower(candidat)] {
+			continue
+		}
+		vus[strings.ToLower(candidat)] = true
+		uniques = append(uniques, candidat)
+	}
+	if len(uniques) == 1 {
+		return uniques[0], true
+	}
+	return "", false
 }
 
 // Resolver traduit un jeton non numérique en indice, ou renvoie -1.

@@ -18,31 +18,6 @@ import (
 // contente de « read:org », mais en créer, en renommer, en supprimer ou en
 // changer la composition n'est possible qu'avec la première.
 
-// team est ce que GitHub renvoie d'une équipe ; seul le nécessaire est retenu.
-type team struct {
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-// ListOrgTeams liste les équipes de l'organisation, sans leurs membres.
-func (c *Client) ListOrgTeams(org string, onPage func(total int)) ([]teams.Info, error) {
-	var all []teams.Info
-	err := c.paginate("orgs/"+url.PathEscape(org)+"/teams", onPage, func(content []byte) (int, error) {
-		var page []team
-		if err := json.Unmarshal(content, &page); err != nil {
-			return 0, err
-		}
-		for _, item := range page {
-			all = append(all, teams.Info{
-				Slug: item.Slug, Name: item.Name, Description: item.Description,
-			})
-		}
-		return len(page), nil
-	})
-	return all, err
-}
-
 // ListTeamMembers renvoie les comptes GitHub inscrits dans une équipe.
 func (c *Client) ListTeamMembers(org, slug string) ([]string, error) {
 	var all []string
@@ -108,32 +83,8 @@ func (c *Client) RemoveTeamMember(org, slug, username string) error {
 	return err
 }
 
-// AddTeamRepo donne à l'équipe un droit sur un dépôt. L'appel est idempotent :
-// le relancer sur un dépôt déjà partagé ne fait que confirmer le droit.
-func (c *Client) AddTeamRepo(org, slug, owner, repo, permission string) error {
-	path := teamPath(org, slug) + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo)
-	_, err := c.do(http.MethodPut, path, map[string]any{"permission": permission})
-	return err
-}
-
-// ListTeamRepos renvoie les dépôts auxquels l'équipe a accès.
-func (c *Client) ListTeamRepos(org, slug string) ([]string, error) {
-	var all []string
-	err := c.paginate(teamPath(org, slug)+"/repos", nil, func(content []byte) (int, error) {
-		var page []Repo
-		if err := json.Unmarshal(content, &page); err != nil {
-			return 0, err
-		}
-		for _, item := range page {
-			all = append(all, item.Name)
-		}
-		return len(page), nil
-	})
-	return all, err
-}
-
 func readTeam(response *Response) (*teams.Info, error) {
-	value := &team{}
+	value := &Team{}
 	if err := response.JSON(value); err != nil {
 		return nil, &Error{Message: "Équipe illisible : " + err.Error()}
 	}
@@ -153,10 +104,16 @@ func teamPath(org, slug string) string {
 // Une équipe dont les membres restent illisibles n'arrête pas le tout : elle
 // est rendue sans eux, et l'interface la montre vide plutôt que de refuser
 // d'afficher quoi que ce soit.
-func (c *Client) LoadOrgTeams(org string, jobs int, onPage func(total int)) ([]teams.Info, error) {
-	found, err := c.ListOrgTeams(org, onPage)
+func (c *Client) LoadOrgTeams(org string, jobs int) ([]teams.Info, error) {
+	listees, err := c.ListOrgTeams(org)
 	if err != nil {
 		return nil, err
+	}
+	found := make([]teams.Info, 0, len(listees))
+	for _, item := range listees {
+		found = append(found, teams.Info{
+			Slug: item.Slug, Name: item.Name, Description: item.Description,
+		})
 	}
 	if jobs < 1 {
 		jobs = 1

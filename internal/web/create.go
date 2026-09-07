@@ -25,12 +25,18 @@ type rosterPayload struct {
 func (s *Server) handleParseRoster(writer http.ResponseWriter, request *http.Request) {
 	var body struct {
 		Text string `json:"text"`
+		// Content porte les octets d'un fichier déposé dans la page : le
+		// navigateur n'en donne jamais le chemin, mais il en donne le contenu.
+		Content []byte `json:"content"`
 	}
 	if err := decode(request, &body); err != nil {
 		fail(writer, err)
 		return
 	}
 	list := roster.Parse(body.Text)
+	if len(body.Content) > 0 {
+		list = roster.ParseBytes(body.Content)
+	}
 	writeJSON(writer, http.StatusOK, rosterPayload{People: list.People, Issues: list.Issues})
 }
 

@@ -72,7 +72,14 @@ func TestUneEquipePorteLaPlaceDeSonGroupe(t *testing.T) {
 	autre := h.groupe("a26", "5n6", "02", "Autre Personne", "autre")
 	h.creerEquipe(autre, "eq1", "autre")
 
-	noms := h.State.TeamNames("acme")
+	// Le faux GitHub porte d'office des équipes qui ne relèvent d'aucun groupe :
+	// seules celles de la nomenclature sont comparées ici.
+	noms := make([]string, 0)
+	for _, nom := range h.State.TeamNames("acme") {
+		if strings.HasPrefix(nom, "a26.") {
+			noms = append(noms, nom)
+		}
+	}
 	attendus := []string{"a26.5n6.01.eq1", "a26.5n6.01.eq2", "a26.5n6.02.eq1"}
 	if strings.Join(noms, ",") != strings.Join(attendus, ",") {
 		t.Fatalf("équipes créées sur GitHub inattendues : %v", noms)
@@ -208,7 +215,7 @@ func TestSupprimerUneEquipeLaisseSesDepots(t *testing.T) {
 	if !strings.Contains(bilan["message"].(string), "dépôts restent") {
 		t.Fatalf("le message devrait rassurer sur les dépôts : %v", bilan["message"])
 	}
-	if noms := h.State.RepoNames("acme"); len(noms) != 1 {
+	if noms := h.depots(); len(noms) != 1 {
 		t.Fatalf("le dépôt devrait subsister : %v", noms)
 	}
 	if len(h.equipes(place).Teams) != 1 {
@@ -229,7 +236,13 @@ func TestAdopterUneEquipeExistante(t *testing.T) {
 		Teams []ficheEquipe `json:"teams"`
 	}
 	h.json(http.MethodGet, "/api/orgs/acme/teams", nil, &libres)
-	if len(libres.Teams) != 1 || libres.Teams[0].Name != "Les anciens" {
+	slug := ""
+	for _, equipe := range libres.Teams {
+		if equipe.Name == "Les anciens" {
+			slug = equipe.Slug
+		}
+	}
+	if slug == "" {
 		t.Fatalf("l'équipe libre devrait être proposée : %+v", libres.Teams)
 	}
 
@@ -238,7 +251,7 @@ func TestAdopterUneEquipeExistante(t *testing.T) {
 		Previous string      `json:"previous"`
 	}
 	h.json(http.MethodPost, "/api/classrooms/"+place+"/teams/adopt",
-		map[string]any{"slug": libres.Teams[0].Slug, "name": "eq1"}, &adoptee)
+		map[string]any{"slug": slug, "name": "eq1"}, &adoptee)
 	if adoptee.Team.Name != "a26.5n6.01.eq1" || adoptee.Previous != "Les anciens" {
 		t.Fatalf("adoption inattendue : %+v", adoptee)
 	}
@@ -258,7 +271,7 @@ func TestDistribuerUnTravailDEquipe(t *testing.T) {
 		t.Fatalf("distribution en échec : %v", bilan)
 	}
 
-	noms := h.State.RepoNames("acme")
+	noms := h.depots()
 	sort.Strings(noms)
 	attendus := []string{"a26.5n6.01.projet.eq1", "a26.5n6.01.projet.eq2"}
 	if strings.Join(noms, ",") != strings.Join(attendus, ",") {
@@ -268,7 +281,7 @@ func TestDistribuerUnTravailDEquipe(t *testing.T) {
 	// L'accès est accordé à l'équipe, pas à ses membres : c'est ce qui fait
 	// qu'un changement de composition suffit ensuite à changer qui y accède.
 	partages := h.State.TeamRepoNames("acme", fakegh.TeamSlug("a26.5n6.01.eq1"))
-	if strings.Join(partages, ",") != "a26.5n6.01.projet.eq1" {
+	if strings.Join(partages, ",") != "acme/a26.5n6.01.projet.eq1" {
 		t.Fatalf("le dépôt devrait être partagé avec eq1 : %v", partages)
 	}
 	if invitations := h.State.Invitations["acme/a26.5n6.01.projet.eq1"]; len(invitations) != 0 {
@@ -283,7 +296,7 @@ func TestDistribuerAQuelquesEquipesSeulement(t *testing.T) {
 	h.travail(http.MethodPost, "/api/classrooms/"+place+"/assignments",
 		map[string]any{"name": "projet", "teams": true, "team_names": []string{"eq1"}})
 
-	if noms := h.State.RepoNames("acme"); strings.Join(noms, ",") != "a26.5n6.01.projet.eq1" {
+	if noms := h.depots(); strings.Join(noms, ",") != "a26.5n6.01.projet.eq1" {
 		t.Fatalf("seule eq1 devait être servie : %v", noms)
 	}
 
@@ -393,15 +406,29 @@ func TestPartagerLesDepotsDunTravailAdopte(t *testing.T) {
 	}
 }
 
-// Un groupe hérité n'a pas de place où nommer ses équipes.
-func TestUnGroupeHeriteNaPasDEquipes(t *testing.T) {
-	h := nouveau(t, nil)
-	place := h.heritage("vieux", "emilie-cote")
-	reponse, contenu := h.requete(http.MethodGet, "/api/classrooms/"+place+"/teams", nil)
-	if reponse.StatusCode != http.StatusBadRequest {
-		t.Fatalf("statut attendu 400, reçu %d — %s", reponse.StatusCode, contenu)
+// Une équipe libre de tout groupe n'appartient à aucun : elle reste à adopter,
+// et n'apparaît dans les équipes d'aucun groupe.
+func TestUneEquipeLibreNAppartientAAucunGroupe(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddTeam("acme", "Les anciens", "emilie-cote")
+	h := nouveau(t, state)
+	place := h.groupe("a26", "5n6", "01", "Émilie Côté", "emilie-cote")
+
+	if liste := h.equipes(place); len(liste.Teams) != 0 {
+		t.Fatalf("le groupe ne devrait avoir aucune équipe : %+v", liste.Teams)
 	}
-	if !strings.Contains(string(contenu), "nomenclature dépassée") {
-		t.Fatalf("message peu explicite : %s", contenu)
+	var libres struct {
+		Teams []ficheEquipe `json:"teams"`
+	}
+	h.json(http.MethodGet, "/api/orgs/acme/teams", nil, &libres)
+	noms := make([]string, 0, len(libres.Teams))
+	for _, equipe := range libres.Teams {
+		noms = append(noms, equipe.Name)
+	}
+	sort.Strings(noms)
+	// Les équipes que le faux GitHub porte d'office s'y trouvent aussi : rien
+	// ne les rattache à un groupe.
+	if strings.Join(noms, ",") != "Les anciens,direction,enseignants" {
+		t.Fatalf("équipes libres = %v", noms)
 	}
 }

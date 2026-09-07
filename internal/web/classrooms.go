@@ -64,7 +64,7 @@ func (s *Server) handleClassrooms(writer http.ResponseWriter, request *http.Requ
 
 	// Les équipes disent lesquels des travaux sont d'équipe ; leur absence
 	// n'empêche rien — le groupe n'a alors que des travaux individuels.
-	infos, _ := s.squadsOf(org, false)
+	infos, _ := s.orgTeams(org, false)
 
 	visibles := s.visibles(org, repos)
 	liste := make([]classroomPayload, 0, len(visibles))
@@ -107,7 +107,6 @@ type classroomInput struct {
 func (s *Server) fromInput(body classroomInput) classroom.Classroom {
 	return classroom.Classroom{
 		Org: s.org(), Session: body.Session, Course: body.Course, Group: body.Group,
-		LegacyPrefix: body.Prefix, LegacyPattern: body.Pattern,
 		Students: body.Students, RosterPath: body.RosterPath,
 		Defaults: s.defaultsOr(body.Defaults),
 	}
@@ -122,7 +121,12 @@ func (s *Server) handleCreateClassroom(writer http.ResponseWriter, request *http
 		fail(writer, err)
 		return
 	}
-	cree, err := s.classrooms.Save(s.fromInput(body))
+	depart := s.fromInput(body)
+	if err := s.apprendre(depart.Org, depart.Students...); err != nil {
+		fail(writer, err)
+		return
+	}
+	cree, err := s.classrooms.Save(depart)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -150,6 +154,7 @@ func (s *Server) handleClassroom(writer http.ResponseWriter, request *http.Reque
 		fail(writer, err)
 		return
 	}
+	cours = s.enrichi(cours, repos)
 	equipes, err := s.teamsIn(cours)
 	if err != nil {
 		fail(writer, err)
@@ -276,12 +281,13 @@ func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *ht
 		fail(writer, err)
 		return
 	}
-
+	cours = s.enrichi(cours, repos)
 	equipes, err := s.teamsIn(cours)
 	if err != nil {
 		fail(writer, err)
 		return
 	}
+
 	toutes := students.Build(cours, repos, equipes)
 	retenues := students.Apply(toutes, filtre, tri, decroissant)
 
@@ -359,6 +365,10 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	cours.Students = people
+	if err := s.apprendre(cours.Org, people...); err != nil {
+		fail(writer, err)
+		return
+	}
 
 	modifie, err := s.classrooms.Save(cours)
 	if err != nil {
@@ -415,6 +425,10 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 		fail(writer, err)
 		return
 	}
+	if err := s.apprendre(cours.Org, personne); err != nil {
+		fail(writer, err)
+		return
+	}
 
 	modifie, err := s.classrooms.Save(augmente)
 	if err != nil {
@@ -454,6 +468,8 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 			job.Progress(index+1, len(remises), remise.Name)
 		}
 		if crees > 0 {
+			// Une création oblige à relire : le dépôt neuf n'est pas dans
+			// l'inventaire, et sa date de dernier envoi ne s'invente pas.
 			s.forget(cours.Org)
 		}
 		return map[string]any{
@@ -494,6 +510,17 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 		return
 	}
 
+	// Les dépôts sont relevés avant même de chercher la personne : celle que
+	// seuls ses dépôts révèlent — un groupe qu'on n'a pas déclaré ici — doit
+	// pouvoir être nommée comme les autres, et c'est justement celle à qui il
+	// manque un nom.
+	repos, _, err := s.repos(cours.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	cours = s.enrichi(cours, repos)
+
 	avant, inscrit := cours.Find(body.Username)
 	if !inscrit {
 		fail(writer, valid.Errorf("@%s n'est pas dans « %s ».",
@@ -526,15 +553,18 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 	// tel qu'il est encore : c'est l'ancien nom qui retrouve ses dépôts.
 	var renommages []classroom.Move
 	if body.Repos {
-		repos, _, err := s.repos(cours.Org, false)
-		if err != nil {
-			fail(writer, err)
-			return
-		}
 		if renommages, err = classroom.PlanRenameStudent(cours, avant, apres, repos); err != nil {
 			fail(writer, err)
 			return
 		}
+	}
+
+	// Le registre retient le nouveau nom sans oublier l'ancien slug : les
+	// dépôts déjà créés restent rattachés à leur personne, qu'on les renomme
+	// ou non.
+	if err := s.apprendre(cours.Org, apres); err != nil {
+		fail(writer, err)
+		return
 	}
 
 	enregistre, err := s.classrooms.Save(modifie)
@@ -555,22 +585,25 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 	label := "Dépôts de @" + apres.Username + " au nom de " + apres.FullName
 	job := s.jobs.Start("renommage", label, func(job *Job) (any, error) {
 		renommes, echecs := 0, 0
+		var suivis []groups.Renamed
 		for index, ligne := range renommages {
 			if job.Canceled() {
 				break
 			}
-			if _, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target); err != nil {
+			apres, err := s.deps.Client.RenameRepo(cours.Org, ligne.Repo, ligne.Target)
+			if err != nil {
 				echecs++
 				job.Line(ligne.Repo+" : échec — "+err.Error(),
 					map[string]string{"status": "échec"})
 			} else {
 				renommes++
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
 				job.Line(ligne.Repo+" → "+ligne.Target,
 					map[string]string{"status": "mis à jour"})
 			}
 			job.Progress(index+1, len(renommages), ligne.Repo)
 		}
-		s.forget(cours.Org)
+		s.renamed(cours.Org, suivis)
 		bilan["renamed"], bilan["failed"] = renommes, echecs
 		return bilan, nil
 	})
@@ -595,12 +628,6 @@ func (s *Server) remises(cours classroom.Classroom, personne roster.Person,
 	if len(noms) == 0 {
 		return nil, nil
 	}
-	if cours.Legacy() {
-		return nil, valid.Errorf(
-			"« %s » suit une nomenclature dépassée : ses dépôts ne peuvent pas être nommés. "+
-				"Renommez-les d'abord, ou ajoutez la personne sans ses dépôts.", cours.Label())
-	}
-
 	// Le nom du dépôt vient du nom complet : sans lui, il n'y a rien à nommer.
 	// Le dire ici évite de laisser l'échec surgir du fond du plan.
 	if _, err := naming.Student(personne.FullName); err != nil {
@@ -652,6 +679,16 @@ func (s *Server) handleResolveStudentNames(writer http.ResponseWriter, request *
 		fail(writer, err)
 		return
 	}
+	// Le bouton compte les noms manquants sur la liste que les dépôts
+	// complètent ; les retrouver doit porter sur la même liste, sans quoi il
+	// annoncerait des noms qu'il ne chercherait jamais.
+	repos, _, err := s.repos(cours.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	cours = s.enrichi(cours, repos)
+
 	pairs := make([]identity.Pair, 0, len(cours.Students))
 	for _, student := range cours.Students {
 		if strings.TrimSpace(student.FullName) == "" {
@@ -670,11 +707,18 @@ func (s *Server) handleResolveStudentNames(writer http.ResponseWriter, request *
 			job.Progress(done, total, "@"+login)
 		})
 		complets := 0
+		var retrouvees []roster.Person
 		for position, student := range cours.Students {
 			if nom := noms[student.Username]; nom != "" {
 				cours.Students[position].FullName = nom
+				retrouvees = append(retrouvees, cours.Students[position])
 				complets++
 			}
+		}
+		// Un nom retrouvé une fois vaut pour toute l'organisation : le mettre au
+		// registre évite de le rechercher groupe après groupe.
+		if err := s.apprendre(cours.Org, retrouvees...); err != nil {
+			return nil, err
 		}
 		modifie, err := s.classrooms.Save(cours)
 		if err != nil {
@@ -718,6 +762,7 @@ func (s *Server) assignmentOf(request *http.Request) (
 	if err != nil {
 		return cours, "", nil, err
 	}
+	cours = s.enrichi(cours, repos)
 	return cours, cours.AssignmentID(nom), repos, nil
 }
 
@@ -787,9 +832,8 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		}
 		lignes = append(lignes, ligne)
 	}
-	travaux := cours.Assignments(repos, equipes)
 	nature := classroom.Individual
-	for _, travail := range travaux {
+	for _, travail := range cours.Assignments(repos, equipes) {
 		if strings.EqualFold(travail.ID, id) {
 			nature = travail.Kind
 		}
@@ -898,12 +942,6 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (distribut
 	if err != nil {
 		return vide, err
 	}
-	if cours.Legacy() {
-		return vide, valid.Errorf(
-			"« %s » suit une nomenclature dépassée. Renommez ses dépôts en "+
-				"« session%[2]scours%[2]sgroupe » avant de lui distribuer un travail.",
-			cours.Label(), naming.Separator)
-	}
 	nom, err := naming.Fragment(body.Name, "Nom du travail")
 	if err != nil {
 		return vide, err
@@ -917,6 +955,7 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (distribut
 	if err != nil {
 		return vide, err
 	}
+	cours = s.enrichi(cours, repos)
 	if body.Teams {
 		return s.prepareTeams(cours, settings, body, repos)
 	}
@@ -1095,6 +1134,7 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 			return nil, err
 		}
 		if !body.DryRun && report.Count(runner.Created) > 0 {
+			// Voir « updateInventory » : une création se relit, un renommage se suit.
 			s.forget(cours.Org)
 		}
 
@@ -1134,34 +1174,3 @@ func plurielDes(equipes bool) string {
 }
 
 // ----------------------------------------------------------------- candidats
-
-// handleCandidates propose des groupes à partir des dépôts déjà présents, pour
-// qu'une organisation en cours d'année s'adopte sans rien renommer.
-func (s *Server) handleCandidates(writer http.ResponseWriter, request *http.Request) {
-	org, err := valid.Login(request.PathValue("org"), "Organisation")
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-	repos, source, err := s.repos(org, request.URL.Query().Get("refresh") == "1")
-	if err != nil {
-		fail(writer, err)
-		return
-	}
-
-	// Les préfixes déjà couverts par un groupe ne sont plus à proposer.
-	pris := map[string]bool{}
-	for _, cours := range s.visibles(org, repos) {
-		pris[classroom.NormalizeScope(cours.Scope())] = true
-	}
-	proposes := make([]classroom.Candidate, 0)
-	for _, candidat := range classroom.Candidates(repos) {
-		if pris[classroom.NormalizeScope(candidat.Prefix)] {
-			continue
-		}
-		proposes = append(proposes, candidat)
-	}
-	writeJSON(writer, http.StatusOK, map[string]any{
-		"candidates": proposes, "total": len(repos), "source": source,
-	})
-}

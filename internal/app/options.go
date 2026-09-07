@@ -24,7 +24,38 @@ type Options struct {
 	Org             string
 	Manage          string // vide = choisir le groupe dans la liste
 	ManageRequested bool
-	Roster          string
+	// StudentsRequested ouvre l'annuaire : les étudiants de l'organisation
+	// entière, avec les cours que chacun a suivis.
+	StudentsRequested bool
+	// Import reprend des dépôts nommés autrement — « travail-compte », ce que
+	// GitHub Classroom produit — et les fait entrer dans la nomenclature. Sans
+	// valeur, il montre les travaux que ces dépôts dessinent.
+	Import          string
+	ImportRequested bool
+	// Into est la place d'arrivée d'une importation : « a26.5n6.1030 ».
+	Into string
+	// Repos restreint une reprise aux dépôts nommés, séparés par des virgules.
+	// Vide, le travail est repris entier.
+	Repos string
+	// NamedOnly laisse où ils sont les dépôts d'une importation dont on ne
+	// connaît pas la personne, plutôt que de les reprendre sous le compte
+	// qu'ils portent.
+	NamedOnly bool
+	// PublishRegistry verse au registre de l'organisation les noms que ce
+	// poste a accumulés, puis quitte. Avec --dry-run, il montre seulement ce
+	// qu'il ferait ; avec --yes, il ne demande pas confirmation.
+	PublishRegistry bool
+	// PreferLocal fait gagner les noms de ce poste sur ceux du registre quand
+	// les deux diffèrent. Sans lui, le registre garde les siens.
+	PreferLocal bool
+	// ForgetRegistryHistory réécrit la branche du registre en un commit sans
+	// passé, puis quitte. Le nom du dépôt doit être retapé : aucune option,
+	// « --yes » compris, ne court-circuite cette confirmation.
+	ForgetRegistryHistory bool
+	// RegistryTeam donne à une équipe de l'organisation accès au registre,
+	// puis quitte.
+	RegistryTeam string
+	Roster       string
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
@@ -49,7 +80,8 @@ type Options struct {
 	TeamDelete    bool
 	TeamShare     bool
 	// MoveTo déplace le travail ouvert vers une place de la nomenclature
-	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra.
+	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra. Sans
+	// MoveTo, RenameTo renomme le travail là où il est déjà.
 	MoveTo           string
 	RenameTo         string
 	Template         string
@@ -79,7 +111,11 @@ type Options struct {
 	NoSaveConfig     bool
 	NoCache          bool
 	ClearCache       bool
-	ShowVersion      bool
+	// RefreshToken régénère le jeton GitHub avec les portées de Scopes, puis
+	// quitte. Scopes vide vaut pour toutes celles dont l'outil se sert.
+	RefreshToken bool
+	Scopes       string
+	ShowVersion  bool
 
 	// Réglés par les tests seulement : jamais exposés en ligne de commande.
 	BaseURL  string
@@ -98,7 +134,13 @@ Utilisation :
   gh cohorte                                  interface graphique dans le navigateur
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
+  gh cohorte --students --session a26         étudiants de la session a26
+  gh cohorte --import                         reprendre des dépôts nommés autrement
+  gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+  gh cohorte --publish-registry --dry-run     ce que publier les noms ferait
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
+  gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
+  gh cohorte --refresh-token --scopes delete_repo
   gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
   gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
   gh cohorte --org acme --manage a26.5n6.01 --teams
@@ -108,12 +150,23 @@ Utilisation :
 Drapeaux :
   --org ORG                organisation GitHub cible
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
+  --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
+  --import [TRAVAIL]       reprendre des dépôts « travail-compte » ; vide, les lister
+  --into PLACE             place d'arrivée d'une importation (« a26.5n6.1030 »)
+  --publish-registry       verser au registre de l'organisation les noms de ce poste
+  --prefer-local           en cas de désaccord, garder le nom de ce poste
+  --registry-team EQUIPE   donner à une équipe accès au registre
+  --forget-registry-history  réécrire le registre sans son historique
+  --session COURT          ne lister que les étudiants d'une session (« a26 »)
+  --course SIGLE           ne lister que les étudiants d'un cours (« 5n6 »)
   --filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
   --pushed-after DATE      ne lister que les envois postérieurs à DATE (AAAA-MM-JJ)
   --pushed-before DATE     ne lister que les envois antérieurs à DATE
   --never-pushed           ne lister que les dépôts sans aucun envoi
   --sort nom|compte|envoi  colonne de tri de la liste (défaut : nom)
   --sort-desc              trier du plus grand au plus petit
+  --repos DEPOTS           ne reprendre que ces dépôts (noms séparés par des virgules)
+  --named-only             ne reprendre que les dépôts dont l'étudiant est connu
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
   --teams                  travail d'équipe : un dépôt par équipe, partagé avec elle
@@ -127,7 +180,7 @@ Drapeaux :
   --team-adopt EQUIPE      adopter une équipe de l'organisation sous le nom de --team
   --team-share             (re)partager les dépôts du travail avec leurs équipes
   --move-to PLACE          déplacer le travail géré vers « session.cours.groupe »
-  --rename-to NOM          nom que le travail déplacé prend à l'arrivée
+  --rename-to NOM          nom que le travail prend ; seul, il le renomme sur place
   --template ORG/DEPOT     dépôt modèle (vide = dépôt neuf initialisé)
   --pattern GABARIT        gabarit de nom des dépôts (défaut : {assignment}-{username})
   --starter DOSSIER        dossier local déposé dans chaque dépôt, en un commit
@@ -152,6 +205,8 @@ Drapeaux :
   --no-save-config         ne pas mémoriser les réglages
   --no-cache               ignorer le cache local
   --clear-cache            vider le cache local puis quitter
+  --refresh-token          régénérer le jeton GitHub puis quitter
+  --scopes LISTE           portées à obtenir (défaut : celles dont l'outil se sert)
   --version                afficher la version
 
 Champs des gabarits : %s
@@ -178,11 +233,24 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.Usage = func() {}
 
 	manage := set.String("manage", unset, "gérer un groupe existant")
+	importer := set.String("import", unset, "reprendre des dépôts nommés autrement")
 	template := set.String("template", unset, "dépôt modèle")
 	starter := set.String("starter", unset, "dossier de fichiers de départ")
 	delay := set.Float64("delay", -1, "marge entre deux créations")
 
 	set.StringVar(&options.Org, "org", "", "organisation GitHub cible")
+	set.BoolVar(&options.StudentsRequested, "students", false,
+		"lister les étudiants de l'organisation")
+	set.BoolVar(&options.PublishRegistry, "publish-registry", false,
+		"verser au registre les noms de ce poste")
+	set.BoolVar(&options.PreferLocal, "prefer-local", false,
+		"garder les noms de ce poste en cas de désaccord")
+	set.BoolVar(&options.ForgetRegistryHistory, "forget-registry-history", false,
+		"réécrire le registre sans son historique")
+	set.StringVar(&options.RegistryTeam, "registry-team", "",
+		"donner à une équipe accès au registre")
+	session := set.String("session", "", "ne lister qu'une session")
+	sigle := set.String("course", "", "ne lister qu'un cours")
 	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")
 	apres := set.String("pushed-after", "", "envois postérieurs à cette date")
 	avant := set.String("pushed-before", "", "envois antérieurs à cette date")
@@ -190,6 +258,11 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	tri := set.String("sort", "", "colonne de tri de la liste")
 	set.BoolVar(&options.SortDesc, "sort-desc", false, "trier du plus grand au plus petit")
 
+	set.StringVar(&options.Into, "into", "", "place d'arrivée d'une importation")
+	set.StringVar(&options.Repos, "repos", "",
+		"dépôts à reprendre, séparés par des virgules (défaut : tous)")
+	set.BoolVar(&options.NamedOnly, "named-only", false,
+		"ne reprendre que les dépôts dont l'étudiant est connu")
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
 	set.BoolVar(&options.Teams, "teams", false, "travail d'équipe")
@@ -202,7 +275,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.BoolVar(&options.TeamDelete, "team-delete", false, "supprimer l'équipe visée")
 	set.BoolVar(&options.TeamShare, "team-share", false, "repartager les dépôts avec les équipes")
 	set.StringVar(&options.MoveTo, "move-to", "", "place d'arrivée du travail géré")
-	set.StringVar(&options.RenameTo, "rename-to", "", "nom du travail à l'arrivée")
+	set.StringVar(&options.RenameTo, "rename-to", "", "nom que le travail prend")
 	set.StringVar(&options.Pattern, "pattern", "", "gabarit de nom des dépôts")
 	set.StringVar(&options.CommitMessage, "commit-message", "", "message du commit")
 	set.BoolVar(&options.ForceStarter, "force-starter", false, "déposer même dans un dépôt garni")
@@ -225,6 +298,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.BoolVar(&options.NoSaveConfig, "no-save-config", false, "ne pas mémoriser les réglages")
 	set.BoolVar(&options.NoCache, "no-cache", false, "ignorer le cache")
 	set.BoolVar(&options.ClearCache, "clear-cache", false, "vider le cache puis quitter")
+	set.BoolVar(&options.RefreshToken, "refresh-token", false, "régénérer le jeton GitHub")
+	set.StringVar(&options.Scopes, "scopes", "", "portées à obtenir")
 	set.BoolVar(&options.ShowVersion, "version", false, "afficher la version")
 
 	if err := set.Parse(normalizeArgs(args)); err != nil {
@@ -240,6 +315,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	// arrêter la ligne de commande, pas se perdre en cours de route.
 	options.Filter = students.Filter{
 		Text: *filtre, PushedAfter: *apres, PushedBefore: *avant,
+		Session: *session, Course: *sigle,
 	}
 	if *muets {
 		options.Filter.Activity = students.Silent
@@ -266,6 +342,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	if *manage != unset {
 		options.ManageRequested = true
 		options.Manage = *manage
+	}
+	if *importer != unset {
+		options.ImportRequested = true
+		options.Import = *importer
 	}
 	if *template != unset {
 		options.TemplateSet = true
@@ -328,7 +408,9 @@ func translateFlagError(err error) error {
 // « --manage » seul comme « --manage= ». Le paquet flag ne sait pas gérer seul
 // un drapeau dont la valeur est facultative.
 func normalizeArgs(args []string) []string {
-	optional := map[string]bool{"-manage": true, "--manage": true}
+	optional := map[string]bool{
+		"-manage": true, "--manage": true, "-import": true, "--import": true,
+	}
 	normalized := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {
 		argument := args[index]

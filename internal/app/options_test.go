@@ -114,6 +114,7 @@ func TestUsageEnFrancais(t *testing.T) {
 	for _, fragment := range []string{
 		"organisation GitHub cible", "gérer un groupe existant",
 		"simuler sans rien créer", "{assignment}", "Codes de retour",
+		"régénérer le jeton GitHub", "portées à obtenir",
 	} {
 		if !strings.Contains(texte, fragment) {
 			t.Errorf("aide sans « %s » :\n%s", fragment, texte)
@@ -179,5 +180,71 @@ func TestOptionsFiltreEtTriDeLaListe(t *testing.T) {
 	}
 	if _, err := app.Parse([]string{"--sort", "popularite"}, io.Discard); err == nil {
 		t.Fatal("un tri inconnu doit être refusé")
+	}
+}
+
+// L'annuaire se demande aussi en ligne de commande : ce que le navigateur pose
+// dans sa barre, un script le pose en drapeaux.
+func TestOptionsAnnuaire(t *testing.T) {
+	options := analyser(t, "--students", "--session", "a26", "--course", "5n6")
+	if !options.StudentsRequested {
+		t.Fatal("« --students » doit ouvrir l'annuaire")
+	}
+	if options.Filter.Session != "a26" || options.Filter.Course != "5n6" {
+		t.Fatalf("filtre : %+v", options.Filter)
+	}
+}
+
+func TestParseRenouvellementDuJeton(t *testing.T) {
+	options := analyser(t, "--refresh-token", "--scopes", "workflow,delete_repo")
+	if !options.RefreshToken || options.Scopes != "workflow,delete_repo" {
+		t.Fatalf("options = %+v", options)
+	}
+	// Sans « --scopes », ce sont toutes les portées dont l'outil se sert.
+	if seul := analyser(t, "--refresh-token"); seul.Scopes != "" {
+		t.Fatalf("portées = %q", seul.Scopes)
+	}
+}
+
+func TestDrapeauxDePublicationDuRegistre(t *testing.T) {
+	options, err := app.Parse([]string{"--publish-registry", "--prefer-local"}, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse : %v", err)
+	}
+	if !options.PublishRegistry || !options.PreferLocal {
+		t.Fatalf("options = %+v", options)
+	}
+	// Sans eux, rien n'est demandé : publier ne doit jamais arriver par défaut.
+	nues, err := app.Parse(nil, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nues.PublishRegistry || nues.PreferLocal {
+		t.Fatalf("options = %+v", nues)
+	}
+}
+
+func TestDrapeauxDImportation(t *testing.T) {
+	// « --import » seul demande la liste des travaux repérés.
+	seul, err := app.Parse([]string{"--import"}, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse : %v", err)
+	}
+	if !seul.ImportRequested || seul.Import != "" {
+		t.Fatalf("options = %+v", seul)
+	}
+	// Avec une valeur, séparée ou collée.
+	for _, args := range [][]string{
+		{"--import", "tp1", "--into", "a26.5n6.1030"},
+		{"--import=tp1", "--into=a26.5n6.1030"},
+	} {
+		options, err := app.Parse(args, io.Discard)
+		if err != nil {
+			t.Fatalf("Parse(%v) : %v", args, err)
+		}
+		if !options.ImportRequested || options.Import != "tp1" ||
+			options.Into != "a26.5n6.1030" {
+			t.Fatalf("options = %+v", options)
+		}
 	}
 }

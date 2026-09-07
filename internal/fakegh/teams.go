@@ -25,6 +25,32 @@ type TeamState struct {
 
 var teamSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
+// newTeam construit une équipe dont le slug est le nom : le cas des équipes que
+// l'outil n'a pas créées.
+func newTeam(org, nom string) *TeamState {
+	return &TeamState{
+		Org: org, Slug: TeamSlug(nom), Name: nom,
+		Privacy: "closed", Members: map[string]string{},
+	}
+}
+
+// teamsOfLocked rend les équipes d'une organisation, prêtes à être servies.
+// L'état est déjà verrouillé par l'appelant.
+func (s *State) teamsOfLocked(org string) []map[string]any {
+	var trouvees []*TeamState
+	for _, equipe := range s.Teams {
+		if equipe.Org == org {
+			trouvees = append(trouvees, equipe)
+		}
+	}
+	sort.Slice(trouvees, func(i, j int) bool { return trouvees[i].Slug < trouvees[j].Slug })
+	payload := make([]map[string]any, 0, len(trouvees))
+	for _, equipe := range trouvees {
+		payload = append(payload, teamPayload(equipe))
+	}
+	return payload
+}
+
 // TeamSlug reproduit la façon dont GitHub tire le « slug » du nom d'une équipe.
 func TeamSlug(name string) string {
 	return strings.Trim(teamSlugRe.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-"), "-")
@@ -34,10 +60,7 @@ func TeamSlug(name string) string {
 func (s *State) AddTeam(org, name string, members ...string) *TeamState {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	equipe := &TeamState{
-		Org: org, Slug: TeamSlug(name), Name: name,
-		Privacy: "closed", Members: map[string]string{},
-	}
+	equipe := newTeam(org, name)
 	for _, member := range members {
 		equipe.Members[strings.ToLower(member)] = "member"
 	}
@@ -75,7 +98,8 @@ func (s *State) TeamMembers(org, slug string) []string {
 	return membres
 }
 
-// TeamRepoNames renvoie les dépôts partagés avec une équipe, triés.
+// TeamRepoNames renvoie les dépôts partagés avec une équipe, triés. Ils y sont
+// nommés « organisation/dépôt », comme le chemin de l'API les donne.
 func (s *State) TeamRepoNames(org, slug string) []string {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -88,37 +112,16 @@ func (s *State) TeamRepoNames(org, slug string) []string {
 }
 
 var (
-	teamsRe       = regexp.MustCompile(`^/orgs/([^/]+)/teams$`)
 	teamRe        = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)$`)
 	teamMembersRe = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/members$`)
 	teamMemberRe  = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/memberships/([^/]+)$`)
 	teamReposRe   = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/repos$`)
-	teamRepoRe    = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/repos/([^/]+)/([^/]+)$`)
 )
 
 // teamsGet répond aux lectures d'équipes ; faux quand la route n'en est pas une.
 // L'état est déjà verrouillé par l'appelant.
-func (s *Server) teamsGet(writer http.ResponseWriter, request *http.Request, path string) bool {
+func (s *Server) teamsGet(writer http.ResponseWriter, path string) bool {
 	state := s.State
-	if match := teamsRe.FindStringSubmatch(path); match != nil {
-		if _, connue := state.Orgs[match[1]]; !connue {
-			s.notFound(writer)
-			return true
-		}
-		var trouvees []*TeamState
-		for _, equipe := range state.Teams {
-			if equipe.Org == match[1] {
-				trouvees = append(trouvees, equipe)
-			}
-		}
-		sort.Slice(trouvees, func(i, j int) bool { return trouvees[i].Slug < trouvees[j].Slug })
-		payload := make([]map[string]any, 0, len(trouvees))
-		for _, equipe := range trouvees {
-			payload = append(payload, teamPayload(equipe))
-		}
-		s.sendPaged(writer, request, payload)
-		return true
-	}
 	if match := teamMembersRe.FindStringSubmatch(path); match != nil {
 		equipe, connue := state.Teams[match[1]+"/"+match[2]]
 		if !connue {
@@ -170,7 +173,7 @@ func (s *Server) teamsGet(writer http.ResponseWriter, request *http.Request, pat
 
 // teamsPost répond à la création d'une équipe.
 func (s *Server) teamsPost(writer http.ResponseWriter, path string, body map[string]any) bool {
-	match := teamsRe.FindStringSubmatch(path)
+	match := orgTeamsRe.FindStringSubmatch(path)
 	if match == nil {
 		return false
 	}
@@ -220,24 +223,6 @@ func (s *Server) teamsPut(writer http.ResponseWriter, path string, body map[stri
 		}
 		equipe.Members[strings.ToLower(login)] = role
 		s.send(writer, 200, map[string]any{"role": role, "state": "active"})
-		return true
-	}
-	if match := teamRepoRe.FindStringSubmatch(path); match != nil {
-		cle := match[1] + "/" + match[2]
-		if _, connue := state.Teams[cle]; !connue {
-			s.notFound(writer)
-			return true
-		}
-		if _, existe := state.Repos[match[3]+"/"+match[4]]; !existe {
-			s.notFound(writer)
-			return true
-		}
-		if state.TeamRepos[cle] == nil {
-			state.TeamRepos[cle] = map[string]string{}
-		}
-		permission, _ := body["permission"].(string)
-		state.TeamRepos[cle][match[4]] = permission
-		writer.WriteHeader(204)
 		return true
 	}
 	return false

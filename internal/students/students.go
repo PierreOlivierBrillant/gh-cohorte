@@ -28,12 +28,16 @@ type Repo struct {
 	ID         string
 	Name       string
 	URL        string
+	// PushedAt est la date seule — « 2026-08-21 » —, vide si rien n'y a été envoyé.
+	PushedAt string
 	// Team nomme l'équipe à qui le dépôt appartient ; vide pour un travail
 	// individuel. Un dépôt d'équipe figure chez chacun de ses membres : c'est
 	// bien leur travail, même s'il ne porte pas leur nom.
 	Team string
-	// PushedAt est la date seule — « 2026-08-21 » —, vide si rien n'y a été envoyé.
-	PushedAt string
+	// Scope est la place du groupe d'où vient ce dépôt. Elle ne sert que
+	// lorsqu'une ligne en rassemble plusieurs : deux groupes peuvent avoir
+	// chacun leur « tp1 », et rien d'autre ne les distinguerait.
+	Scope string
 }
 
 // Row est un étudiant et ce que ses dépôts racontent de lui.
@@ -41,6 +45,9 @@ type Row struct {
 	FullName string
 	Username string
 	Repos    []Repo
+	// Enrollments dit les groupes dont la personne est. La liste d'un groupe
+	// n'en porte qu'un ; l'annuaire de l'organisation les rassemble tous.
+	Enrollments []Enrollment
 	// PushedAt est le plus récent envoi de ses dépôts ; vide s'il n'y en a eu aucun.
 	PushedAt string
 }
@@ -55,6 +62,7 @@ type Row struct {
 func Build(cours classroom.Classroom, repos []groups.RepoInfo,
 	equipes []teams.Team) []Row {
 	parEtudiant := map[string][]Repo{}
+	scope := cours.Scope()
 	ajouter := func(username string, depot Repo) {
 		cle := strings.ToLower(username)
 		parEtudiant[cle] = append(parEtudiant[cle], depot)
@@ -64,7 +72,7 @@ func Build(cours classroom.Classroom, repos []groups.RepoInfo,
 		for _, depot := range cours.Repos(travail.ID, repos) {
 			ligne := Repo{
 				Assignment: travail.Name, ID: travail.ID, Name: depot.Name,
-				URL: depot.URL, PushedAt: depot.PushedAt,
+				URL: depot.URL, PushedAt: depot.PushedAt, Scope: scope,
 			}
 			if equipe, appartient := cours.TeamOf(depot.Name, equipes); appartient {
 				ligne.Team = equipe.Short
@@ -83,8 +91,10 @@ func Build(cours classroom.Classroom, repos []groups.RepoInfo,
 
 	lignes := make([]Row, 0, len(cours.Students))
 	for _, student := range cours.Students {
-		lignes = append(lignes, compose(student.FullName, student.Username,
-			parEtudiant[strings.ToLower(student.Username)]))
+		ligne := compose(student.FullName, student.Username,
+			parEtudiant[strings.ToLower(student.Username)])
+		ligne.Enrollments = []Enrollment{enrollmentOf(cours, ligne.Repos)}
+		lignes = append(lignes, ligne)
 	}
 	return lignes
 }
@@ -108,7 +118,10 @@ func compose(fullName, username string, depots []Repo) Row {
 	if depots == nil {
 		depots = []Repo{}
 	}
-	ligne := Row{FullName: fullName, Username: username, Repos: depots}
+	ligne := Row{
+		FullName: fullName, Username: username, Repos: depots,
+		Enrollments: []Enrollment{},
+	}
 	for _, depot := range depots {
 		if depot.PushedAt > ligne.PushedAt {
 			ligne.PushedAt = depot.PushedAt
@@ -152,6 +165,11 @@ type Filter struct {
 	// Assignment ne garde que ceux qui ont un dépôt pour ce travail, désigné
 	// par son nom court ou par son identifiant complet.
 	Assignment string
+	// Session et Course ne gardent que ceux qui ont suivi cette session, ou ce
+	// cours. Ils portent sur l'inscription, non sur les dépôts : quelqu'un
+	// d'inscrit qui n'a rien remis a suivi le cours quand même.
+	Session string
+	Course  string
 	// PushedAfter et PushedBefore encadrent le dernier envoi, « 2026-10-01 ».
 	PushedAfter  string
 	PushedBefore string
@@ -191,6 +209,8 @@ func (f Filter) Validate() (Filter, error) {
 	f.Name = strings.TrimSpace(f.Name)
 	f.Username = strings.TrimSpace(f.Username)
 	f.Assignment = strings.TrimSpace(f.Assignment)
+	f.Session = strings.TrimSpace(f.Session)
+	f.Course = strings.TrimSpace(f.Course)
 	return f, nil
 }
 
@@ -215,7 +235,7 @@ func (f Filter) Keep(row Row) bool {
 		!contains(row.Username, f.Username) {
 		return false
 	}
-	if !f.keepActivity(row) || !f.keepAssignment(row) {
+	if !f.keepActivity(row) || !f.keepAssignment(row) || !f.keepEnrollment(row) {
 		return false
 	}
 	// Sans date connue, les bornes ne peuvent rien dire de cette personne.
@@ -249,6 +269,25 @@ func (f Filter) keepAssignment(row Row) bool {
 			strings.EqualFold(depot.ID, f.Assignment) {
 			return true
 		}
+	}
+	return false
+}
+
+// keepEnrollment retient ceux dont un des groupes répond aux deux critères à
+// la fois : « le cours 5N6 à l'automne 2026 » ne doit pas retenir quelqu'un qui
+// a fait ce cours une autre session et un autre cours cet automne-là.
+func (f Filter) keepEnrollment(row Row) bool {
+	if f.Session == "" && f.Course == "" {
+		return true
+	}
+	for _, inscription := range row.Enrollments {
+		if f.Session != "" && !strings.EqualFold(inscription.Session, f.Session) {
+			continue
+		}
+		if f.Course != "" && !strings.EqualFold(inscription.Course, f.Course) {
+			continue
+		}
+		return true
 	}
 	return false
 }

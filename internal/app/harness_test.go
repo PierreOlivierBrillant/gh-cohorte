@@ -9,26 +9,59 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 )
 
 // harnais monte un faux GitHub, des dossiers jetables et une console captée,
 // pour dérouler des parcours complets sans réseau ni terminal.
 type harnais struct {
-	t         *testing.T
-	State     *fakegh.State
-	Serveur   *fakegh.Server
-	Options   *app.Options
-	Console   *ui.Console
-	Sortie    *bytes.Buffer
-	Rapports  string
-	Reglages  string
-	CacheDir  string
-	XDGCache  string
+	t        *testing.T
+	State    *fakegh.State
+	Serveur  *fakegh.Server
+	Options  *app.Options
+	Console  *ui.Console
+	Sortie   *bytes.Buffer
+	Rapports string
+	Reglages string
+	CacheDir string
+	XDGCache string
+	// Refresher remplace « gh auth refresh » : le flux d'appareil de GitHub ne
+	// peut pas être joué pour de vrai.
+	Refresher *scopes.Refresher
 	Pauses    []time.Duration
 	scripte   *ui.Scripted
 	dernierRC int
+}
+
+// depots rend les dépôts d'étudiants de l'organisation, triés.
+//
+// Les dépôts de service en sont écartés : « .cohorte », que le registre des
+// étudiants amène dès qu'un nom est appris, n'est pas le dépôt de quelqu'un et
+// n'a rien à faire dans ce que ces tests comparent.
+func (h *harnais) depots() []string {
+	gardes := make([]string, 0)
+	for _, nom := range h.State.RepoNames("acme") {
+		if !groups.Service(nom) {
+			gardes = append(gardes, nom)
+		}
+	}
+	return gardes
+}
+
+// groupesLocaux rend le fichier des groupes de ce poste, tel qu'il est sur le
+// disque : ce que la machine déclare vraiment, sans ce que le registre y verse
+// à la lecture.
+func (h *harnais) groupesLocaux() string {
+	h.t.Helper()
+	contenu, err := os.ReadFile(classroom.PathNextTo(h.Reglages))
+	if err != nil {
+		return ""
+	}
+	return string(contenu)
 }
 
 func nouveau(t *testing.T, state *fakegh.State) *harnais {
@@ -94,6 +127,7 @@ func (h *harnais) executer(prompter ui.Prompter) int {
 	h.t.Helper()
 	session := app.New(h.Options, h.Console, prompter)
 	session.Sleep = func(delay time.Duration) { h.Pauses = append(h.Pauses, delay) }
+	session.Refresher = h.Refresher
 	h.dernierRC = session.Run()
 	return h.dernierRC
 }
@@ -115,15 +149,6 @@ func (h *harnais) muet() int {
 	h.t.Helper()
 	h.Options.NonInteractive = true
 	return h.executer(&ui.ScriptPrompter{})
-}
-
-// derniereQuestion retrouve une question posée pendant la dernière session.
-func (h *harnais) derniereQuestion(fragment string) (ui.Question, bool) {
-	h.t.Helper()
-	if h.scripte == nil {
-		return ui.Question{}, false
-	}
-	return h.scripte.AskedFor(fragment)
 }
 
 // dernierMenu retrouve un menu proposé pendant la dernière session.
