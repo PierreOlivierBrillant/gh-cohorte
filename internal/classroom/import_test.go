@@ -473,3 +473,49 @@ func TestImportNeDefaitPasUnChoixManuelAvecLeRegistre(t *testing.T) {
 		}
 	}
 }
+
+// Un compte que l'organisation nomme n'est pas un compte douteux, même si rien
+// ne donne accès au dépôt : il vient du registre, donc il existe et il désigne
+// quelqu'un. Le signaler ferait douter de ce qui est écrit.
+func TestImportNeDouteJamaisDunCompteQueLeRegistreNomme(t *testing.T) {
+	inventaire := depots("tp1-felixb", "tp1-lyonnais", "tp1-inconnu-x")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+		// Aucun accès n'est connu — la carte est vide.
+		Owners: nil,
+		Known: map[string]string{
+			"felixb":   "Félix Bourassa",
+			"lyonnais": "Étienne Lyonnais",
+		},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(plan.Unconfirmed) != 1 || plan.Unconfirmed[0] != "tp1-inconnu-x" {
+		t.Fatalf("non confirmés = %v : seul le compte que rien ne connaît doit l'être",
+			plan.Unconfirmed)
+	}
+}
+
+// Le doute reste entier quand le compte ne vient que du nom : c'est le cas qui
+// a motivé la lecture des accès, et un nom trouvé par ressemblance ne le lève
+// pas.
+func TestImportDouteEncoreDunCompteQueSeulLeNomDonne(t *testing.T) {
+	inventaire := depots("tp1-felixbourassa")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	// Le rapprochement a bien trouvé quelqu'un…
+	if len(plan.Pairings) != 1 || !plan.Pairings[0].Found() {
+		t.Fatalf("rapprochements = %+v", plan.Pairings)
+	}
+	// … et le compte reste pourtant à confirmer : il n'est lu que dans le nom.
+	if len(plan.Unconfirmed) != 1 {
+		t.Fatalf("non confirmés = %v", plan.Unconfirmed)
+	}
+}

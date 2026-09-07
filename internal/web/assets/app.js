@@ -3363,13 +3363,13 @@ function dessinerAvis(plan) {
       texte: `${plan.absent.length} étudiant(s) de la liste n'ont pas de dépôt pour ce `
         + 'travail — ' + quelquesNoms(plan.absent) + '.' }));
   }
-  // Le compte des autres dépôts vient de leurs accès : c'est le seul qui puisse
-  // encore être faux, et le seul qui mérite d'être signalé.
+  // Ailleurs, le compte vient des accès ou du registre. Ici, il ne vient que du
+  // nom : c'est le seul qui puisse encore être faux, et le seul à signaler.
   if ((plan.unconfirmed || []).length) {
     avis.append(el('div', { classe: 'avis alerte',
-      texte: `${plan.unconfirmed.length} dépôt(s) ne donnent accès à personne : leur compte `
-        + 'est celui que leur nom porte, faute de mieux — '
-        + quelquesNoms(plan.unconfirmed) + '.' }));
+      texte: `${plan.unconfirmed.length} dépôt(s) dont le compte n'a pas pu être confirmé : `
+        + "leurs accès ne désignent personne, et l'organisation ne connaît pas ce compte. "
+        + 'Il est lu dans leur nom — ' + quelquesNoms(plan.unconfirmed) + '.' }));
   }
 }
 

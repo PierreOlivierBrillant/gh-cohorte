@@ -77,9 +77,9 @@ type Import struct {
 	// « kickmyb-android » —, qu'il n'y a rien à reprendre tel quel, et qu'il
 	// faut choisir lequel.
 	Splits []groups.Detected `json:"splits"`
-	// Unconfirmed nomme les dépôts dont aucun accès n'a désigné la personne :
-	// leur compte est celui que le nom porte, faute de mieux, et c'est le seul
-	// endroit où il peut encore être faux.
+	// Unconfirmed nomme les dépôts dont rien n'a confirmé le compte : ni leurs
+	// accès, ni le registre de l'organisation. Le leur vient de leur nom, et
+	// c'est le seul endroit où il peut encore être faux.
 	Unconfirmed []string `json:"unconfirmed"`
 }
 
@@ -142,7 +142,7 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 	// Les accès disent qui est derrière chaque dépôt ; le nom, lui, ne dit
 	// alors plus que le travail. Un préfixe qui en cache plusieurs se voit ici,
 	// et nulle part ailleurs.
-	lus := lire(groupe, demande.Owners)
+	lus := lire(groupe, demande.Owners, demande.Known)
 	travaux := parTravail(lus, groupe.Prefix)
 	if len(travaux) > 1 {
 		return Import{Prefix: groupe.Prefix, Name: name, Scope: arrivee.Scope(),
@@ -212,7 +212,11 @@ type depotLu struct {
 // le nom reste seul juge — c'est ce que faisait l'outil avant de savoir les
 // lire, et ce qu'il continue de faire pour un dépôt auquel personne n'est
 // rattaché.
-func lire(groupe groups.Group, proprietaires map[string]string) []depotLu {
+//
+// Un compte que l'organisation nomme déjà est sûr lui aussi, même sans accès :
+// il vient de son registre ou d'un groupe déclaré, donc il existe et il désigne
+// quelqu'un. Le signaler comme douteux ferait douter de ce qui est écrit.
+func lire(groupe groups.Group, proprietaires, connus map[string]string) []depotLu {
 	lus := make([]depotLu, 0, groupe.Len())
 	for _, depot := range groupe.Repos {
 		lu := depotLu{repo: depot, login: depot.Suffix, travail: groupe.Prefix}
@@ -221,6 +225,8 @@ func lire(groupe groups.Group, proprietaires map[string]string) []depotLu {
 			if travail, coupe := groups.Split(depot.Name, login); coupe {
 				lu.travail = travail
 			}
+		} else if connus[strings.ToLower(lu.login)] != "" {
+			lu.sur = true
 		}
 		lus = append(lus, lu)
 	}
@@ -271,7 +277,7 @@ func comptes(lus []depotLu) []groups.Repo {
 	return depots
 }
 
-// sansAcces nomme les dépôts dont le compte n'a pas été confirmé.
+// sansAcces nomme les dépôts dont rien n'a confirmé le compte.
 func sansAcces(lus []depotLu) []string {
 	var noms []string
 	for _, lu := range lus {
@@ -330,8 +336,9 @@ func pair(entries []roster.Entry, logins []string,
 		}
 		// Ce que l'organisation sait déjà vaut mieux que ce qu'on devinerait :
 		// c'est le même couple, écrit une fois pour toutes, et il n'y a plus
-		// rien à vérifier à l'écran.
-		if nom := strings.TrimSpace(connus[strings.ToLower(login)]); nom != "" {
+		// rien à vérifier à l'écran. Passé la première lecture, non : un choix
+		// rendu à la main tient, et un nom connu le déferait à chaque fois.
+		if nom := strings.TrimSpace(connus[strings.ToLower(login)]); nom != "" && guess {
 			entree, dans := parNom[valid.Slugify(nom)]
 			if !dans {
 				// La personne n'est pas dans cette liste-ci : son nom est

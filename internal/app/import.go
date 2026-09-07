@@ -397,13 +397,13 @@ func (i *importSession) montrer(plan classroom.Import) {
 			console.Warn(plural("%d étudiant(s) sans dépôt pour ce travail", len(plan.Absent))),
 			console.Dim(strings.Join(plan.Absent, ", ")))
 	}
-	// Le compte des autres vient de leurs accès : c'est le seul qui puisse
-	// encore être faux.
+	// Ailleurs, le compte vient des accès ou du registre. Ici, il ne vient que
+	// du nom : c'est le seul qui puisse encore être faux.
 	if len(plan.Unconfirmed) > 0 {
 		console.Blank()
 		console.Printf("  %s : %s",
-			console.Warn(plural("%d dépôt(s) ne donnent accès à personne", len(plan.Unconfirmed))),
-			console.Dim("leur compte est celui que leur nom porte"))
+			console.Warn(plural("%d compte(s) non confirmé(s)", len(plan.Unconfirmed))),
+			console.Dim("ni accès ni registre ne les nomment ; ils sont lus dans le nom du dépôt"))
 	}
 }
 
@@ -522,7 +522,7 @@ func (i *importSession) corriger(arrivee classroom.Classroom, plan classroom.Imp
 		refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 			Prefix: plan.Prefix, Name: plan.Name,
 			Entries: entreesRetenues(noms, retenus), NamedOnly: plan.NamedOnly,
-			Owners: i.proprietaires,
+			Owners: i.proprietaires, Known: i.connus(),
 		}, repos)
 		if err != nil {
 			return plan, err
@@ -552,7 +552,7 @@ func (i *importSession) laisserLesInconnus(arrivee classroom.Classroom,
 	refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: plan.Prefix, Name: plan.Name,
 		Entries: entreesRetenues(noms, retenus), NamedOnly: true,
-		Owners: i.proprietaires,
+		Owners: i.proprietaires, Known: i.connus(),
 	}, repos)
 	if err != nil {
 		return plan, err

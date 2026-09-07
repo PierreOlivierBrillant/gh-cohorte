@@ -85,14 +85,13 @@ func (s *Server) importPlan(org string, body importInput) (
 	proprietaires := s.owners(org, body.Prefix, repos)
 	demande := classroom.ImportRequest{
 		Prefix: body.Prefix, Name: body.Name, Entries: entrees, Guess: deviner,
-		NamedOnly: body.NamedOnly, Owners: proprietaires,
+		NamedOnly: body.NamedOnly, Owners: proprietaires, Known: s.connus(org),
 	}
 	if deviner {
-		// Ce que l'organisation sait déjà et les profils GitHub ne servent
-		// qu'à la première lecture. Une fois qu'on a corrigé à l'écran, le
-		// jugement rendu doit tenir — y compris quand il consiste à ne
-		// rapprocher personne, ce qu'un nom connu réattribuerait aussitôt.
-		demande.Known = s.connus(org)
+		// Les profils GitHub ne servent qu'à la première lecture : après une
+		// correction, plus rien n'est deviné. Ce que l'organisation sait, lui,
+		// est toujours donné — il confirme les comptes, et le plan sait ne
+		// plus s'en servir pour rapprocher.
 		demande.Profiles = s.profiles(org, body.Prefix, repos, proprietaires)
 	}
 	plan, err := classroom.PlanImport(arrivee, demande, repos)
