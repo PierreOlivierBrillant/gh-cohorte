@@ -289,8 +289,11 @@ func Build(prefix string, repos []RepoInfo) Group {
 			pushed = pushed[:10]
 		}
 		group.Repos = append(group.Repos, Repo{
-			Name:     raw.Name,
-			Suffix:   raw.Name[len(wanted)+1:],
+			Name: raw.Name,
+			// Les séparateurs en trop ne sont à personne : « TP3-KickMyB--alice »
+			// désigne « alice », pas « -alice ». Un compte GitHub ne commence
+			// pas par un tiret, un nom slugifié non plus.
+			Suffix:   strings.TrimLeft(raw.Name[len(wanted)+1:], Separators),
 			Private:  raw.Private,
 			URL:      raw.HTMLURL,
 			PushedAt: pushed,
@@ -327,6 +330,11 @@ func suit(name, prefix string) bool {
 // Split retire d'un nom de dépôt le compte qui le termine et rend le travail
 // qui précède. Le compte doit finir le nom et être détaché par un séparateur :
 // « kickmyb-firebase-Walid7Akk » et « Walid7Akk » donnent « kickmyb-firebase ».
+//
+// Les séparateurs en trop sont retirés avec lui. GitHub Classroom nomme parfois
+// « TP3-H23-4204N6-KickMyB--alice » : deux tirets, dont un seul sépare. Garder
+// le premier ferait un travail « …-KickMyB- » que rien d'autre n'écrit ainsi,
+// et le même travail se dédoublerait selon que son compte a été trouvé ou non.
 func Split(name, login string) (string, bool) {
 	name = strings.TrimSpace(name)
 	login = strings.TrimSpace(login)
@@ -340,7 +348,11 @@ func Split(name, login string) (string, bool) {
 	if !strings.ContainsRune(Separators, rune(name[coupe-1])) {
 		return "", false
 	}
-	return name[:coupe-1], true
+	travail := strings.TrimRight(name[:coupe-1], Separators)
+	if travail == "" {
+		return "", false
+	}
+	return travail, true
 }
 
 // Owner choisit, parmi les comptes qui ont accès à un dépôt, celui de la

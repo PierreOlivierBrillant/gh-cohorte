@@ -626,3 +626,50 @@ func TestImportSansListeQuandLOrganisationConnaitDeja(t *testing.T) {
 		t.Fatalf("plan = %+v", plan)
 	}
 }
+
+// Le cas rapporté : GitHub Classroom a doublé le tiret — « …-KickMyB--alice » —,
+// et deux dépôts sur trente-cinq ne donnaient accès à personne. Le travail se
+// dédoublait alors : « TP3-H23-4204N6-KickMyB- » pour ceux dont le compte était
+// connu, « tp3-h23-4204n6-kickmyb » pour les autres. Un seul et même travail,
+// que l'écran demandait de départager.
+func TestImportNeDedoublePasUnTravailAuTiretDouble(t *testing.T) {
+	inventaire := depots(
+		"TP3-H23-4204N6-KickMyB--ladamlarocque",
+		"TP3-H23-4204N6-KickMyB--felixb",
+		"TP3-H23-4204N6-KickMyB--lyonnais",
+	)
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		// Le préfixe deviné arrive en minuscules, comme l'écran le propose.
+		Prefix: "tp3-h23-4204n6-kickmyb", Entries: inscrits(), Guess: true,
+		// Deux dépôts livrent leur compte, le troisième non.
+		Owners: map[string]string{
+			"TP3-H23-4204N6-KickMyB--ladamlarocque": "ladamlarocque",
+			"TP3-H23-4204N6-KickMyB--felixb":        "felixb",
+		},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if plan.Divided() {
+		t.Fatalf("un seul travail attendu, %d proposés : %+v", len(plan.Splits), plan.Splits)
+	}
+	if len(plan.Moves) != 3 {
+		t.Fatalf("les trois dépôts doivent être repris : %+v", plan.Moves)
+	}
+	// Le compte du dépôt sans accès est lu dans son nom, sans le tiret qui le
+	// précédait : « -lyonnais » n'est pas un compte GitHub.
+	for _, trouve := range plan.Pairings {
+		if strings.HasPrefix(trouve.Login, "-") {
+			t.Fatalf("compte mal découpé : %+v", trouve)
+		}
+	}
+	cibles := map[string]string{}
+	for _, ligne := range plan.Moves {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if cibles["TP3-H23-4204N6-KickMyB--lyonnais"] !=
+		"a26.5n6.1030.tp3-h23-4204n6-kickmyb.etienne-lyonnais" {
+		t.Fatalf("cibles = %v", cibles)
+	}
+}
