@@ -2969,27 +2969,54 @@ for (const tete of document.querySelectorAll('#import-stepper .etape-tete')) {
 
 // --- 1. le travail
 
+// viderImport ramène l'assistant à son premier écran. Effacer les seuls résumés
+// des étapes ne suffit pas : leurs corps sont repliés, pas vides, et une reprise
+// rouverte montrerait la liste, la place et les rapprochements de la
+// précédente — que « Vérifier » renverrait au serveur.
+function viderImport() {
+  // Une correction faite juste avant de partir a pu laisser une vérification en
+  // vol : elle redessinerait l'écran qu'on vient de vider.
+  clearTimeout(importAttente);
+  importTravail = '';
+  importPlan = null;
+  importNoms = [];
+  importChoix = new Map();
+  importDevinee = {};
+
+  vider($('import-travaux'));
+  viderDepot('import-liste');
+  for (const id of ['import-session', 'import-cours', 'import-groupe', 'import-nom']) {
+    $(id).value = '';
+  }
+  $('import-nommes').checked = false;
+  $('import-filtre').value = 'tout';
+  vider($('import-rapprochements').querySelector('tbody'));
+  vider($('import-renommages').querySelector('tbody'));
+  vider($('import-avis'));
+  vider($('import-journal'));
+  $('import-barre').value = 0;
+  $('import-resume').textContent = '';
+  $('import-compte').textContent = '';
+  $('import-etat').textContent = '';
+  dire('import-place-note', '');
+  for (const nom of ['travail', 'liste', 'place', 'verifier', 'noms', 'journal']) {
+    marquerEtape(nom, '');
+  }
+  ouvrirEtape('travail');
+}
+
 async function preparerImport() {
   const org = etat.organisation;
   if (!org) return;
+  // Vidé avant d'aller chercher : une reprise qui échoue laisserait sinon
+  // l'écran de la précédente, intact et trompeur.
+  viderImport();
   const vue = await tenter(() => api('GET', `/api/orgs/${encode(org)}/foreign`), 'Reprise');
   if (!vue) return;
 
   $('import-aide-texte').textContent = vue.help || '';
   const travaux = vue.assignments || [];
   const conteneur = $('import-travaux');
-  vider(conteneur);
-  importTravail = '';
-  importPlan = null;
-  importNoms = [];
-  importChoix = new Map();
-  importDevinee = {};
-  dire('import-place-note', '');
-  $('import-nommes').checked = false;
-  for (const nom of ['travail', 'liste', 'place', 'verifier', 'noms', 'journal']) {
-    marquerEtape(nom, '');
-  }
-  ouvrirEtape('travail');
 
   $('import-resume').textContent = travaux.length
     ? `${vue.repos.length} dépôt(s) ne suivent pas la nomenclature. Choisissez le travail à reprendre.`
@@ -4141,6 +4168,16 @@ function contenuDepot(id) {
 // un tel fichier n'a pas de chemin, et son nom n'en fait pas un.
 function cheminDepot(id) {
   return contenuDepot(id) ? '' : $(id).value.trim();
+}
+
+// viderDepot oublie le fichier d'une zone : le chemin comme les octets déposés.
+// Effacer le champ seul laisserait le contenu derrière, et l'écran dirait qu'il
+// n'y a plus de liste alors qu'une requête en enverrait encore une.
+function viderDepot(id) {
+  const champ = $(id);
+  const zone = champ.closest('.depot');
+  if (zone) delete zone.dataset.contenu;
+  champ.value = '';
 }
 
 for (const zone of document.querySelectorAll('[data-depot]')) brancherDepot(zone);
