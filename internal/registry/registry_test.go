@@ -227,6 +227,33 @@ func TestUnRegistreVideNEstPasUneErreur(t *testing.T) {
 	}
 }
 
+// Une fiche sans nom complet désigne quand même quelqu'un : son compte suffit
+// à dire que le dépôt est celui d'une personne connue, et non d'un slug
+// orphelin. C'est ce qui permet ensuite de la nommer ou de la déplacer.
+func TestUneFicheSansNomDesigneQuandMemeQuelquun(t *testing.T) {
+	set, _, err := appliquer(t, registry.Empty(),
+		registry.Learn(personne("", "aleksilepaj")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trouvee, connue := set.Lookup("aleksilepaj")
+	if !connue {
+		t.Fatal("le compte doit se retrouver même sans nom complet")
+	}
+	if trouvee.Username != "aleksilepaj" || trouvee.FullName != "" {
+		t.Fatalf("personne = %+v", trouvee)
+	}
+	// La marque de doublon de GitHub n'en fait pas quelqu'un d'autre.
+	if trouvee, connue := set.Lookup("aleksilepaj-1"); !connue ||
+		trouvee.Username != "aleksilepaj" {
+		t.Errorf("« aleksilepaj-1 » = %+v, %v", trouvee, connue)
+	}
+	// Ce que le registre ignore reste ignoré : un slug n'invente personne.
+	if _, connue := set.Lookup("emilie-cote"); connue {
+		t.Error("un slug inconnu ne doit désigner personne")
+	}
+}
+
 // appliquer déroule un changement hors réseau, comme le magasin le fera.
 func appliquer(t *testing.T, set *registry.Set, change registry.Change) (*registry.Set, bool, error) {
 	t.Helper()

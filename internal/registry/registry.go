@@ -210,11 +210,16 @@ func (s *Set) Resolve(slug string) (Student, bool) {
 }
 
 // Lookup répond à la question que « classroom » pose au registre : qui se
-// cache derrière le dernier niveau d'un nom de dépôt ? Une fiche sans nom
-// complet ne répond rien : elle n'apprendrait rien à qui la reçoit.
+// cache derrière le dernier niveau d'un nom de dépôt ?
+//
+// Une fiche sans nom complet répond quand même. Le compte GitHub est déjà une
+// réponse : il dit que ce dépôt est celui de quelqu'un qu'on connaît, et non
+// d'un slug orphelin. Refuser de le dire rendait invisibles — donc
+// innommables et indéplaçables — les personnes qu'on n'a jamais eu l'occasion
+// de nommer, celles des dépôts repris qui portent leur compte.
 func (s *Set) Lookup(fragment string) (roster.Person, bool) {
 	fiche, trouve := s.Resolve(fragment)
-	if !trouve || strings.TrimSpace(fiche.FullName) == "" {
+	if !trouve {
 		return roster.Person{}, false
 	}
 	return fiche.Person(), true

@@ -478,6 +478,17 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 		return
 	}
 
+	// Les dépôts sont relevés avant même de chercher la personne : celle que
+	// seuls ses dépôts révèlent — un groupe qu'on n'a pas déclaré ici — doit
+	// pouvoir être nommée comme les autres, et c'est justement celle à qui il
+	// manque un nom.
+	repos, _, err := s.repos(cours.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	cours = s.enrichi(cours, repos)
+
 	avant, inscrit := cours.Find(body.Username)
 	if !inscrit {
 		fail(writer, valid.Errorf("@%s n'est pas dans « %s ».",
@@ -510,12 +521,6 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 	// tel qu'il est encore : c'est l'ancien nom qui retrouve ses dépôts.
 	var renommages []classroom.Move
 	if body.Repos {
-		repos, _, err := s.repos(cours.Org, false)
-		if err != nil {
-			fail(writer, err)
-			return
-		}
-		cours = s.enrichi(cours, repos)
 		if renommages, err = classroom.PlanRenameStudent(cours, avant, apres, repos); err != nil {
 			fail(writer, err)
 			return
@@ -642,6 +647,16 @@ func (s *Server) handleResolveStudentNames(writer http.ResponseWriter, request *
 		fail(writer, err)
 		return
 	}
+	// Le bouton compte les noms manquants sur la liste que les dépôts
+	// complètent ; les retrouver doit porter sur la même liste, sans quoi il
+	// annoncerait des noms qu'il ne chercherait jamais.
+	repos, _, err := s.repos(cours.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	cours = s.enrichi(cours, repos)
+
 	pairs := make([]identity.Pair, 0, len(cours.Students))
 	for _, student := range cours.Students {
 		if strings.TrimSpace(student.FullName) == "" {
