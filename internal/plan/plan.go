@@ -26,11 +26,38 @@ var placeholderRe = regexp.MustCompile(`\{([a-z_]+)\}`)
 // Champs qui rendent un nom de dépôt distinctif d'une personne à l'autre.
 var distinctive = map[string]bool{"username": true, "name": true, "index": true}
 
-// PlannedRepo est un dépôt à créer pour une personne donnée.
+// PlannedRepo est un dépôt à créer pour une personne, ou pour une équipe.
+//
+// Les deux ne se distinguent que par leur destinataire : un travail individuel
+// remplit « Person », un travail d'équipe remplit « Team » et « TeamSlug ».
+// L'accès s'accorde ensuite à l'un ou à l'autre — à l'équipe entière plutôt
+// qu'à chacun de ses membres, ce qui fait que changer sa composition suffit à
+// changer qui voit le dépôt.
 type PlannedRepo struct {
 	Person      roster.Person
+	Team        string // nom court de l'équipe ; vide pour un travail individuel
+	TeamSlug    string // adresse GitHub de l'équipe
 	Name        string
 	Description string
+}
+
+// ForTeam dit si le dépôt est celui d'une équipe.
+func (p PlannedRepo) ForTeam() bool { return strings.TrimSpace(p.TeamSlug) != "" }
+
+// Recipient nomme le destinataire du dépôt, pour l'affichage et les bilans.
+func (p PlannedRepo) Recipient() string {
+	if p.ForTeam() {
+		return "Équipe " + p.Team
+	}
+	return p.Person.FullName
+}
+
+// TeamTarget est une équipe à qui distribuer un travail. Ses membres ne servent
+// pas à nommer le dépôt — l'équipe le fait —, mais à dire qui il concerne.
+type TeamTarget struct {
+	Short   string
+	Slug    string
+	Members []string
 }
 
 // ValidatePattern vérifie qu'un gabarit n'utilise que des champs connus et reste distinctif.
@@ -98,9 +125,37 @@ func title(assignment string) string {
 	return assignment
 }
 
+// teamFields calcule les valeurs des champs pour une équipe.
+//
+// {name} rend le nom court de l'équipe : c'est lui qui occupe le dernier niveau
+// du nom du dépôt, là où un travail individuel écrit le nom de l'étudiant. Le
+// gabarit de nom est donc le même pour les deux, et « a26.5n6.01.tp1.eq1 » se
+// lit comme « a26.5n6.01.tp1.emilie-cote ». {fullname} dit « Équipe eq1 », pour
+// que la description d'un dépôt reste lisible sans gabarit particulier.
+func teamFields(target TeamTarget, assignment string, index int) map[string]string {
+	return map[string]string{
+		"assignment": assignment,
+		"title":      title(assignment),
+		"username":   "",
+		"name":       target.Short,
+		"fullname":   "Équipe " + target.Short,
+		"first":      "",
+		"last":       "",
+		"index":      fmt.Sprintf("%02d", index),
+	}
+}
+
 // Render remplit un gabarit pour une personne.
 func Render(pattern string, person roster.Person, assignment string, index int) string {
-	values := fields(person, assignment, index)
+	return fill(pattern, fields(person, assignment, index))
+}
+
+// RenderTeam remplit un gabarit pour une équipe.
+func RenderTeam(pattern string, target TeamTarget, assignment string, index int) string {
+	return fill(pattern, teamFields(target, assignment, index))
+}
+
+func fill(pattern string, values map[string]string) string {
 	return placeholderRe.ReplaceAllStringFunc(pattern, func(match string) string {
 		return values[strings.Trim(match, "{}")]
 	})
@@ -163,42 +218,97 @@ func Assignment(expression *regexp.Regexp, repoName string) (string, bool) {
 
 // Build construit le plan complet et refuse toute collision de noms de dépôts.
 func Build(people []roster.Person, settings config.Settings) ([]PlannedRepo, error) {
-	if _, err := ValidatePattern(settings.NamePattern, "Gabarit de nom", true); err != nil {
+	description, err := patterns(settings)
+	if err != nil {
 		return nil, err
 	}
-	description := settings.DescriptionPattern
-	if description != "" {
-		if _, err := ValidatePattern(description, "Gabarit de description", false); err != nil {
-			return nil, err
-		}
-	}
-
+	assembleur := &assembler{settings: settings, description: description,
+		seen: map[string]string{}}
 	plan := make([]PlannedRepo, 0, len(people))
-	seen := map[string]roster.Person{}
 	for position, person := range people {
 		index := position + 1
-		name, err := valid.RepoName(Render(settings.NamePattern, person, settings.Assignment, index))
+		item, err := assembleur.add(
+			Render(settings.NamePattern, person, settings.Assignment, index),
+			Render(description, person, settings.Assignment, index),
+			person.FullName)
 		if err != nil {
 			return nil, err
 		}
-		if clash, exists := seen[strings.ToLower(name)]; exists {
-			return nil, valid.Errorf(
-				"Collision de noms : « %s » servirait à la fois à %s et à %s. Ajustez le gabarit de nom.",
-				name, clash.FullName, person.FullName)
-		}
-		seen[strings.ToLower(name)] = person
-
-		text := ""
-		if description != "" {
-			text = strings.TrimSpace(Render(description, person, settings.Assignment, index))
-		}
-		// Découpe en runes : une description accentuée ne doit pas être coupée en deux.
-		if runes := []rune(text); len(runes) > 350 {
-			text = string(runes[:350])
-		}
-		plan = append(plan, PlannedRepo{Person: person, Name: name, Description: text})
+		item.Person = person
+		plan = append(plan, item)
 	}
 	return plan, nil
+}
+
+// BuildTeams construit le plan d'un travail d'équipe : un dépôt par équipe,
+// nommé d'après elle. C'est le même plan que pour des personnes — mêmes
+// gabarits, mêmes collisions refusées —, seul le destinataire change.
+func BuildTeams(targets []TeamTarget, settings config.Settings) ([]PlannedRepo, error) {
+	description, err := patterns(settings)
+	if err != nil {
+		return nil, err
+	}
+	assembleur := &assembler{settings: settings, description: description,
+		seen: map[string]string{}}
+	plan := make([]PlannedRepo, 0, len(targets))
+	for position, target := range targets {
+		index := position + 1
+		item, err := assembleur.add(
+			RenderTeam(settings.NamePattern, target, settings.Assignment, index),
+			RenderTeam(description, target, settings.Assignment, index),
+			"l'équipe "+target.Short)
+		if err != nil {
+			return nil, err
+		}
+		item.Team, item.TeamSlug = target.Short, target.Slug
+		plan = append(plan, item)
+	}
+	return plan, nil
+}
+
+// patterns valide les gabarits et renvoie celui des descriptions.
+func patterns(settings config.Settings) (string, error) {
+	if _, err := ValidatePattern(settings.NamePattern, "Gabarit de nom", true); err != nil {
+		return "", err
+	}
+	description := settings.DescriptionPattern
+	if description == "" {
+		return "", nil
+	}
+	return ValidatePattern(description, "Gabarit de description", false)
+}
+
+// assembler compose les lignes du plan et retient les noms déjà visés : deux
+// destinataires ne peuvent pas se voir attribuer le même dépôt.
+type assembler struct {
+	settings    config.Settings
+	description string
+	seen        map[string]string
+}
+
+// add valide un nom rendu et compose la ligne. « owner » nomme le destinataire :
+// il ne sert qu'à dire, en cas de collision, qui se dispute le nom.
+func (a *assembler) add(rendered, described, owner string) (PlannedRepo, error) {
+	name, err := valid.RepoName(rendered)
+	if err != nil {
+		return PlannedRepo{}, err
+	}
+	if clash, exists := a.seen[strings.ToLower(name)]; exists {
+		return PlannedRepo{}, valid.Errorf(
+			"Collision de noms : « %s » servirait à la fois à %s et à %s. Ajustez le gabarit de nom.",
+			name, clash, owner)
+	}
+	a.seen[strings.ToLower(name)] = owner
+
+	text := ""
+	if a.description != "" {
+		text = strings.TrimSpace(described)
+	}
+	// Découpe en runes : une description accentuée ne doit pas être coupée en deux.
+	if runes := []rune(text); len(runes) > 350 {
+		text = string(runes[:350])
+	}
+	return PlannedRepo{Name: name, Description: text}, nil
 }
 
 func containsString(values []string, wanted string) bool {

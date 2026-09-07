@@ -41,6 +41,7 @@
   <nav class="onglets" id="onglets" hidden>
     <button type="button" data-vue="travaux" class="actif">Travaux</button>
     <button type="button" data-vue="etudiants">Étudiants</button>
+    <button type="button" data-vue="equipes">Équipes</button>
     <button type="button" data-vue="groupe-reglages">Réglages du groupe</button>
   </nav>
 </div>
@@ -253,6 +254,7 @@
         <p class="note" id="detail-resume"></p>
       </div>
       <div class="actions">
+        <button type="button" id="detail-partager" class="bouton" hidden>Partager avec les équipes</button>
         <button type="button" id="detail-acces" class="bouton">Inspecter les accès</button>
         <button type="button" id="detail-deplacer" class="bouton">Déplacer ce travail…</button>
         <button type="button" id="detail-distribuer" class="bouton vert">Distribuer aux manquants</button>
@@ -300,7 +302,7 @@
         <thead>
           <tr>
             <th class="etroit"></th>
-            <th data-tri="nom"><button type="button">Étudiant<span class="fleche"></span></button></th>
+            <th data-tri="nom"><button type="button"><span id="detail-colonne">Étudiant</span><span class="fleche"></span></button></th>
             <!-- Les dépôts d'un travail ne diffèrent que par ce qui suit le
                  préfixe commun : les ordonner par compte, c'est les ordonner
                  par nom. -->
@@ -329,12 +331,21 @@
     <div class="boite etape" data-etape="1">
       <div class="boite-entete"><strong>Bases du travail</strong></div>
       <div class="boite-corps">
+        <fieldset class="groupe-radio">
+          <legend class="etiquette">Nature du travail</legend>
+          <label class="case"><input type="radio" name="nature" value="individuel" id="nature-individuel" checked>
+            <span><strong>Individuel</strong><span class="aide">Un dépôt par étudiant.</span></span></label>
+          <label class="case"><input type="radio" name="nature" value="equipe" id="nature-equipe">
+            <span><strong>En équipe</strong><span class="aide">Un dépôt par équipe, partagé
+              avec elle : changer sa composition suffit à changer qui y accède.</span></span></label>
+        </fieldset>
+
         <label class="champ-bloc">
           <span class="etiquette">Nom du travail</span>
           <input type="text" id="travail-nom" class="champ" placeholder="tp1">
           <span class="aide">Chaque dépôt s'appellera
-            <code id="apercu-nom">session.cours.groupe.tp1.prenom-nom</code> — le nom de
-            l'étudiant, pas son compte GitHub.</span>
+            <code id="apercu-nom">session.cours.groupe.tp1.prenom-nom</code><span
+              id="apercu-suite"> — le nom de l'étudiant, pas son compte GitHub.</span></span>
         </label>
         <label class="champ-bloc">
           <span class="etiquette">Gabarit de description</span>
@@ -351,10 +362,11 @@
         </fieldset>
 
         <fieldset class="groupe-radio">
-          <legend class="etiquette">Accès des étudiants</legend>
+          <legend class="etiquette">Accès aux dépôts</legend>
           <label class="case"><input type="checkbox" id="reglage-collaborateur">
-            <span><strong>Inviter chaque étudiant sur son dépôt</strong>
-            <span class="aide">Une invitation part vers le compte GitHub de la personne.</span></span></label>
+            <span><strong id="acces-titre">Inviter chaque étudiant sur son dépôt</strong>
+            <span class="aide" id="acces-aide">Une invitation part vers le compte GitHub
+              de la personne.</span></span></label>
           <label class="champ-bloc etroit-champ">
             <span class="etiquette">Droit accordé</span>
             <select id="reglage-permission" class="champ"></select>
@@ -412,7 +424,8 @@
     <div class="boite etape" data-etape="3" hidden>
       <div class="boite-entete"><strong>Distribution</strong></div>
       <div class="boite-corps">
-        <p class="note">Le travail est distribué aux étudiants du groupe : un dépôt chacun.</p>
+        <p class="note" id="dest-intro">Le travail est distribué aux étudiants du groupe :
+          un dépôt chacun.</p>
 
         <div class="boite">
           <div class="boite-entete">
@@ -425,7 +438,7 @@
         <div id="deja-servis" class="avis-pile"></div>
         <div id="plan-erreur" class="avis-pile"></div>
         <table class="tableau" id="plan-table" hidden>
-          <thead><tr><th>Dépôt</th><th>Étudiant</th><th>Compte</th><th>Description</th></tr></thead>
+          <thead><tr><th>Dépôt</th><th id="plan-colonne">Étudiant</th><th>Compte</th><th>Description</th></tr></thead>
           <tbody></tbody>
         </table>
         <p class="note" id="plan-resume"></p>
@@ -503,6 +516,7 @@
           <th class="etroit"></th>
           <th data-tri="nom"><button type="button">Étudiant<span class="fleche"></span></button></th>
           <th data-tri="compte"><button type="button">Compte GitHub<span class="fleche"></span></button></th>
+          <th>Équipe</th>
           <th>Travaux</th>
           <th data-tri="envoi"><button type="button">Dernier envoi<span class="fleche"></span></button></th>
           <th class="etroit"></th>
@@ -510,6 +524,40 @@
         <tbody></tbody>
       </table>
       <div class="boite-vide" id="etudiants-vide" hidden></div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------- équipes du groupe -->
+  <!-- Une équipe est une vraie équipe d'organisation GitHub. Son nom porte la
+       place du groupe — « a26.5n6.01.eq1 » — parce qu'une organisation n'accepte
+       qu'un nom d'équipe donné : sans cela, deux groupes ne pourraient pas avoir
+       chacun leur « eq1 ». -->
+  <section id="vue-equipes" class="vue" hidden>
+    <div class="barre-outils">
+      <div>
+        <h2>Équipes</h2>
+        <p class="note" id="equipes-resume"></p>
+      </div>
+      <div class="actions">
+        <button type="button" id="equipes-adopter" class="bouton">Adopter une équipe…</button>
+        <button type="button" id="equipes-recharger" class="bouton">Recharger</button>
+        <button type="button" id="equipes-nouvelle" class="bouton vert">Nouvelle équipe</button>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>Équipes du groupe</strong></div>
+      <div id="equipes-liste"></div>
+      <div class="boite-vide" id="equipes-vide" hidden></div>
+    </div>
+
+    <div class="boite" id="equipes-orphelins-boite" hidden>
+      <div class="boite-entete"><strong>Sans équipe</strong></div>
+      <div class="boite-corps">
+        <p class="note">Ces étudiants ne sont dans aucune équipe : un travail d'équipe
+          les laisserait de côté.</p>
+        <div id="equipes-orphelins" class="jetons"></div>
+      </div>
     </div>
   </section>
 

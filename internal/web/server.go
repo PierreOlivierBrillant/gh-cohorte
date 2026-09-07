@@ -26,6 +26,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -66,6 +67,7 @@ type Server struct {
 	mutex     sync.Mutex
 	settings  config.Settings
 	inventory map[string][]groups.RepoInfo  // organisation → dépôts connus
+	squads    map[string][]teams.Info       // organisation → équipes connues
 	resolvers map[string]*identity.Resolver // organisation → noms complets
 }
 
@@ -99,6 +101,7 @@ func New(deps Deps) (*Server, error) {
 		stop:       make(chan struct{}),
 		settings:   deps.Settings,
 		inventory:  map[string][]groups.RepoInfo{},
+		squads:     map[string][]teams.Info{},
 		resolvers:  map[string]*identity.Resolver{},
 	}
 	server.handler = server.guard(server.routes())
@@ -182,15 +185,28 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{scope}/students/names", s.handleResolveStudentNames)
 	mux.HandleFunc("POST /api/classrooms/{scope}/students/move", s.handleMoveStudent)
 	mux.HandleFunc("POST /api/classrooms/{scope}/students/rename", s.handleRenameStudent)
+	// --- équipes du groupe
+	// Une équipe se désigne par son nom court — « eq1 » —, et son nom complet
+	// sur GitHub porte la place du groupe : « a26.5n6.01.eq1 ».
+	mux.HandleFunc("GET /api/classrooms/{scope}/teams", s.handleTeams)
+	mux.HandleFunc("POST /api/classrooms/{scope}/teams", s.handleCreateTeam)
+	mux.HandleFunc("POST /api/classrooms/{scope}/teams/adopt", s.handleAdoptTeam)
+	mux.HandleFunc("POST /api/classrooms/{scope}/teams/members", s.handleAssignTeam)
+	mux.HandleFunc("PUT /api/classrooms/{scope}/teams/{team}", s.handleRenameTeam)
+	mux.HandleFunc("DELETE /api/classrooms/{scope}/teams/{team}", s.handleDeleteTeam)
+	mux.HandleFunc("POST /api/classrooms/{scope}/teams/{team}/members", s.handleComposeTeam)
+	mux.HandleFunc("DELETE /api/classrooms/{scope}/teams/{team}/members/{login}", s.handleLeaveTeam)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments", s.handleCreateAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/preview", s.handlePreviewAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move/preview", s.handleRelocatePreview)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move", s.handleRelocate)
 	mux.HandleFunc("GET /api/classrooms/{scope}/assignments/{name}", s.handleAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/access", s.handleAssignmentAccess)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/share", s.handleShareAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/preview", s.handleMigrationPreview)
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/apply", s.handleMigrationApply)
 	mux.HandleFunc("GET /api/orgs/{org}/candidates", s.handleCandidates)
+	mux.HandleFunc("GET /api/orgs/{org}/teams", s.handleLooseTeams)
 	mux.HandleFunc("POST /api/orgs/{org}/match", s.handleMatchPattern)
 
 	// --- listes et code de départ

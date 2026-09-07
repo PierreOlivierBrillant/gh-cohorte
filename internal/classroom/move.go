@@ -101,7 +101,10 @@ func planRenames(depart, arrivee Classroom, fragments map[string]string,
 	pris := nouvellesCibles(repos)
 
 	var lignes []Move
-	for _, travail := range depart.Assignments(repos) {
+	// Les équipes ne sont pas nécessaires ici : seuls les dépôts d'étudiants
+	// suivent une personne qui change de groupe ou de nom. Ceux d'une équipe
+	// appartiennent à l'équipe, et elle ne bouge pas.
+	for _, travail := range depart.Assignments(repos, nil) {
 		nom, err := naming.Fragment(depart.ShortName(travail.ID), "Travail")
 		if err != nil {
 			continue
@@ -206,7 +209,7 @@ func Followers(depart Classroom, plan []Move, repos []groups.RepoInfo) (
 
 	total := map[string]int{}
 	emportes := map[string]int{}
-	for _, travail := range depart.Assignments(repos) {
+	for _, travail := range depart.Assignments(repos, nil) {
 		for _, depot := range depart.Repos(travail.ID, repos) {
 			student, inscrit := depart.StudentOf(depot.Name)
 			if !inscrit {

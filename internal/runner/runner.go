@@ -1,5 +1,7 @@
 // Package runner applique un plan de génération : création des dépôts, dépôt des
-// fichiers de départ, puis invitation des personnes.
+// fichiers de départ, puis attribution de l'accès — une invitation à la
+// personne pour un travail individuel, un partage avec l'équipe pour un travail
+// d'équipe.
 package runner
 
 import (
@@ -33,12 +35,18 @@ const (
 	StarterFailed   = "échec"
 	CollaboratorNo  = "non"
 	CollaboratorYes = "prévu"
+	// TeamShared dit qu'un dépôt d'équipe a été partagé avec elle. L'accès est
+	// accordé à l'équipe entière : personne n'est invité individuellement, et
+	// changer sa composition suffit à changer qui voit le dépôt.
+	TeamShared = "équipe"
 )
 
 // Result est l'issue du traitement d'un dépôt.
 type Result struct {
-	Username     string `json:"username"`
-	FullName     string `json:"full_name"`
+	Username string `json:"username"`
+	FullName string `json:"full_name"`
+	// Team nomme l'équipe destinataire ; vide pour un travail individuel.
+	Team         string `json:"team,omitempty"`
 	Repo         string `json:"repo"`
 	Status       string `json:"status"`
 	URL          string `json:"url"`
@@ -113,12 +121,12 @@ func (r *Report) Save(directory string) (string, string, error) {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	records := [][]string{{
-		"nom_complet", "github_username", "depot", "statut",
+		"nom_complet", "github_username", "equipe", "depot", "statut",
 		"collaborateur", "fichiers_de_depart", "url", "erreur",
 	}}
 	for _, result := range r.Results {
 		records = append(records, []string{
-			result.FullName, result.Username, result.Repo, result.Status,
+			result.FullName, result.Username, result.Team, result.Repo, result.Status,
 			result.Collaborator, result.Starter, result.URL, result.Error,
 		})
 	}
@@ -199,10 +207,14 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 	result := Result{
 		Username:     item.Person.Username,
 		FullName:     item.Person.FullName,
+		Team:         item.Team,
 		Repo:         item.Name,
 		Status:       Skipped,
 		Collaborator: CollaboratorNo,
 		Starter:      StarterNone,
+	}
+	if item.ForTeam() {
+		result.FullName = item.Recipient()
 	}
 
 	existing, err := e.client.GetRepo(org, item.Name)
@@ -259,6 +271,21 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 	}
 	if options.DryRun {
 		result.Collaborator = CollaboratorYes
+		return result
+	}
+	// L'équipe reçoit le dépôt, pas ses membres : c'est ce qui fait qu'un
+	// changement de composition suffit ensuite à changer qui y accède.
+	if item.ForTeam() {
+		if err := e.client.AddTeamRepo(org, item.TeamSlug, org, item.Name,
+			e.settings.Permission); err != nil {
+			previous := result.Status
+			result.Status = Failed
+			result.Collaborator = "échec"
+			result.Error = fmt.Sprintf("dépôt %s mais partage avec l'équipe impossible : %v",
+				previous, err)
+			return result
+		}
+		result.Collaborator = TeamShared
 		return result
 	}
 	state, err := e.client.AddCollaborator(org, item.Name, item.Person.Username, e.settings.Permission)

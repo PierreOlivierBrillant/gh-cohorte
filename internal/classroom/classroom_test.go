@@ -90,11 +90,11 @@ func TestPlusieursGroupesDansUnMemeCours(t *testing.T) {
 	premier := groupe("a26", "5n6", "01", cohorte)
 	second := groupe("a26", "5n6", "02", cohorte)
 
-	if travaux := premier.Assignments(inventaire); len(travaux) != 1 ||
+	if travaux := premier.Assignments(inventaire, nil); len(travaux) != 1 ||
 		travaux[0].Repos != 1 || travaux[0].Students != 1 {
 		t.Fatalf("groupe 01 : %+v", travaux)
 	}
-	if travaux := second.Assignments(inventaire); len(travaux) != 1 ||
+	if travaux := second.Assignments(inventaire, nil); len(travaux) != 1 ||
 		travaux[0].Repos != 1 || travaux[0].Students != 1 {
 		t.Fatalf("groupe 02 : %+v", travaux)
 	}
@@ -111,7 +111,7 @@ func TestTravauxDuGroupe(t *testing.T) {
 	)
 	cours := groupe("a26", "5n6", "01", cohorte)
 
-	travaux := cours.Assignments(inventaire)
+	travaux := cours.Assignments(inventaire, nil)
 	if len(travaux) != 2 {
 		t.Fatalf("travaux trouvés : %v", noms(travaux))
 	}
@@ -141,7 +141,7 @@ func TestDepotHorsListeCompteApart(t *testing.T) {
 	)
 	cours := groupe("a26", "5n6", "01", cohorte)
 
-	travaux := cours.Assignments(inventaire)
+	travaux := cours.Assignments(inventaire, nil)
 	if len(travaux) != 1 {
 		t.Fatalf("travaux trouvés : %v", noms(travaux))
 	}
@@ -214,7 +214,7 @@ func TestGroupeHeriteResteLisible(t *testing.T) {
 		t.Fatal("le groupe devrait être reconnu comme hérité")
 	}
 
-	travaux := cours.Assignments(inventaire)
+	travaux := cours.Assignments(inventaire, nil)
 	if len(travaux) != 2 {
 		t.Fatalf("travaux trouvés : %v", noms(travaux))
 	}
@@ -259,7 +259,7 @@ func TestGroupeAQuatreNiveauxRedevientLisible(t *testing.T) {
 		"5n6.a26-01.tp1.emilie-cote", "5n6.a26-01.travailsession.emilie-cote",
 		"5n6.a26-01.tp1.inconnu", "4w6.a26-01.tp1.emilie-cote",
 	)
-	travaux := cours.Assignments(inventaire)
+	travaux := cours.Assignments(inventaire, nil)
 	if len(travaux) != 2 {
 		t.Fatalf("travaux trouvés : %v", noms(travaux))
 	}

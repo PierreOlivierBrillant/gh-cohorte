@@ -36,9 +36,10 @@ gh extension upgrade cohorte
 - **`gh` authentifié** (`gh auth login`) : l'extension reprend son jeton, son
   hôte et ses limites de débit.
 - **Portées** : `repo` pour créer les dépôts et inviter les personnes,
-  `read:org` pour lister vos organisations. À la demande : `delete_repo` pour
-  supprimer un dépôt, `workflow` pour déposer des fichiers dans
-  `.github/workflows` (`gh auth refresh -s delete_repo,workflow`).
+  `read:org` pour lister vos organisations. À la demande : `admin:org` pour les
+  travaux d'équipe, `delete_repo` pour supprimer un dépôt, `workflow` pour
+  déposer des fichiers dans `.github/workflows`
+  (`gh auth refresh -s admin:org,delete_repo,workflow`).
 - **`git`**, uniquement pour cloner et mettre à jour des clones.
 
 Le droit de créer des dépôts dans l'organisation visée est requis ; un rôle
@@ -114,10 +115,18 @@ non alphanumérique par un tiret, si bien qu'un nom venu d'un CSV en est nettoy�
 (« J.-P. Tremblay » devient `j-p-tremblay`) et qu'un compte GitHub n'en contient
 jamais. Un nom se relit donc sans rien deviner.
 
-Le dernier niveau est le **nom de l'étudiant**, pas son compte GitHub : un dépôt
-se lit sans connaître le pseudonyme de personne. En contrepartie, le nom complet
+Le dernier niveau nomme le **destinataire** du dépôt. Pour un travail
+individuel, c'est le **nom de l'étudiant**, pas son compte GitHub : un dépôt se
+lit sans connaître le pseudonyme de personne. En contrepartie, le nom complet
 est obligatoire et deux homonymes font échouer la préparation avant toute
 écriture.
+
+Pour un travail d'équipe, c'est le nom de l'**équipe** — `a26.5n6.01.projet.eq1`.
+Une équipe est une vraie équipe d'organisation GitHub, et son nom porte lui
+aussi la place du groupe (`a26.5n6.01.eq1`) : une organisation n'accepte qu'un
+nom d'équipe donné, et sans cette place deux groupes ne pourraient pas avoir
+chacun leur « eq1 ». Un travail est donc d'équipe ou individuel selon ce que son
+dernier niveau nomme, et rien n'est déclaré ailleurs.
 
 **GitHub reste la seule source de vérité** : sessions, cours, groupes, travaux
 et étudiants se lisent tous dans le nom des dépôts. Un groupe n'a rien à
@@ -149,15 +158,20 @@ depuis chaque ancien nom.
   `--pushed-before`, `--never-pushed`, `--sort`).
 - **Déplacer un travail ou des étudiants** d'un groupe à l'autre, en renommant
   les dépôts si on le demande.
+- **Distribuer un travail en équipe** : un dépôt par équipe, partagé avec elle
+  plutôt qu'avec chacun de ses membres — changer sa composition suffit donc à
+  changer qui y accède. Les équipes se créent, se renomment, se suppriment, et
+  une équipe déjà présente dans l'organisation s'adopte telle quelle.
 
 Ce que GitHub Classroom fait et que l'outil ne fait pas : pas de lien
 d'invitation à distribuer — les dépôts sont créés directement —, pas d'échéance,
-pas de correction automatique, pas de travail en équipe.
+pas de correction automatique.
 
 L'assistant du terminal ignore la notion de groupe et travaille par préfixe
 (`--manage tp1`). Déclarer un groupe, tenir sa liste d'étudiants ou déplacer une
-personne n'existent donc que dans l'interface web ; tout le reste est disponible
-partout.
+personne n'existent donc que dans l'interface web. Les équipes, elles,
+appartiennent à un groupe : au terminal, c'est la place du groupe qui en tient
+lieu (`--manage a26.5n6.01 --teams`). Tout le reste est disponible partout.
 
 ## Fiabilité
 
@@ -200,6 +214,8 @@ Les plus courantes :
 | `--roster FICHIER` | liste « nom complet, compte GitHub » au format CSV |
 | `--assignment NOM` | identifiant du travail |
 | `--manage [PREFIXE]` | gérer un groupe existant au lieu d'en créer un |
+| `--teams` | travail d'équipe ; avec `--manage`, les équipes du groupe |
+| `--team NOM` | équipe visée, ou équipes à servir |
 | `--template ORG/DEPOT` | dépôt modèle |
 | `--starter DOSSIER` | dossier local déposé dans chaque dépôt, en un commit |
 | `--dry-run` | simuler sans rien créer |
@@ -226,10 +242,10 @@ Les tests montent un faux serveur GitHub local (`internal/fakegh`) et de vrais
 dépôts git locaux (`file://`) : rien ne sort de la machine.
 
 La logique vit dans les paquets du domaine — `internal/naming` (la
-nomenclature), `internal/classroom` (les groupes), `internal/plan`,
-`internal/groups`, `internal/roster`, `internal/students`, `internal/runner`,
-`internal/clone` — et les trois interfaces (`internal/web`, `internal/app`) n'en
-sont que des façades. C'est ce qui garantit qu'elles ne divergent pas.
+nomenclature), `internal/classroom` (les groupes), `internal/teams` (les
+équipes), `internal/plan`, `internal/groups`, `internal/roster`,
+`internal/students`, `internal/runner`, `internal/clone` — et les trois
+interfaces (`internal/web`, `internal/app`) n'en sont que des façades. C'est ce qui garantit qu'elles ne divergent pas.
 [`CLAUDE.md`](CLAUDE.md) énonce les règles à ne pas perdre de vue.
 
 Publication : pousser une étiquette `vX.Y.Z` déclenche le workflow

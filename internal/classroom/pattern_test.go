@@ -116,7 +116,7 @@ func TestGroupeAdopteParGabarit(t *testing.T) {
 		"projet-tp2-emilie-cote", "projet-tp2-visiteur",
 		"angular-tp1-emilie-cote", // hors gabarit
 	)
-	travaux := valide.Assignments(inventaire)
+	travaux := valide.Assignments(inventaire, nil)
 	if len(travaux) != 2 {
 		t.Fatalf("travaux : %v", noms(travaux))
 	}

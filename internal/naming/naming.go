@@ -16,6 +16,13 @@
 // finissait le travail et où commençait la personne ; « a26.5n6.01.tp1.emilie-cote »
 // le dit.
 //
+// Le dernier niveau nomme le destinataire du dépôt : l'étudiant pour un travail
+// individuel, l'équipe pour un travail d'équipe. Les équipes suivent la même
+// découpe, d'un niveau plus court :
+//
+//	session . cours . groupe . équipe
+//	a26.5n6.01.eq1
+//
 // Seul le nom court d'une session entre dans un dépôt. Son nom long — « Automne
 // 2026 » — ne sert qu'à l'affichage et vit dans le fichier des groupes.
 package naming
@@ -116,4 +123,56 @@ func Student(fullName string) (string, error) {
 		slug = strings.Trim(slug[:valid.MaxSlugLength], "-")
 	}
 	return slug, nil
+}
+
+// ------------------------------------------------------------------ équipes
+
+// TeamLevels est le nombre de niveaux du nom d'une équipe : la place du
+// groupe, puis le nom court de l'équipe.
+const TeamLevels = 4
+
+// TeamParts est le nom d'une équipe découpé.
+type TeamParts struct {
+	Session string `json:"session"`
+	Course  string `json:"course"`
+	Group   string `json:"group"`
+	Team    string `json:"team"`
+}
+
+// TeamName compose le nom d'une équipe : « a26.5n6.01.eq1 ».
+//
+// Une équipe GitHub appartient à l'organisation, pas au groupe : deux groupes
+// qui voudraient chacun leur « eq1 » se heurteraient, car l'organisation
+// n'accepte qu'un « slug » d'équipe donné. La place du groupe est donc écrite
+// dans le nom, exactement comme elle l'est dans celui des dépôts — c'est ce qui
+// garantit qu'une équipe reste dans son groupe et ne peut pas en changer par
+// accident.
+func TeamName(session, course, group, team string) string {
+	return join(session, course, group, team)
+}
+
+// ParseTeam découpe le nom d'une équipe. Un nom qui n'a pas exactement quatre
+// niveaux non vides n'est pas de cette nomenclature : l'équipe existe dans
+// l'organisation, mais elle ne relève d'aucun groupe.
+func ParseTeam(name string) (TeamParts, bool) {
+	fragments := strings.Split(strings.TrimSpace(name), Separator)
+	if len(fragments) != TeamLevels {
+		return TeamParts{}, false
+	}
+	for _, fragment := range fragments {
+		if fragment == "" {
+			return TeamParts{}, false
+		}
+	}
+	return TeamParts{
+		Session: fragments[0], Course: fragments[1],
+		Group: fragments[2], Team: fragments[3],
+	}, true
+}
+
+// TeamBelongs dit si une équipe appartient au groupe donné.
+func TeamBelongs(parts TeamParts, session, course, group string) bool {
+	return strings.EqualFold(parts.Session, session) &&
+		strings.EqualFold(parts.Course, course) &&
+		strings.EqualFold(parts.Group, group)
 }

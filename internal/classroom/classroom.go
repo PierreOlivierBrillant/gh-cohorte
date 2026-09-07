@@ -8,6 +8,12 @@
 // dépôts sont créés. Un groupe se déclare donc sans rien écrire sur GitHub, et
 // se supprime sans rien y effacer.
 //
+// Un travail est individuel ou d'équipe, et cela non plus ne se déclare pas :
+// le dernier niveau du nom de ses dépôts nomme une équipe du groupe, ou un
+// étudiant. Les équipes elles-mêmes vivent sur GitHub — ce sont de vraies
+// équipes d'organisation —, si bien qu'elles sont passées en argument là où
+// elles comptent plutôt que retenues ici.
+//
 // Les groupes déclarés avant cette nomenclature gardent leur
 // préfixe tout en tirets. Ils restent lisibles — leurs dépôts s'affichent — mais
 // on ne leur distribue plus : il faut d'abord les migrer.
@@ -22,6 +28,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -387,24 +394,44 @@ func (c Classroom) Find(username string) (roster.Person, bool) {
 
 // ------------------------------------------------------------------- travaux
 
+// Nature d'un travail. Elle ne se déclare pas : elle se lit dans le dernier
+// niveau du nom des dépôts, qui nomme une équipe du groupe ou un étudiant.
+const (
+	Individual = "individuel"
+	TeamWork   = "équipe"
+)
+
 // Assignment est un travail du groupe, tel que les dépôts le racontent.
 type Assignment struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Repos    int    `json:"repos"`
 	Students int    `json:"students"` // étudiants du groupe qui ont un dépôt
-	Others   int    `json:"others"`   // dépôts dont l'étudiant n'est pas du groupe
+	Teams    int    `json:"teams"`    // équipes du groupe qui ont un dépôt
+	Others   int    `json:"others"`   // dépôts dont le destinataire est inconnu
+	// Kind vaut « équipe » dès qu'un dépôt du travail porte le nom d'une équipe
+	// du groupe, « individuel » sinon.
+	Kind     string `json:"kind"`
 	PushedAt string `json:"pushed_at"`
 }
+
+// ForTeams dit si le travail est distribué aux équipes.
+func (a Assignment) ForTeams() bool { return a.Kind == TeamWork }
 
 // Assignments retrouve les travaux du groupe parmi les dépôts de l'organisation.
 // La nomenclature courante se relit sans rien deviner : un dépôt est du
 // groupe, ou il ne l'est pas.
-func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
+//
+// Les équipes du groupe sont données parce qu'elles vivent sur GitHub, pas dans
+// un fichier local : c'est en confrontant le dernier niveau d'un nom de dépôt à
+// leurs noms qu'on sait si le travail est d'équipe. Une liste vide n'est pas
+// une erreur — le groupe n'a alors que des travaux individuels.
+func (c Classroom) Assignments(repos []groups.RepoInfo, equipes []teams.Team) []Assignment {
 	if c.Legacy() {
 		return c.legacyAssignments(repos)
 	}
 	connus := c.fragments()
+	nomsDEquipes := teamFragments(equipes)
 	parNom := map[string]*Assignment{}
 
 	for _, repo := range repos {
@@ -417,14 +444,19 @@ func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
 		if !deja {
 			travail = &Assignment{
 				ID:   naming.AssignmentID(c.Session, c.Course, c.Group, parts.Assignment),
-				Name: parts.Assignment,
+				Name: parts.Assignment, Kind: Individual,
 			}
 			parNom[cle] = travail
 		}
 		travail.Repos++
-		if _, inscrit := connus[strings.ToLower(parts.Student)]; inscrit {
+		_, inscrit := connus[strings.ToLower(parts.Student)]
+		switch {
+		case nomsDEquipes[strings.ToLower(parts.Student)]:
+			travail.Teams++
+			travail.Kind = TeamWork
+		case inscrit:
 			travail.Students++
-		} else {
+		default:
 			travail.Others++
 		}
 		if repo.PushedAt > travail.PushedAt {
@@ -438,6 +470,16 @@ func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
 	}
 	sortAssignments(trouves)
 	return trouves
+}
+
+// teamFragments rassemble les noms courts d'équipes, pour reconnaître le dernier
+// niveau d'un nom de dépôt.
+func teamFragments(equipes []teams.Team) map[string]bool {
+	noms := make(map[string]bool, len(equipes))
+	for _, equipe := range equipes {
+		noms[strings.ToLower(equipe.Short)] = true
+	}
+	return noms
 }
 
 func sortAssignments(found []Assignment) {

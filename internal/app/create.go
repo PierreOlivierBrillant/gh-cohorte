@@ -18,6 +18,11 @@ import (
 
 // create déroule le mode création, de la liste des personnes au bilan.
 func (s *Session) create() (int, error) {
+	// Un travail d'équipe ne se distribue pas à une liste : ses destinataires
+	// sont les équipes du groupe, et elles vivent sur GitHub.
+	if s.Options.Teams || s.Options.TeamShare {
+		return s.createTeams()
+	}
 	people, err := s.collectPeople()
 	if err != nil {
 		return ExitOK, err
@@ -605,6 +610,18 @@ func (s *Session) configureStarter() error {
 
 // summarize récapitule ce qui sera fait, avant toute écriture.
 func (s *Session) summarize(items []plan.PlannedRepo) {
+	s.summarizeCommon(items, "Dépôts à traiter")
+	preview := make([][]string, 0, len(items))
+	for _, item := range items {
+		preview = append(preview, []string{item.Name, item.Person.FullName, "@" + item.Person.Username})
+	}
+	s.Console.Table([]string{"Dépôt", "Personne", "Compte"}, preview, 20)
+}
+
+// summarizeCommon dit ce qui ne change pas d'une distribution à l'autre : les
+// réglages. Ce qu'elle produit — des dépôts de personnes ou d'équipes — se
+// décrit ensuite, chacun avec ses colonnes.
+func (s *Session) summarizeCommon(items []plan.PlannedRepo, compte string) {
 	s.Console.Heading("Récapitulatif")
 	mode := "création réelle"
 	if s.Options.DryRun {
@@ -630,7 +647,7 @@ func (s *Session) summarize(items []plan.PlannedRepo) {
 	rows := [][2]string{
 		{"Organisation", s.Settings.Org},
 		{"Travail", s.Settings.Assignment},
-		{"Dépôts à traiter", itoa(len(items))},
+		{compte, itoa(len(items))},
 		{"Source", source},
 		{"Fichiers de départ", starterLabel},
 		{"Visibilité", visibility},
@@ -640,12 +657,6 @@ func (s *Session) summarize(items []plan.PlannedRepo) {
 	for _, row := range rows {
 		s.Console.Printf("  %s %s", s.Console.Dim(pad(row[0], 18)), row[1])
 	}
-
-	preview := make([][]string, 0, len(items))
-	for _, item := range items {
-		preview = append(preview, []string{item.Name, item.Person.FullName, "@" + item.Person.Username})
-	}
-	s.Console.Table([]string{"Dépôt", "Personne", "Compte"}, preview, 20)
 }
 
 // execute lance la génération et enregistre le bilan.

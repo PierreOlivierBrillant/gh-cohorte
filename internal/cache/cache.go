@@ -14,14 +14,21 @@ import (
 
 // Durées de validité : la liste des dépôts bouge plus souvent qu'un nom de profil.
 const (
-	ReposTTL   = 6 * time.Hour
-	OrgsTTL    = 12 * time.Hour
+	ReposTTL = 6 * time.Hour
+	OrgsTTL  = 12 * time.Hour
+	// Les équipes changent sous la main de qui enseigne — une composition
+	// corrigée sur github.com doit se voir vite : elles se gardent moins
+	// longtemps que les dépôts.
+	TeamsTTL   = time.Hour
 	ProfileTTL = 30 * 24 * time.Hour
 	fileName   = "cache.json"
 )
 
 // ReposKey est la clé de la liste des dépôts d'une organisation.
 func ReposKey(org string) string { return "repos:" + strings.ToLower(org) }
+
+// TeamsKey est la clé des équipes d'une organisation.
+func TeamsKey(org string) string { return "teams:" + strings.ToLower(org) }
 
 // OrgsKey est la clé des organisations accessibles à un compte.
 func OrgsKey(viewer string) string { return "orgs:" + strings.ToLower(viewer) }

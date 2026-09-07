@@ -187,6 +187,15 @@ const etat = {
   deplaces: new Set(),
   // Les travaux cochés dans la liste d'un groupe, pour les déplacer ensemble.
   travauxChoisis: new Set(),
+  // Les équipes du groupe, telles que GitHub les donne, et les étudiants
+  // qu'aucune n'accueille. Rien n'en est retenu localement : leur nom dit à
+  // quel groupe elles appartiennent.
+  equipes: [],
+  orphelins: [],
+  // Ce que l'assistant distribue : « individuel » ou « equipe ». La nature
+  // d'un travail ne se déclare nulle part — elle se lit ensuite dans le nom de
+  // ses dépôts —, mais il faut bien la choisir au moment de le créer.
+  nature: 'individuel',
   destinataires: new Set(),
   reglagesTravail: {},
   nouveau: { org: '', etudiants: [], rejets: [] },
@@ -341,7 +350,7 @@ function demander(titre, contenu, libelle = 'Confirmer') {
 // Les vues d'un groupe partagent ses onglets.
 const ongletDeLaVue = {
   travaux: 'travaux', travail: 'travaux', assistant: 'travaux',
-  etudiants: 'etudiants', 'groupe-reglages': 'groupe-reglages',
+  etudiants: 'etudiants', equipes: 'equipes', 'groupe-reglages': 'groupe-reglages',
 };
 
 // sigle rend un code de cours tel qu'on l'écrit : « 4w6 » se lit « 4W6 ». Les
@@ -380,6 +389,7 @@ function cheminDeLaVue(nom) {
     case 'travaux': return `/g/${groupe}`;
     case 'assistant': return `/g/${groupe}/nouveau-travail`;
     case 'etudiants': return `/g/${groupe}/etudiants`;
+    case 'equipes': return `/g/${groupe}/equipes`;
     case 'groupe-reglages': return `/g/${groupe}/reglages`;
     case 'travail':
       return `/g/${groupe}/travaux/${encode(etat.travail ? etat.travail.name : '')}`;
@@ -417,6 +427,7 @@ function vueDuGroupe(segment) {
     case 'travaux': return 'travail';
     case 'nouveau-travail': return 'assistant';
     case 'etudiants': return 'etudiants';
+    case 'equipes': return 'equipes';
     case 'reglages': return 'groupe-reglages';
     default: return 'travaux';
   }
@@ -476,11 +487,16 @@ function afficherVue(nom, sansHistorique) {
   // Tant qu'aucune organisation n'est choisie, rien d'autre n'est accessible :
   // tout ce que fait l'outil s'y passe.
   if (!etat.organisation && nom !== 'organisation') nom = 'organisation';
+  // Un groupe hérité n'a pas de place où nommer ses équipes : l'onglet n'a
+  // rien à montrer tant que ses dépôts ne sont pas renommés.
+  const sansPlace = !!etat.groupe && !etat.groupe.session;
+  if (nom === 'equipes' && sansPlace) nom = 'travaux';
   const onglet = ongletDeLaVue[nom];
   $('ouvrir-reglages').hidden = !etat.organisation;
   $('accueil').disabled = !etat.organisation;
   for (const bouton of $('onglets').querySelectorAll('button')) {
     bouton.classList.toggle('actif', bouton.dataset.vue === onglet);
+    if (bouton.dataset.vue === 'equipes') bouton.hidden = sansPlace;
   }
   for (const vue of document.querySelectorAll('.vue')) {
     vue.hidden = vue.id !== 'vue-' + nom;
@@ -493,6 +509,7 @@ function afficherVue(nom, sansHistorique) {
   if (nom === 'parcours') chargerGroupes();
   if (nom === 'reglages') rafraichirEmplacements();
   if (nom === 'etudiants') chargerEtudiants();
+  if (nom === 'equipes') chargerEquipes();
   if (nom === 'groupe-reglages') ecrireReglagesGroupe();
 }
 
@@ -603,6 +620,7 @@ function ficheDeLEntete(nom) {
   if (nom === 'travail' && etat.travail) fil.push({ texte: etat.travail.name });
   if (nom === 'assistant') fil.push({ texte: etat.assistantTitre || 'Nouveau travail' });
   if (nom === 'etudiants') fil.push({ texte: 'Étudiants' });
+  if (nom === 'equipes') fil.push({ texte: 'Équipes' });
   if (nom === 'groupe-reglages') fil.push({ texte: 'Réglages du groupe' });
 
   return {
@@ -628,7 +646,8 @@ function etapeCours(court, cours) {
 }
 
 function sousTitreDuGroupe(groupe) {
-  const compte = `${(groupe.students || []).length} étudiant(s)`;
+  let compte = `${(groupe.students || []).length} étudiant(s)`;
+  if (groupe.teams > 0) compte += ` · ${groupe.teams} équipe(s)`;
   if (!groupe.session) return `Organisation ${groupe.org} · ${compte}`;
   return `${groupe.session_name || groupe.session} · ${sigle(groupe.course)}` +
     ` · groupe ${groupe.group} · ${compte}`;
@@ -637,7 +656,10 @@ function sousTitreDuGroupe(groupe) {
 // nomenclatureDuGroupe montre en toutes lettres comment ses dépôts s'appellent.
 function nomenclatureDuGroupe(groupe) {
   if (groupe.session) {
-    return `${groupe.session}.${groupe.course}.${groupe.group}.<travail>.<étudiant>`;
+    // Le dernier niveau nomme le destinataire : l'étudiant, ou l'équipe quand
+    // le groupe en a. C'est lui qui dit ensuite la nature d'un travail.
+    const dernier = groupe.teams > 0 ? '<étudiant | équipe>' : '<étudiant>';
+    return `${groupe.session}.${groupe.course}.${groupe.group}.<travail>.${dernier}`;
   }
   if (groupe.pattern) return groupe.pattern;
   if (groupe.prefix) {
@@ -821,9 +843,13 @@ async function ouvrirGroupe(id, force, sansHistorique) {
   // un autre les remet à zéro, plutôt que d'y cacher des étudiants sans qu'on
   // s'y attende.
   if (!etat.groupe || etat.groupe.scope !== groupe.scope) barreEtudiants.reinitialiser();
+  const change = !etat.groupe || etat.groupe.scope !== groupe.scope;
   etat.groupe = groupe;
   etat.travail = null;
   etat.etudiants = [];
+  // Les équipes appartiennent au groupe : celles du précédent ne disent rien
+  // de celui-ci.
+  if (change) { etat.equipes = []; etat.orphelins = []; }
   if (groupe.session) etat.parcours = { session: groupe.session, cours: groupe.course };
 
   $('travaux-nouveau').disabled = !groupe.session;
@@ -1131,7 +1157,10 @@ function dessinerTravaux() {
   }
   const total = (groupe.students || []).length;
   for (const travail of sesTravaux) {
-    const detail = [`${travail.students} étudiant(s) du groupe sur ${total}`];
+    const equipe = travail.kind === 'équipe';
+    const detail = equipe
+      ? [`${travail.teams} équipe(s) ont un dépôt`]
+      : [`${travail.students} étudiant(s) du groupe sur ${total}`];
     if (travail.others > 0) detail.push(`${travail.others} dépôt(s) hors liste`);
     const case_ = el('input', {
       type: 'checkbox', checked: etat.travauxChoisis.has(travail.id),
@@ -1151,8 +1180,9 @@ function dessinerTravaux() {
           el('span', { classe: 'titre', texte: travail.name }),
           el('span', { classe: 'detail', texte: detail.join(' · ') })),
         el('span', { classe: 'espace' }),
+        equipe ? el('span', { classe: 'jeton', texte: 'équipe' }) : null,
         el('span', {
-          classe: 'jeton ' + (total > 0 && travail.students >= total ? 'oui' : ''),
+          classe: 'jeton ' + (!equipe && total > 0 && travail.students >= total ? 'oui' : ''),
           texte: `${travail.repos} dépôt(s)`,
         }),
         el('span', { classe: 'chevron', texte: '›' }))));
@@ -1235,6 +1265,9 @@ async function chargerTravail(travail, force, toutCocher) {
   etat.travail = {
     id: travail.id, name: travail.name, depots: detail.repos,
     total: detail.total, noms: detail.names || [],
+    // La nature vient du serveur, qui la lit dans le nom des dépôts : elle
+    // n'est déclarée nulle part, et la fiche du groupe peut être plus vieille.
+    kind: detail.kind || travail.kind,
   };
   // Une sélection ne survit pas à ce que le filtre écarte : on agit sur ce
   // qu'on voit, et rien d'autre.
@@ -1276,18 +1309,26 @@ const barreTravail = barreDeFiltre({
 function dessinerTravail() {
   const depots = etat.travail.depots;
   const total = (etat.groupe.students || []).length;
-  // Le serveur a déjà rattaché chaque dépôt à son étudiant : la page n'a plus à
-  // deviner qui se cache derrière un nom.
-  const servis = depots.filter((repo) => repo.username).length;
+  const equipe = etat.travail.kind === 'équipe';
+  // Le serveur a déjà rattaché chaque dépôt à son destinataire : la page n'a
+  // plus à deviner qui se cache derrière un nom.
+  const servis = depots.filter((repo) => repo.username || repo.team).length;
   // Sous filtre, le résumé dit sur combien : sans cela, une liste courte ne
   // distinguerait pas un travail peu distribué d'un critère trop étroit.
-  const parts = depots.length === etat.travail.total
-    ? [`${depots.length} dépôt(s)`,
-       `${servis} étudiant(s) du groupe sur ${total} en ont un`]
-    : [`${depots.length} dépôt(s) sur ${etat.travail.total}`,
-       `${servis} étudiant(s) du groupe`];
+  const parts = equipe
+    ? [`${depots.length} dépôt(s) d'équipe` +
+       (depots.length === etat.travail.total ? '' : ` sur ${etat.travail.total}`)]
+    : (depots.length === etat.travail.total
+      ? [`${depots.length} dépôt(s)`,
+         `${servis} étudiant(s) du groupe sur ${total} en ont un`]
+      : [`${depots.length} dépôt(s) sur ${etat.travail.total}`,
+         `${servis} étudiant(s) du groupe`]);
   if (depots.length - servis > 0) parts.push(`${depots.length - servis} hors liste`);
   $('detail-resume').textContent = parts.join(' · ');
+  $('detail-colonne').textContent = equipe ? 'Équipe' : 'Étudiant';
+  // Repartager n'a de sens que pour un travail d'équipe : c'est ce qui achève
+  // l'adoption d'un travail fait en équipe avant l'outil.
+  $('detail-partager').hidden = !equipe;
 
   $('detail-table').hidden = depots.length === 0;
   $('detail-vide').hidden = depots.length > 0;
@@ -1310,9 +1351,19 @@ function dessinerTravail() {
       // « hors liste » dit que le dépôt n'est rattaché à personne, pas que son
       // nom complet manque : un dépôt nommé par le compte GitHub d'un inscrit
       // lui appartient, et le dire autrement ferait croire à un intrus.
-      el('td', repo.username
-        ? { texte: repo.full_name || '@' + repo.username }
-        : { classe: 'vide', texte: repo.student + ' (hors liste)' }),
+      // « hors liste » dit que le dépôt n'est rattaché à personne. Un dépôt
+      // d'équipe, lui, nomme l'équipe et ses membres : il n'appartient à
+      // personne en particulier, et c'est normal.
+      el('td', {}, repo.team
+        ? el('span', {},
+            el('strong', { texte: repo.full_name }),
+            el('span', { classe: 'note',
+              texte: (repo.members || []).length === 0
+                ? ' — équipe vide'
+                : ' — ' + (repo.members || []).map((compte) => '@' + compte).join(', ') }))
+        : el('span', repo.username
+            ? { texte: repo.full_name || '@' + repo.username }
+            : { classe: 'vide', texte: repo.student + ' (hors liste)' })),
       el('td', {}, el('a', {
         href: repo.url, target: '_blank', rel: 'noreferrer noopener', texte: repo.name,
       })),
@@ -1594,18 +1645,74 @@ $('travaux-nouveau').addEventListener('click', () => {
 // « Distribuer aux manquants » reprend le travail ouvert : mêmes réglages, et
 // seuls les étudiants sans dépôt sont cochés.
 $('detail-distribuer').addEventListener('click', () => {
-  ouvrirAssistant(etat.travail.name, `Distribuer « ${etat.travail.name} »`, 3);
+  ouvrirAssistant(etat.travail.name, `Distribuer « ${etat.travail.name} »`, 3,
+    etat.travail.kind === 'équipe' ? 'equipe' : 'individuel');
 });
 
-function ouvrirAssistant(nom, titre, etape = 1) {
+// Redonner à chaque équipe l'accès au dépôt qui porte son nom : c'est la
+// dernière étape de l'adoption d'un travail fait en équipe avant l'outil, où
+// les dépôts sont déjà là mais n'ont jamais été partagés.
+$('detail-partager').addEventListener('click', async () => {
+  const corps = el('div', {},
+    el('p', { texte: `Partager les dépôts de « ${etat.travail.name} » avec leurs équipes ?` }),
+    el('p', { classe: 'note', texte:
+      "Chaque dépôt nommé d'après une équipe du groupe lui est accordé, au droit " +
+      "réglé pour le groupe. Un dépôt déjà partagé ne change pas." }));
+  if (!await demander('Partager avec les équipes', corps, 'Partager')) return;
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/${encode(etat.travail.name)}/share`),
+    'Partage');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (!bilan) return;
+  journaliser(`${bilan.shared} dépôt(s) partagé(s) · ${bilan.failed} en échec`,
+    bilan.failed ? 'warn' : 'ok');
+});
+
+async function ouvrirAssistant(nom, titre, etape = 1, nature) {
+  if (nature === 'equipe' || (etat.groupe.teams > 0 && etat.equipes.length === 0)) {
+    await assurerEquipes();
+  }
   etat.reglagesTravail = Object.assign({}, etat.groupe.defaults);
   etat.assistantTitre = titre;
   $('travail-nom').value = nom;
+  // Un travail rouvert garde sa nature : on ne redistribue pas en équipe un
+  // travail qui a été individuel, et l'inverse encore moins.
+  etat.nature = nature || 'individuel';
+  $('nature-equipe').checked = etat.nature === 'equipe';
+  $('nature-individuel').checked = etat.nature !== 'equipe';
   ecrireReglagesTravail();
   dessinerDestinataires();
   afficherEtape(etape);
   afficherVue('assistant');
   if (etape === 1) $('travail-nom').focus();
+}
+
+// La nature du travail décide de qui reçoit un dépôt. Elle se choisit ici et
+// nulle part ailleurs : une fois distribué, c'est le nom des dépôts qui la dit.
+for (const id of ['nature-individuel', 'nature-equipe']) {
+  $(id).addEventListener('change', async () => {
+    etat.nature = $('nature-equipe').checked ? 'equipe' : 'individuel';
+    if (enEquipe()) await assurerEquipes();
+    majApercuDuNom();
+    dessinerDestinataires();
+    planifierApercu();
+  });
+}
+
+// enEquipe dit si l'assistant prépare un travail d'équipe.
+function enEquipe() { return etat.nature === 'equipe'; }
+
+// assurerEquipes charge les équipes du groupe si l'on ne les a pas encore vues.
+// L'assistant peut être ouvert sans être jamais passé par l'onglet Équipes.
+async function assurerEquipes() {
+  if (etat.equipes.length > 0 || !etat.groupe || !etat.groupe.session) return;
+  const donnees = await tenter(() => api('GET',
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams`), 'Équipes');
+  if (!donnees) return;
+  etat.equipes = donnees.teams || [];
+  etat.orphelins = donnees.unassigned || [];
 }
 
 for (const bouton of document.querySelectorAll('[data-continuer]')) {
@@ -1675,38 +1782,87 @@ function majApercuDuNom() {
     ? `${groupe.session}.${groupe.course}.${groupe.group}`
     : (groupe.prefix || 'session.cours.groupe');
   const travail = $('travail-nom').value.trim() || 'travail';
-  $('apercu-nom').textContent = `${portee}.${travail}.prenom-nom`;
+  // Le dernier niveau nomme le destinataire : l'étudiant, ou l'équipe. C'est
+  // par lui qu'on relit ensuite la nature du travail.
+  const dernier = enEquipe() ? (etat.equipes[0] ? etat.equipes[0].short : 'eq1') : 'prenom-nom';
+  $('apercu-nom').textContent = `${portee}.${travail}.${dernier}`;
+  $('apercu-suite').textContent = enEquipe()
+    ? " — le nom de l'équipe, et le dépôt lui est partagé."
+    : " — le nom de l'étudiant, pas son compte GitHub.";
 }
 
 // --- destinataires
 
+// destinatairesPossibles rend ceux à qui le travail peut être distribué : les
+// étudiants du groupe, ou ses équipes. Chacun n'y est que par son identifiant —
+// un compte GitHub ou un nom court d'équipe —, si bien que la suite ne fait
+// plus de différence entre les deux.
+function destinatairesPossibles() {
+  if (enEquipe()) {
+    return etat.equipes.map((equipe) => ({
+      cle: equipe.short,
+      titre: equipe.short,
+      detail: (equipe.members || []).length === 0
+        ? 'équipe vide'
+        : (equipe.members || []).map((compte) => '@' + compte).join(', '),
+    }));
+  }
+  return (etat.groupe.students || []).map((personne) => ({
+    cle: personne.username,
+    titre: personne.full_name || '',
+    detail: '@' + personne.username,
+  }));
+}
+
 function dessinerDestinataires() {
-  const etudiants = etat.groupe.students || [];
-  etat.destinataires = new Set(etudiants.map((personne) => personne.username));
+  const possibles = destinatairesPossibles();
+  etat.destinataires = new Set(possibles.map((item) => item.cle));
+
+  // L'accès d'un travail d'équipe est accordé à l'équipe, pas à ses membres :
+  // le libellé doit dire ce qui se passera vraiment.
+  $('acces-titre').textContent = enEquipe()
+    ? "Partager le dépôt avec son équipe"
+    : "Inviter chaque étudiant sur son dépôt";
+  $('acces-aide').textContent = enEquipe()
+    ? "L'accès va à l'équipe entière : changer sa composition suffit ensuite à " +
+      "changer qui voit le dépôt."
+    : "Une invitation part vers le compte GitHub de la personne.";
+
+  $('dest-intro').textContent = enEquipe()
+    ? "Le travail est distribué aux équipes du groupe : un dépôt par équipe, " +
+      "partagé avec elle. Rien n'oblige à toutes les servir maintenant."
+    : 'Le travail est distribué aux étudiants du groupe : un dépôt chacun.';
+  $('plan-colonne').textContent = enEquipe() ? 'Équipe' : 'Étudiant';
 
   const conteneur = $('dest-liste');
   vider(conteneur);
-  for (const personne of etudiants) {
+  if (possibles.length === 0) {
+    conteneur.append(el('p', { classe: 'note', texte: enEquipe()
+      ? "Ce groupe n'a aucune équipe : créez-en dans l'onglet Équipes."
+      : "Ce groupe n'a aucun étudiant : importez sa liste dans l'onglet Étudiants." }));
+  }
+  for (const item of possibles) {
     const coche = el('input', {
-      type: 'checkbox', checked: true, value: personne.username,
+      type: 'checkbox', checked: true, value: item.cle,
       onchange: (evenement) => {
-        if (evenement.target.checked) etat.destinataires.add(personne.username);
-        else etat.destinataires.delete(personne.username);
+        if (evenement.target.checked) etat.destinataires.add(item.cle);
+        else etat.destinataires.delete(item.cle);
         majDestinataires();
         planifierApercu();
       },
     });
     conteneur.append(el('label', { classe: 'case' }, coche,
       el('span', {},
-        personne.full_name ? personne.full_name + ' ' : '',
-        el('span', { classe: 'compte', texte: '@' + personne.username }))));
+        item.titre ? item.titre + ' ' : '',
+        el('span', { classe: 'compte', texte: item.detail }))));
   }
   majDestinataires();
 }
 
 function majDestinataires() {
-  const total = (etat.groupe.students || []).length;
-  $('dest-compte').textContent = `${etat.destinataires.size} étudiant(s) sur ${total}`;
+  const total = destinatairesPossibles().length;
+  const mot = enEquipe() ? 'équipe(s)' : 'étudiant(s)';
+  $('dest-compte').textContent = `${etat.destinataires.size} ${mot} sur ${total}`;
   $('dest-tout').checked = total > 0 && etat.destinataires.size === total;
   for (const coche of $('dest-liste').querySelectorAll('input')) {
     coche.checked = etat.destinataires.has(coche.value);
@@ -1715,7 +1871,7 @@ function majDestinataires() {
 
 $('dest-tout').addEventListener('change', (evenement) => {
   etat.destinataires = evenement.target.checked
-    ? new Set((etat.groupe.students || []).map((personne) => personne.username))
+    ? new Set(destinatairesPossibles().map((item) => item.cle))
     : new Set();
   majDestinataires();
   planifierApercu();
@@ -1775,11 +1931,17 @@ function planifierApercu() {
 }
 
 function corpsDuTravail() {
-  return {
+  const corps = {
     name: $('travail-nom').value.trim(),
     settings: lireReglagesTravail(),
-    usernames: [...etat.destinataires],
+    teams: enEquipe(),
   };
+  // Un travail d'équipe ne restreint pas par compte mais par équipe : envoyer
+  // les deux listes laisserait le serveur choisir, et il ne doit pas avoir à le
+  // faire.
+  if (enEquipe()) corps.team_names = [...etat.destinataires];
+  else corps.usernames = [...etat.destinataires];
+  return corps;
 }
 
 async function rafraichirApercu() {
@@ -1800,7 +1962,9 @@ async function rafraichirApercu() {
       corps.append(el('tr', {},
         el('td', {}, el('code', { texte: item.name })),
         el('td', { texte: item.full_name || '—' }),
-        el('td', {}, el('code', { texte: '@' + item.username })),
+        el('td', {}, item.username
+          ? el('code', { texte: '@' + item.username })
+          : el('span', { classe: 'vide', texte: '—' })),
         el('td', { classe: 'note', texte: item.description })));
     }
     table.hidden = apercu.items.length === 0;
@@ -1808,10 +1972,14 @@ async function rafraichirApercu() {
       `${apercu.items.length} dépôt(s) à créer dans « ${etat.groupe.org} » — travail « ${apercu.assignment} »`;
 
     if (apercu.served && apercu.served.length) {
+      // « served » porte des comptes pour un travail individuel, des noms
+      // d'équipes pour un travail d'équipe.
+      const noms = apercu.served.map((item) =>
+        typeof item === 'string' ? item : '@' + item.username);
       $('deja-servis').append(el('div', { classe: 'avis',
-        texte: `${apercu.served.length} étudiant(s) ont déjà un dépôt pour ce travail : ` +
-          apercu.served.map((personne) => '@' + personne.username).join(', ') +
-          ". Ils sont écartés de la distribution." }));
+        texte: `${noms.length} ${apercu.teams ? 'équipe(s)' : 'étudiant(s)'} ` +
+          `${apercu.teams ? 'ont' : 'ont'} déjà un dépôt pour ce travail : ` +
+          noms.join(', ') + ". Ils sont écartés de la distribution." }));
     }
   } catch (probleme) {
     erreur.append(el('div', { classe: 'avis erreur', texte: probleme.message }));
@@ -1825,17 +1993,26 @@ $('lancer-creation').addEventListener('click', () => distribuer(false));
 
 async function distribuer(simulation) {
   const corps = corpsDuTravail();
+  const retenus = corps.teams ? corps.team_names : corps.usernames;
   if (!corps.name) { message('Donnez un nom au travail.', 'alerte'); return; }
-  if (corps.usernames.length === 0) { message('Aucun étudiant retenu.', 'alerte'); return; }
+  if (retenus.length === 0) {
+    message(corps.teams ? 'Aucune équipe retenue.' : 'Aucun étudiant retenu.', 'alerte');
+    return;
+  }
 
   if (!simulation) {
+    // L'accès d'un travail d'équipe est accordé à l'équipe, pas à ses membres :
+    // le dire ici évite de chercher ensuite pourquoi personne n'a été invité.
+    const acces = corps.teams
+      ? `Partage avec chaque équipe (${corps.settings.permission}).`
+      : (corps.settings.add_collaborator
+        ? `Invitations : oui (${corps.settings.permission}).` : 'Invitations : non.');
     const confirme = await demander('Confirmer la distribution', el('div', {},
-      el('p', { texte: `${corps.usernames.length} étudiant(s) du groupe « ${etat.groupe.label} », ` +
-        `travail « ${corps.name} ».` }),
+      el('p', { texte: `${retenus.length} ${corps.teams ? 'équipe(s)' : 'étudiant(s)'} ` +
+        `du groupe « ${etat.groupe.label} », travail « ${corps.name} ».` }),
       el('p', { classe: 'note', texte:
         `Visibilité : ${corps.settings.visibility === 'public' ? 'public' : 'privé'}. ` +
-        (corps.settings.add_collaborator
-          ? `Invitations : oui (${corps.settings.permission}).` : 'Invitations : non.') +
+        acces +
         (corps.settings.template ? ` Modèle : ${corps.settings.template}.` : ' Dépôts neufs.') })),
       'Distribuer');
     if (!confirme) return;
@@ -1855,7 +2032,8 @@ async function distribuer(simulation) {
   journaliser(`${bilan.created} ${simulation ? 'à créer' : 'créé(s)'} · ` +
     `${bilan.existing} déjà présent(s) · ${bilan.failed} en échec`, bilan.failed ? 'warn' : 'ok');
   if (bilan.skipped && bilan.skipped.length) {
-    journaliser(`${bilan.skipped.length} étudiant(s) avaient déjà un dépôt.`, 'dim');
+    journaliser(`${bilan.skipped.length} ${bilan.teams ? 'équipe(s)' : 'étudiant(s)'} ` +
+      'avaient déjà un dépôt.', 'dim');
   }
   if (bilan.json_path) journaliser(`Bilan : ${bilan.json_path}`, 'dim');
   if (simulation) return;
@@ -1925,12 +2103,18 @@ async function chargerEtudiants(force) {
         ? { texte: ligne.full_name }
         : { classe: 'vide', texte: 'nom inconnu' }),
       el('td', {}, el('code', { texte: '@' + ligne.username })),
+      el('td', ligne.team
+        ? { texte: ligne.team }
+        : { classe: 'vide', texte: 'aucune' }),
       el('td', {}, ligne.assignments.length === 0
         ? el('span', { classe: 'vide', texte: 'aucun dépôt' })
         : el('span', { classe: 'etiquettes' }, ligne.assignments.map((travail) =>
             el('a', {
               classe: 'jeton lien', href: travail.url,
-              target: '_blank', rel: 'noreferrer noopener', texte: travail.name,
+              target: '_blank', rel: 'noreferrer noopener',
+              // Un dépôt d'équipe figure chez chacun de ses membres : dire
+              // lequel évite de croire qu'il porte leur nom.
+              texte: travail.team ? `${travail.name} (${travail.team})` : travail.name,
             })))),
       el('td', ligne.pushed_at ? { texte: ligne.pushed_at } : { classe: 'vide', texte: 'jamais' }),
       el('td', {}, el('span', { classe: 'actions' },
@@ -2331,6 +2515,271 @@ $('etudiants-importer').addEventListener('click', async () => {
   await ouvrirGroupe(etat.groupe.scope);
   afficherVue('etudiants');
 });
+
+// ------------------------------------------------------------------ équipes
+
+// Une équipe est une vraie équipe d'organisation GitHub, comme chez Classroom.
+// Son nom porte la place du groupe — « a26.5n6.01.eq1 » — parce qu'une
+// organisation n'accepte qu'un nom d'équipe donné : sans cela, deux groupes ne
+// pourraient pas avoir chacun leur « eq1 ».
+//
+// L'accès au dépôt est accordé à l'équipe, jamais à ses membres un par un.
+// Déplacer quelqu'un d'une équipe à l'autre suffit donc à changer ce qu'il
+// voit, sans toucher à aucun dépôt.
+
+async function chargerEquipes(force) {
+  const conteneur = $('equipes-liste');
+  enAttente(conteneur, 'Chargement des équipes…');
+  $('equipes-vide').hidden = true;
+  const adresse = `/api/classrooms/${encode(etat.groupe.scope)}/teams` + (force ? '?refresh=1' : '');
+  const donnees = await tenter(() => api('GET', adresse), 'Équipes');
+  if (!donnees) {
+    enEchec(conteneur, "Les équipes n'ont pas pu être chargées.");
+    return;
+  }
+  etat.equipes = donnees.teams || [];
+  etat.orphelins = donnees.unassigned || [];
+  dessinerEquipes();
+}
+
+function dessinerEquipes() {
+  const conteneur = $('equipes-liste');
+  vider(conteneur);
+  const total = (etat.groupe.students || []).length;
+  const places = total - etat.orphelins.length;
+  $('equipes-resume').textContent = etat.equipes.length === 0
+    ? `Aucune équipe · ${total} étudiant(s) dans le groupe`
+    : `${etat.equipes.length} équipe(s) · ${places} étudiant(s) sur ${total} en font partie`;
+
+  $('equipes-vide').hidden = etat.equipes.length > 0;
+  $('equipes-vide').textContent =
+    "Aucune équipe. « Nouvelle équipe » en crée une sur GitHub ; « Adopter une équipe » " +
+    "reprend une équipe déjà présente dans l'organisation.";
+
+  for (const equipe of etat.equipes) {
+    const membres = el('span', { classe: 'jetons equipe-membres' },
+      equipe.people.map((personne) => el('span', {
+        classe: 'jeton', texte: personne.full_name || '@' + personne.username,
+        title: '@' + personne.username,
+      })),
+      equipe.strangers.map((compte) => el('span', {
+        classe: 'jeton etranger', texte: '@' + compte,
+        title: "Ce compte n'est pas dans la liste du groupe.",
+      })));
+    if (equipe.people.length === 0 && equipe.strangers.length === 0) {
+      vider(membres);
+      membres.append(el('span', { classe: 'vide', texte: 'équipe vide' }));
+    }
+    conteneur.append(el('div', { classe: 'equipe-rangee' },
+      el('span', { classe: 'equipe-titre', texte: equipe.short }),
+      el('code', { classe: 'equipe-nom', texte: equipe.name }),
+      membres,
+      el('span', { classe: 'equipe-actions' },
+        el('button', { classe: 'bouton petit', type: 'button', texte: 'Composer…',
+          onclick: () => composerEquipe(equipe) }),
+        el('button', { classe: 'bouton petit', type: 'button', texte: 'Renommer…',
+          onclick: () => renommerEquipe(equipe) }),
+        el('button', { classe: 'bouton petit', type: 'button', texte: 'Supprimer…',
+          onclick: () => supprimerEquipe(equipe) }))));
+  }
+
+  const orphelins = $('equipes-orphelins');
+  vider(orphelins);
+  $('equipes-orphelins-boite').hidden = etat.orphelins.length === 0;
+  for (const personne of etat.orphelins) {
+    orphelins.append(el('button', {
+      classe: 'jeton lien', type: 'button',
+      texte: (personne.full_name || '@' + personne.username),
+      title: 'Placer dans une équipe',
+      onclick: () => placerDansUneEquipe(personne),
+    }));
+  }
+}
+
+$('equipes-recharger').addEventListener('click', () => chargerEquipes(true));
+$('equipes-nouvelle').addEventListener('click', () => nouvelleEquipe());
+$('equipes-adopter').addEventListener('click', () => adopterEquipe());
+
+// listeDeComptes rend la liste des membres d'une équipe, telle qu'on la saisit.
+function listeDeComptes(equipe) {
+  return (equipe.members || []).join(', ');
+}
+
+// choixDesEtudiants dresse des cases à cocher pour les étudiants du groupe,
+// avec ceux qui sont déjà ailleurs signalés : les déplacer est permis, mais il
+// faut le savoir.
+function choixDesEtudiants(coches, sauf) {
+  const liste = el('div', { classe: 'liste-cases' });
+  for (const personne of etat.groupe.students || []) {
+    const ailleurs = etat.equipes.find((equipe) =>
+      equipe.short !== sauf &&
+      (equipe.members || []).some((compte) => compte.toLowerCase() === personne.username.toLowerCase()));
+    liste.append(el('label', { classe: 'case' },
+      el('input', {
+        type: 'checkbox', value: personne.username,
+        checked: coches.has(personne.username.toLowerCase()),
+      }),
+      el('span', {},
+        personne.full_name ? personne.full_name + ' ' : '',
+        el('span', { classe: 'compte', texte: '@' + personne.username }),
+        ailleurs ? el('span', { classe: 'note', texte: ` — actuellement dans ${ailleurs.short}` }) : null)));
+  }
+  if ((etat.groupe.students || []).length === 0) {
+    liste.append(el('p', { classe: 'note',
+      texte: "Ce groupe n'a aucun étudiant : importez sa liste avant de composer des équipes." }));
+  }
+  return liste;
+}
+
+// comptesCoches relève les cases cochées d'un formulaire d'équipe.
+function comptesCoches(racine) {
+  return [...racine.querySelectorAll('input[type="checkbox"]')]
+    .filter((coche) => coche.checked).map((coche) => coche.value);
+}
+
+async function nouvelleEquipe() {
+  const nom = el('input', { classe: 'champ', type: 'text', placeholder: 'eq1' });
+  const coches = new Set();
+  const liste = choixDesEtudiants(coches, null);
+  const corps = el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: "Nom de l'équipe" }), nom,
+      el('span', { classe: 'aide' },
+        "Sur GitHub, l'équipe s'appellera ",
+        el('code', { texte: `${etat.groupe.scope}.eq1` }),
+        " : la place du groupe fait partie du nom, sans quoi deux groupes ne " +
+        "pourraient pas avoir chacun leur « eq1 ».")),
+    el('p', { classe: 'etiquette', texte: 'Membres' }),
+    liste);
+
+  if (!await demander('Nouvelle équipe', corps, 'Créer')) return;
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams`,
+    { name: nom.value.trim(), members: comptesCoches(liste) }), 'Équipe');
+  if (!fiche) return;
+  message(`Équipe « ${fiche.team.short} » créée.`);
+  await chargerEquipes(true);
+}
+
+async function composerEquipe(equipe) {
+  const coches = new Set((equipe.members || []).map((compte) => compte.toLowerCase()));
+  const liste = choixDesEtudiants(coches, equipe.short);
+  const corps = el('div', {},
+    el('p', { classe: 'note', texte:
+      `Composition de « ${equipe.name} ». Quelqu'un qui appartenait à une autre ` +
+      "équipe la quitte au passage : on n'est que d'une équipe à la fois." }),
+    liste);
+
+  if (!await demander(`Composer ${equipe.short}`, corps, 'Enregistrer')) return;
+  const bilan = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams/${encode(equipe.short)}/members`,
+    { usernames: comptesCoches(liste) }), 'Composition');
+  if (!bilan) return;
+  message(bilan.steps.length === 0
+    ? `« ${equipe.short} » était déjà ainsi composée.`
+    : `${bilan.steps.length} changement(s) appliqué(s) à « ${equipe.short} ».`);
+  etat.equipes = bilan.teams || [];
+  etat.orphelins = bilan.unassigned || [];
+  dessinerEquipes();
+}
+
+async function placerDansUneEquipe(personne) {
+  if (etat.equipes.length === 0) {
+    message("Ce groupe n'a aucune équipe : créez-en une d'abord.", 'alerte');
+    return;
+  }
+  const choix = el('select', { classe: 'champ' },
+    etat.equipes.map((equipe) => el('option', { value: equipe.short, texte: equipe.short })));
+  const corps = el('div', {},
+    el('p', { texte: `${personne.full_name || '@' + personne.username} rejoint :` }),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Équipe' }), choix),
+    el('p', { classe: 'note', texte:
+      "L'accès aux dépôts de l'équipe suit : rien d'autre n'est à faire." }));
+
+  if (!await demander('Placer dans une équipe', corps, 'Inscrire')) return;
+  const bilan = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams/members`,
+    { team: choix.value, usernames: [personne.username] }), 'Équipe');
+  if (!bilan) return;
+  message(`@${personne.username} rejoint « ${choix.value} ».`);
+  etat.equipes = bilan.teams || [];
+  etat.orphelins = bilan.unassigned || [];
+  dessinerEquipes();
+}
+
+async function renommerEquipe(equipe) {
+  const nom = el('input', { classe: 'champ', type: 'text', value: equipe.short });
+  const corps = el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nouveau nom' }), nom,
+      el('span', { classe: 'aide', texte:
+        "L'équipe garde ses membres et ses accès. Les dépôts déjà créés, eux, " +
+        "gardent l'ancien nom : ils portent celui qu'elle avait au moment de la distribution." })),
+    el('p', { classe: 'note' },
+      el('code', { texte: equipe.name }), ' devient ',
+      el('code', { texte: `${etat.groupe.scope}.` }),
+      el('em', { texte: 'nouveau nom' })));
+
+  if (!await demander(`Renommer ${equipe.short}`, corps, 'Renommer')) return;
+  const fiche = await tenter(() => api('PUT',
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams/${encode(equipe.short)}`,
+    { name: nom.value.trim() }), 'Renommage');
+  if (!fiche) return;
+  message(`« ${fiche.previous} » devient « ${fiche.team.short} ».`);
+  await chargerEquipes(true);
+}
+
+async function supprimerEquipe(equipe) {
+  const corps = el('div', {},
+    el('p', { texte: `Supprimer « ${equipe.name} » ?` }),
+    el('p', { classe: 'note', texte:
+      "Ses dépôts restent sur GitHub : c'est l'accès qu'elle donnait qui disparaît. " +
+      "Ses membres restent dans le groupe." }));
+
+  if (!await demander('Supprimer une équipe', corps, 'Supprimer')) return;
+  const bilan = await tenter(() => api('DELETE',
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams/${encode(equipe.short)}`),
+    'Suppression');
+  if (!bilan) return;
+  message(bilan.message);
+  await chargerEquipes(true);
+}
+
+// adopterEquipe fait entrer dans le groupe une équipe déjà présente dans
+// l'organisation, en la renommant. C'est ce qui permet de reprendre un travail
+// d'équipe commencé sans l'outil : l'équipe garde ses membres et ses accès.
+async function adopterEquipe() {
+  const libres = await tenter(() => api('GET',
+    `/api/orgs/${encode(etat.groupe.org)}/teams`), 'Équipes');
+  if (!libres) return;
+  if ((libres.teams || []).length === 0) {
+    message("Aucune équipe de l'organisation n'est libre d'un groupe.", 'alerte');
+    return;
+  }
+
+  const source = el('select', { classe: 'champ' },
+    libres.teams.map((equipe) => el('option', {
+      value: equipe.slug, texte: `${equipe.name} (${equipe.members.length} membre(s))`,
+    })));
+  const nom = el('input', { classe: 'champ', type: 'text', placeholder: 'eq1' });
+  const corps = el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: "Équipe de l'organisation" }), source),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: `Nom dans « ${etat.groupe.label} »` }), nom),
+    el('p', { classe: 'note', texte:
+      "Adopter, c'est renommer : l'équipe garde ses membres, ses accès et son " +
+      "histoire, et devient lisible pour l'outil." }));
+
+  if (!await demander('Adopter une équipe', corps, 'Adopter')) return;
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams/adopt`,
+    { slug: source.value, name: nom.value.trim() }), 'Adoption');
+  if (!fiche) return;
+  message(`« ${fiche.previous} » rejoint le groupe sous le nom « ${fiche.team.short} ».`);
+  await chargerEquipes(true);
+}
 
 // -------------------------------------------------------- réglages du groupe
 

@@ -17,6 +17,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/picker"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -60,7 +61,7 @@ func (s *Server) handleContext(writer http.ResponseWriter, _ *http.Request) {
 		permissions = append(permissions, choice{Value: value, Label: config.PermissionLabels[value]})
 	}
 	scopes := map[string]string{}
-	for _, scope := range []string{"repo", "read:org", "workflow", "delete_repo"} {
+	for _, scope := range []string{"repo", "read:org", "admin:org", "workflow", "delete_repo"} {
 		scopes[scope] = describeScope(s.deps.Client.HasScope(scope))
 	}
 
@@ -138,6 +139,7 @@ func (s *Server) handleClearCache(writer http.ResponseWriter, _ *http.Request) {
 	removed := s.deps.Cache.Clear()
 	s.mutex.Lock()
 	s.inventory = map[string][]groups.RepoInfo{}
+	s.squads = map[string][]teams.Info{}
 	s.resolvers = map[string]*identity.Resolver{}
 	s.mutex.Unlock()
 	writeJSON(writer, http.StatusOK, map[string]any{
@@ -268,6 +270,47 @@ func (s *Server) forget(org string) {
 	delete(s.inventory, org)
 	s.mutex.Unlock()
 	s.deps.Cache.Forget(cache.ReposKey(org))
+}
+
+// squadsOf charge les équipes de l'organisation : mémoire, puis cache, puis
+// API. Elles suivent le même chemin que les dépôts — elles vivent sur GitHub,
+// et rien n'en est retenu localement.
+func (s *Server) squadsOf(org string, force bool) ([]teams.Info, error) {
+	if !force {
+		s.mutex.Lock()
+		known, found := s.squads[org]
+		s.mutex.Unlock()
+		if found {
+			return known, nil
+		}
+		var cached []teams.Info
+		if s.deps.Cache.Get(cache.TeamsKey(org), cache.TeamsTTL, &cached) {
+			s.rememberSquads(org, cached)
+			return cached, nil
+		}
+	}
+
+	fetched, err := s.deps.Client.LoadOrgTeams(org, s.deps.Jobs, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.deps.Cache.Set(cache.TeamsKey(org), fetched)
+	s.rememberSquads(org, fetched)
+	return fetched, nil
+}
+
+func (s *Server) rememberSquads(org string, list []teams.Info) {
+	s.mutex.Lock()
+	s.squads[org] = list
+	s.mutex.Unlock()
+}
+
+// forgetSquads oublie les équipes d'une organisation, après une écriture.
+func (s *Server) forgetSquads(org string) {
+	s.mutex.Lock()
+	delete(s.squads, org)
+	s.mutex.Unlock()
+	s.deps.Cache.Forget(cache.TeamsKey(org))
 }
 
 // resolver retrouve, par organisation, le service qui nomme les personnes.

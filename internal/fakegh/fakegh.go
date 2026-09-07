@@ -68,6 +68,12 @@ type State struct {
 	Invitations   map[string][]invitation
 	Deleted       []string
 
+	// Équipes d'organisation, par « organisation/slug », et les dépôts qu'on
+	// leur a partagés.
+	Teams        map[string]*TeamState
+	TeamRepos    map[string]map[string]string // équipe → dépôt → droit
+	DeletedTeams []string
+
 	Blobs   map[string][]byte
 	Trees   map[string]map[string]treeEntry
 	Commits map[string]commit
@@ -112,6 +118,8 @@ func NewState() *State {
 		Templates:      map[string]bool{"acme/modele-tp": true},
 		Collaborators:  map[string]map[string]string{},
 		Invitations:    map[string][]invitation{},
+		Teams:          map[string]*TeamState{},
+		TeamRepos:      map[string]map[string]string{},
 		Blobs:          map[string][]byte{},
 		Trees:          map[string]map[string]treeEntry{},
 		Commits:        map[string]commit{},
@@ -443,6 +451,9 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		s.send(writer, 200, s.repoPayload(repo))
 		return
 	}
+	if s.teamsGet(writer, request, path) {
+		return
+	}
 	s.notFound(writer)
 }
 
@@ -558,6 +569,9 @@ func (s *Server) post(writer http.ResponseWriter, request *http.Request, path st
 		s.send(writer, 201, map[string]any{"ref": ref, "object": map[string]any{"sha": sha}})
 		return
 	}
+	if s.teamsPost(writer, path, body) {
+		return
+	}
 	s.notFound(writer)
 }
 
@@ -605,6 +619,9 @@ func (s *Server) put(writer http.ResponseWriter, request *http.Request, path str
 			"id":      item.ID,
 			"invitee": map[string]any{"login": login},
 		})
+		return
+	}
+	if s.teamsPut(writer, path, body) {
 		return
 	}
 	s.notFound(writer)
@@ -661,6 +678,9 @@ func (s *Server) patch(writer http.ResponseWriter, request *http.Request, path s
 		s.send(writer, 200, s.repoPayload(repo))
 		return
 	}
+	if s.teamsPatch(writer, path, body) {
+		return
+	}
 	s.notFound(writer)
 }
 
@@ -699,6 +719,9 @@ func (s *Server) delete(writer http.ResponseWriter, request *http.Request, path 
 		writer.WriteHeader(204)
 		return
 	}
+	if s.teamsDelete(writer, path) {
+		return
+	}
 	s.notFound(writer)
 }
 
@@ -727,6 +750,16 @@ func (s *Server) repoPayload(repo *RepoState) map[string]any {
 
 // sendPage renvoie une page de dépôts avec l'en-tête Link attendu par le client.
 func (s *Server) sendPage(writer http.ResponseWriter, request *http.Request, repos []*RepoState) {
+	payload := make([]map[string]any, 0, len(repos))
+	for _, repo := range repos {
+		payload = append(payload, s.repoPayload(repo))
+	}
+	s.sendPaged(writer, request, payload)
+}
+
+// sendPaged découpe une collection quelconque en pages et pose l'en-tête Link.
+func (s *Server) sendPaged(writer http.ResponseWriter, request *http.Request,
+	items []map[string]any) {
 	perPage := s.State.PerPage
 	if perPage <= 0 {
 		perPage, _ = strconv.Atoi(request.URL.Query().Get("per_page"))
@@ -740,17 +773,13 @@ func (s *Server) sendPage(writer http.ResponseWriter, request *http.Request, rep
 	}
 	start := (page - 1) * perPage
 	end := start + perPage
-	if start > len(repos) {
-		start = len(repos)
+	if start > len(items) {
+		start = len(items)
 	}
-	if end > len(repos) {
-		end = len(repos)
+	if end > len(items) {
+		end = len(items)
 	}
-	payload := make([]map[string]any, 0, end-start)
-	for _, repo := range repos[start:end] {
-		payload = append(payload, s.repoPayload(repo))
-	}
-	if end < len(repos) {
+	if end < len(items) {
 		next := *request.URL
 		query := next.Query()
 		query.Set("page", strconv.Itoa(page+1))
@@ -759,7 +788,7 @@ func (s *Server) sendPage(writer http.ResponseWriter, request *http.Request, rep
 		writer.Header().Set("Link",
 			fmt.Sprintf("<%s%s>; rel=\"next\"", s.Server.URL, next.RequestURI()))
 	}
-	s.send(writer, 200, payload)
+	s.send(writer, 200, items[start:end])
 }
 
 func (s *Server) send(writer http.ResponseWriter, status int, payload any) {

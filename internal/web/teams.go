@@ -1,0 +1,435 @@
+package web
+
+import (
+	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+)
+
+// Les équipes d'un groupe. Elles vivent sur GitHub — ce sont de vraies équipes
+// d'organisation —, et rien n'en est retenu localement : leur nom dit à quel
+// groupe elles appartiennent, leur composition dit qui en est. Cette façade ne
+// fait que traduire des requêtes en écritures ; ce qui est permis, ce qui se
+// heurte, ce qui doit précéder quoi, tout cela se décide dans « teams ».
+
+// teamsOf résout le groupe demandé et ses équipes.
+func (s *Server) teamsOf(request *http.Request) (classroom.Classroom, []teams.Team, error) {
+	cours, err := s.place(request)
+	if err != nil {
+		return cours, nil, err
+	}
+	if cours.Legacy() {
+		return cours, nil, valid.Errorf(
+			"« %s » suit une nomenclature dépassée : ses équipes ne peuvent pas être nommées. "+
+				"Renommez d'abord ses dépôts.", cours.Label())
+	}
+	infos, err := s.squadsOf(cours.Org, request.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		return cours, nil, err
+	}
+	return cours, cours.Teams(infos), nil
+}
+
+// teamsIn renvoie les équipes d'un groupe sans exiger qu'il en ait. Un groupe
+// hérité n'en a jamais : il n'a pas de place où les nommer.
+func (s *Server) teamsIn(cours classroom.Classroom) ([]teams.Team, error) {
+	if cours.Legacy() {
+		return nil, nil
+	}
+	infos, err := s.squadsOf(cours.Org, false)
+	if err != nil {
+		return nil, err
+	}
+	return cours.Teams(infos), nil
+}
+
+// handleTeams liste les équipes du groupe, leurs membres nommés, et les
+// étudiants qu'aucune équipe n'accueille encore.
+func (s *Server) handleTeams(writer http.ResponseWriter, request *http.Request) {
+	cours, equipes, err := s.teamsOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"teams": cours.Describe(equipes), "unassigned": cours.Unassigned(equipes),
+		"scope": cours.Scope(),
+	})
+}
+
+// handleLooseTeams propose les équipes de l'organisation qui ne relèvent
+// d'aucun groupe : celles qu'on peut adopter.
+func (s *Server) handleLooseTeams(writer http.ResponseWriter, request *http.Request) {
+	org, err := valid.Login(request.PathValue("org"), "Organisation")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	infos, err := s.squadsOf(org, request.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	libres := teams.Loose(infos)
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"teams": libres, "total": len(infos),
+	})
+}
+
+// teamInput décrit une équipe à créer, avec sa composition initiale.
+type teamInput struct {
+	Name    string   `json:"name"`
+	Members []string `json:"members"`
+}
+
+// handleCreateTeam crée une équipe du groupe sur GitHub et y inscrit ses
+// membres. L'équipe est créée d'abord, la composition ensuite : une inscription
+// qui échoue laisse une équipe vide, qu'on complète — jamais une équipe qu'on
+// ne saurait pas retrouver.
+func (s *Server) handleCreateTeam(writer http.ResponseWriter, request *http.Request) {
+	cours, equipes, err := s.teamsOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body teamInput
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	short, err := teams.ShortName(body.Name)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if err := teams.Available(equipes, short); err != nil {
+		fail(writer, err)
+		return
+	}
+	membres, err := s.members(cours, body.Members)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+
+	cree, err := s.deps.Client.CreateTeam(cours.Org, cours.TeamName(short),
+		teams.Describe(cours.Session, cours.Course, cours.Group, short), teams.Privacy)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	s.forgetSquads(cours.Org)
+
+	neuve, _ := teams.Read(*cree)
+	etapes, err := teams.PlanAssign(append(equipes, neuve), short, membres)
+	if err != nil && len(membres) > 0 {
+		fail(writer, err)
+		return
+	}
+	applied, echecs := s.applyTeamSteps(cours.Org, etapes)
+	writeJSON(writer, http.StatusCreated, map[string]any{
+		"team": neuve, "joined": applied, "failed": echecs,
+	})
+}
+
+// handleRenameTeam renomme une équipe du groupe. Le nom court change ; la place,
+// elle, ne bouge pas — une équipe ne change pas de groupe.
+func (s *Server) handleRenameTeam(writer http.ResponseWriter, request *http.Request) {
+	cours, equipes, err := s.teamsOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	equipe, cible, err := teams.PlanRename(equipes, request.PathValue("team"), body.Name)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	parts, _ := teams.Read(teams.Info{Name: cible})
+	renommee, err := s.deps.Client.UpdateTeam(cours.Org, equipe.Slug, cible,
+		teams.Describe(cours.Session, cours.Course, cours.Group, parts.Short))
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	s.forgetSquads(cours.Org)
+	lue, _ := teams.Read(*renommee)
+	lue.Members = equipe.Members
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"team": lue, "previous": equipe.Short,
+	})
+}
+
+// handleDeleteTeam supprime une équipe. Ses dépôts restent : c'est l'accès qui
+// disparaît, et le travail qu'elle a rendu reste lisible sous son nom.
+func (s *Server) handleDeleteTeam(writer http.ResponseWriter, request *http.Request) {
+	cours, equipes, err := s.teamsOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	equipe, trouvee := teams.Find(equipes, request.PathValue("team"))
+	if !trouvee {
+		fail(writer, valid.Errorf("Aucune équipe « %s » dans ce groupe.",
+			strings.TrimSpace(request.PathValue("team"))))
+		return
+	}
+	if err := s.deps.Client.DeleteTeam(cours.Org, equipe.Slug); err != nil {
+		fail(writer, err)
+		return
+	}
+	s.forgetSquads(cours.Org)
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"team": equipe.Short,
+		"message": "« " + equipe.Label() + " » supprimée. Ses dépôts restent sur GitHub ; " +
+			"seul l'accès qu'elle donnait a disparu.",
+	})
+}
+
+// handleAdoptTeam fait entrer dans le groupe une équipe déjà présente dans
+// l'organisation, en la renommant. Elle garde ses membres et ses accès : c'est
+// ce qui permet de reprendre un travail d'équipe commencé sans l'outil.
+func (s *Server) handleAdoptTeam(writer http.ResponseWriter, request *http.Request) {
+	cours, equipes, err := s.teamsOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body struct {
+		Slug string `json:"slug"`
+		Name string `json:"name"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	infos, err := s.squadsOf(cours.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	source, cible, err := teams.PlanAdopt(equipes, infos, body.Slug, body.Name,
+		cours.Session, cours.Course, cours.Group)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	parts, _ := teams.Read(teams.Info{Name: cible})
+	adoptee, err := s.deps.Client.UpdateTeam(cours.Org, source.Slug, cible,
+		teams.Describe(cours.Session, cours.Course, cours.Group, parts.Short))
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	s.forgetSquads(cours.Org)
+	lue, _ := teams.Read(*adoptee)
+	lue.Members = source.Members
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"team": lue, "previous": source.Name,
+	})
+}
+
+// handleAssignTeam inscrit des personnes dans une équipe. Celles qui étaient
+// dans une autre la quittent : c'est le déplacement d'une équipe à l'autre, et
+// il ne demande rien de plus que de dire où l'on va.
+func (s *Server) handleAssignTeam(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Team      string   `json:"team"`
+		Usernames []string `json:"usernames"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	s.applyMembership(writer, request, body.Team, body.Usernames, teams.PlanAssign)
+}
+
+// handleComposeTeam donne à une équipe la composition exacte demandée.
+func (s *Server) handleComposeTeam(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Usernames []string `json:"usernames"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	s.applyMembership(writer, request, request.PathValue("team"), body.Usernames,
+		teams.PlanCompose)
+}
+
+// handleLeaveTeam retire une personne de son équipe. Elle reste du groupe :
+// n'être dans aucune équipe n'est pas en être exclu.
+func (s *Server) handleLeaveTeam(writer http.ResponseWriter, request *http.Request) {
+	s.applyMembership(writer, request, request.PathValue("team"),
+		[]string{request.PathValue("login")}, teams.PlanRemove)
+}
+
+// applyMembership compose puis applique un changement de composition. Le plan
+// est établi en entier avant la première écriture : une composition impossible
+// est refusée plutôt qu'appliquée à moitié.
+func (s *Server) applyMembership(writer http.ResponseWriter, request *http.Request,
+	target string, usernames []string,
+	planifier func([]teams.Team, string, []string) ([]teams.Step, error)) {
+	cours, equipes, err := s.teamsOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	membres, err := s.members(cours, usernames)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	etapes, err := planifier(equipes, target, membres)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	applied, echecs := s.applyTeamSteps(cours.Org, etapes)
+	if len(echecs) > 0 {
+		writeJSON(writer, http.StatusBadGateway, map[string]any{
+			"error": "Composition partiellement appliquée : " + strings.Join(echecs, " ; "),
+			"steps": applied,
+		})
+		return
+	}
+	infos, err := s.squadsOf(cours.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	apres := cours.Teams(infos)
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"steps": applied, "teams": cours.Describe(apres),
+		"unassigned": cours.Unassigned(apres),
+	})
+}
+
+// applyTeamSteps exécute les écritures d'une composition et renvoie ce qui a
+// été fait, puis ce qui a échoué.
+func (s *Server) applyTeamSteps(org string, etapes []teams.Step) ([]teams.Step, []string) {
+	applied := make([]teams.Step, 0, len(etapes))
+	var echecs []string
+	for _, etape := range etapes {
+		var err error
+		if etape.Kind == teams.Join {
+			err = s.deps.Client.AddTeamMember(org, etape.Slug, etape.Username, teams.MemberRole)
+		} else {
+			err = s.deps.Client.RemoveTeamMember(org, etape.Slug, etape.Username)
+		}
+		if err != nil {
+			echecs = append(echecs, "@"+etape.Username+" ("+etape.Kind+") : "+err.Error())
+			continue
+		}
+		applied = append(applied, etape)
+	}
+	if len(applied) > 0 {
+		s.forgetSquads(org)
+	}
+	return applied, echecs
+}
+
+// members vérifie que les comptes donnés sont bien des étudiants du groupe.
+// Inscrire quelqu'un d'étranger au groupe dans une de ses équipes lui donnerait
+// accès à des dépôts sans qu'aucune liste ne le mentionne.
+func (s *Server) members(cours classroom.Classroom, usernames []string) ([]string, error) {
+	propres := make([]string, 0, len(usernames))
+	for _, brut := range usernames {
+		if strings.TrimSpace(brut) == "" {
+			continue
+		}
+		username, err := valid.Login(brut, "Compte GitHub")
+		if err != nil {
+			return nil, err
+		}
+		personne, inscrit := cours.Find(username)
+		if !inscrit {
+			return nil, valid.Errorf(
+				"@%s n'est pas dans « %s » : inscrivez-le au groupe avant de lui donner une équipe.",
+				username, cours.Label())
+		}
+		propres = append(propres, personne.Username)
+	}
+	return propres, nil
+}
+
+// ------------------------------------------------- accès des dépôts d'équipe
+
+// handleShareAssignment redonne à chaque équipe l'accès au dépôt qui porte son
+// nom. C'est ce qui achève l'adoption d'un travail fait en équipe avant
+// l'outil : les dépôts sont déjà là et bien nommés, mais rien ne les a jamais
+// partagés avec l'équipe.
+func (s *Server) handleShareAssignment(writer http.ResponseWriter, request *http.Request) {
+	cours, id, repos, err := s.assignmentOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	equipes, err := s.teamsIn(cours)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	droit := cours.Settings(cours.ShortName(id)).Permission
+
+	type partage struct {
+		Repo string
+		Slug string
+		Team string
+	}
+	var partages []partage
+	for _, depot := range cours.Repos(id, repos) {
+		equipe, appartient := cours.TeamOf(depot.Name, equipes)
+		if !appartient {
+			continue
+		}
+		partages = append(partages, partage{Repo: depot.Name, Slug: equipe.Slug, Team: equipe.Short})
+	}
+	if len(partages) == 0 {
+		fail(writer, valid.Errorf(
+			"Aucun dépôt de « %s » ne porte le nom d'une équipe du groupe.", cours.ShortName(id)))
+		return
+	}
+
+	label := "Partage de « " + cours.ShortName(id) + " » avec " +
+		itoa(len(partages)) + " équipe(s)"
+	job := s.jobs.Start("partage", label, func(job *Job) (any, error) {
+		faits, echecs := 0, 0
+		for index, item := range partages {
+			if job.Canceled() {
+				break
+			}
+			err := s.deps.Client.AddTeamRepo(cours.Org, item.Slug, cours.Org, item.Repo, droit)
+			if err != nil {
+				echecs++
+				job.Line(item.Repo+" : échec — "+err.Error(), map[string]string{"status": "échec"})
+			} else {
+				faits++
+				job.Line(item.Repo+" → équipe "+item.Team, map[string]string{"status": "partagé"})
+			}
+			job.Progress(index+1, len(partages), item.Repo)
+		}
+		return map[string]any{"shared": faits, "failed": echecs, "permission": droit}, nil
+	})
+	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
+// ------------------------------------------------------------------ affichage
+
+// teamNames rend les noms courts d'équipes, triés, pour un message.
+func teamNames(list []teams.Team) []string {
+	noms := teams.Names(list)
+	sort.Strings(noms)
+	return noms
+}

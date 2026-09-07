@@ -14,6 +14,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -27,6 +28,10 @@ type Repo struct {
 	ID         string
 	Name       string
 	URL        string
+	// Team nomme l'équipe à qui le dépôt appartient ; vide pour un travail
+	// individuel. Un dépôt d'équipe figure chez chacun de ses membres : c'est
+	// bien leur travail, même s'il ne porte pas leur nom.
+	Team string
 	// PushedAt est la date seule — « 2026-08-21 » —, vide si rien n'y a été envoyé.
 	PushedAt string
 }
@@ -43,19 +48,36 @@ type Row struct {
 // Build croise les étudiants du groupe avec les dépôts de l'organisation :
 // c'est l'équivalent du « a accepté le devoir » de GitHub Classroom, déduit des
 // dépôts existants plutôt que d'une invitation.
-func Build(cours classroom.Classroom, repos []groups.RepoInfo) []Row {
+//
+// Les équipes du groupe entrent dans le compte : le dépôt d'une équipe est
+// celui de chacun de ses membres. Sans elles, un travail fait en équipe
+// laisserait tout le monde à « aucun dépôt », alors que tout le monde en a un.
+func Build(cours classroom.Classroom, repos []groups.RepoInfo,
+	equipes []teams.Team) []Row {
 	parEtudiant := map[string][]Repo{}
-	for _, travail := range cours.Assignments(repos) {
+	ajouter := func(username string, depot Repo) {
+		cle := strings.ToLower(username)
+		parEtudiant[cle] = append(parEtudiant[cle], depot)
+	}
+
+	for _, travail := range cours.Assignments(repos, equipes) {
 		for _, depot := range cours.Repos(travail.ID, repos) {
+			ligne := Repo{
+				Assignment: travail.Name, ID: travail.ID, Name: depot.Name,
+				URL: depot.URL, PushedAt: depot.PushedAt,
+			}
+			if equipe, appartient := cours.TeamOf(depot.Name, equipes); appartient {
+				ligne.Team = equipe.Short
+				for _, membre := range equipe.Members {
+					ajouter(membre, ligne)
+				}
+				continue
+			}
 			student, inscrit := cours.StudentOf(depot.Name)
 			if !inscrit {
 				continue
 			}
-			cle := strings.ToLower(student.Username)
-			parEtudiant[cle] = append(parEtudiant[cle], Repo{
-				Assignment: travail.Name, ID: travail.ID, Name: depot.Name,
-				URL: depot.URL, PushedAt: depot.PushedAt,
-			})
+			ajouter(student.Username, ligne)
 		}
 	}
 

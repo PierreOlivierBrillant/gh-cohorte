@@ -79,7 +79,9 @@ func (s *Server) migrationPlan(request *http.Request, body migrationInput) (
 
 	var lignes []migrationRow
 	vises := map[string]string{} // nom visé → dépôt qui le vise déjà
-	for _, travail := range cours.Assignments(repos) {
+	// Une migration ne renomme que les dépôts d'étudiants : ceux d'une équipe
+	// sont nommés d'après elle, et un groupe hérité n'en a aucune.
+	for _, travail := range cours.Assignments(repos, nil) {
 		nom, err := naming.Fragment(cours.ShortName(travail.ID), "Travail")
 		if err != nil {
 			nom = ""

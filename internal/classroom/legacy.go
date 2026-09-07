@@ -70,7 +70,7 @@ func (c Classroom) legacyAssignments(repos []groups.RepoInfo) []Assignment {
 		if group.Len() == 0 {
 			continue
 		}
-		travail := Assignment{ID: id, Name: c.ShortName(id), Repos: group.Len()}
+		travail := Assignment{ID: id, Name: c.ShortName(id), Repos: group.Len(), Kind: Individual}
 		for _, repo := range group.Repos {
 			if c.Has(repo.Suffix) {
 				travail.Students++
@@ -99,7 +99,7 @@ func (c Classroom) patternAssignments(gabarit Pattern, repos []groups.RepoInfo) 
 		cle := strings.ToLower(travail)
 		trouve, deja := parNom[cle]
 		if !deja {
-			trouve = &Assignment{ID: travail, Name: travail}
+			trouve = &Assignment{ID: travail, Name: travail, Kind: Individual}
 			parNom[cle] = trouve
 		}
 		trouve.Repos++
@@ -157,7 +157,7 @@ func (c Classroom) dottedAssignments(repos []groups.RepoInfo) []Assignment {
 		cle := strings.ToLower(travail)
 		trouve, deja := parNom[cle]
 		if !deja {
-			trouve = &Assignment{ID: c.AssignmentID(travail), Name: travail}
+			trouve = &Assignment{ID: c.AssignmentID(travail), Name: travail, Kind: Individual}
 			parNom[cle] = trouve
 		}
 		trouve.Repos++
