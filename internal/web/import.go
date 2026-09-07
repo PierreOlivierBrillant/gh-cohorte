@@ -35,6 +35,8 @@ type importInput struct {
 	// NamedOnly laisse où ils sont les dépôts dont on ne connaît pas la
 	// personne.
 	NamedOnly bool `json:"named_only"`
+	// Only nomme les dépôts retenus. Vide, le travail est repris entier.
+	Only []string `json:"only"`
 	// People remplace la liste quand un rapprochement a été corrigé à l'écran.
 	// Sa présence dit aussi que plus rien ne doit être deviné : le jugement
 	// rendu tient, y compris quand il consiste à ne rapprocher personne.
@@ -60,6 +62,65 @@ func (s *Server) handleForeign(writer http.ResponseWriter, request *http.Request
 	})
 }
 
+// foreignRepo est un dépôt qu'on peut retenir ou écarter, tel que l'écran le
+// montre : son nom, où le lire sur GitHub, sa dernière trace de vie, et qui est
+// derrière lui quand on le sait déjà.
+type foreignRepo struct {
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Private  bool   `json:"private"`
+	PushedAt string `json:"pushed_at"`
+	// Login est le compte que les accès désignent, Student le nom complet que
+	// l'organisation lui donne. Savoir cela avant de cocher change ce qu'on
+	// coche — et savoir combien de dépôts sont déjà nommés dit si la liste des
+	// étudiants a encore quelque chose à apprendre.
+	Login   string `json:"login"`
+	Student string `json:"student"`
+}
+
+// handleForeignRepos énumère les dépôts d'un travail à reprendre. L'inventaire
+// est déjà en main : c'est une lecture, pas une requête de plus.
+func (s *Server) handleForeignRepos(writer http.ResponseWriter, request *http.Request) {
+	org, body, err := s.importRequest(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	repos, _, err := s.repos(org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	groupe := groups.Build(body.Prefix, repos)
+	// Les accès se lisent ici plutôt qu'à la vérification : ils coûtent le même
+	// prix, le cache les garde, et ils disent dès maintenant qui est derrière
+	// chaque dépôt — ce qui est justement ce qu'on regarde pour cocher.
+	proprietaires := s.owners(org, body.Prefix, nil, repos)
+	connus := s.connus(org)
+
+	lignes := make([]foreignRepo, 0, groupe.Len())
+	nommes := 0
+	for _, depot := range groupe.Repos {
+		compte := depot.Suffix
+		if login := proprietaires[depot.Name]; login != "" {
+			compte = login
+		}
+		nom := connus[strings.ToLower(compte)]
+		if nom != "" {
+			nommes++
+		}
+		lignes = append(lignes, foreignRepo{
+			Name: depot.Name, URL: s.urlOf(org, depot),
+			Private: depot.Private, PushedAt: depot.PushedAt,
+			Login: compte, Student: nom,
+		})
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"prefix": groupe.Prefix, "repos": lignes,
+		"total": len(lignes), "known": nommes,
+	})
+}
+
 // importPlan compose ce qu'une importation ferait.
 //
 // La liste vient du fichier, ou de ce que l'interface renvoie après correction :
@@ -82,17 +143,17 @@ func (s *Server) importPlan(org string, body importInput) (
 	}
 	// Qui a accès à quoi se lit avant tout le reste : c'est ce qui dit le
 	// compte de chaque dépôt, et donc où finit le travail dans son nom.
-	proprietaires := s.owners(org, body.Prefix, repos)
+	proprietaires := s.owners(org, body.Prefix, body.Only, repos)
 	demande := classroom.ImportRequest{
 		Prefix: body.Prefix, Name: body.Name, Entries: entrees, Guess: deviner,
-		NamedOnly: body.NamedOnly, Owners: proprietaires,
+		NamedOnly: body.NamedOnly, Owners: proprietaires, Known: s.connus(org),
+		Only: body.Only,
 	}
 	if deviner {
-		// Ce que l'organisation sait déjà et les profils GitHub ne servent
-		// qu'à la première lecture. Une fois qu'on a corrigé à l'écran, le
-		// jugement rendu doit tenir — y compris quand il consiste à ne
-		// rapprocher personne, ce qu'un nom connu réattribuerait aussitôt.
-		demande.Known = s.connus(org)
+		// Les profils GitHub ne servent qu'à la première lecture : après une
+		// correction, plus rien n'est deviné. Ce que l'organisation sait, lui,
+		// est toujours donné — il confirme les comptes, et le plan sait ne
+		// plus s'en servir pour rapprocher.
 		demande.Profiles = s.profiles(org, body.Prefix, repos, proprietaires)
 	}
 	plan, err := classroom.PlanImport(arrivee, demande, repos)
@@ -128,14 +189,27 @@ func (s *Server) connus(org string) map[string]string {
 // owners relève, pour les dépôts d'un préfixe, le compte GitHub que leurs accès
 // désignent. Un appel par dépôt la première fois, rien ensuite : le cache les
 // retient, et l'écran les redemande à chaque correction de rapprochement.
-func (s *Server) owners(org, prefix string, repos []groups.RepoInfo) map[string]string {
+func (s *Server) owners(org, prefix string, seulement []string,
+	repos []groups.RepoInfo) map[string]string {
 	groupe := groups.Build(prefix, repos)
 	if groupe.Len() == 0 {
 		return nil
 	}
+	// Un dépôt écarté ne sera ni repris ni rapproché : lire ses accès coûterait
+	// une requête pour rien.
+	retenus := map[string]bool{}
+	for _, nom := range seulement {
+		retenus[strings.ToLower(strings.TrimSpace(nom))] = true
+	}
 	noms := make([]string, 0, groupe.Len())
 	for _, depot := range groupe.Repos {
+		if len(retenus) > 0 && !retenus[strings.ToLower(depot.Name)] {
+			continue
+		}
 		noms = append(noms, depot.Name)
+	}
+	if len(noms) == 0 {
+		return nil
 	}
 	trouves := s.resolver(org).Owners(org, noms, s.deps.Viewer, nil)
 	comptes := make(map[string]string, len(trouves))
@@ -170,7 +244,10 @@ func (s *Server) entries(body importInput) ([]roster.Entry, bool, error) {
 		}
 		liste = lue
 	default:
-		return nil, false, valid.Errorf("Aucune liste d'étudiants n'a été fournie.")
+		// Pas de liste : l'organisation connaît peut-être déjà tout le monde,
+		// et une liste n'apprendrait alors rien. Ce que le registre ignore
+		// restera sans nom, ce que la revue dira.
+		return nil, true, nil
 	}
 	if len(liste.Entries) == 0 {
 		return nil, false, valid.Errorf("Aucun étudiant dans la liste fournie.")

@@ -110,13 +110,44 @@
         </div>
       </li>
 
-      <li class="etape" data-etape="liste">
+      <!-- Un travail ne se reprend pas toujours en entier : un dépôt d'essai,
+           celui d'une personne qui a abandonné, celui d'une équipe qui remettra
+           ailleurs. Tout est coché — écarter est le geste rare. -->
+      <li class="etape" data-etape="depots">
         <button type="button" class="etape-tete">
           <span class="etape-num">2</span>
+          <span class="etape-titre">Les dépôts à reprendre</span>
+          <span class="etape-resume" id="resume-depots"></span>
+        </button>
+        <div class="etape-corps">
+          <div class="barre-filtre">
+            <label class="case"><input type="checkbox" id="import-depots-tout" checked>
+              <span id="import-depots-compte"></span></label>
+          </div>
+          <div class="tableau-defile">
+            <table class="tableau" id="import-depots">
+              <thead><tr>
+                <th class="etroit"></th><th>Dépôt</th><th>Étudiant</th>
+                <th>Dernier envoi</th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="actions">
+            <button type="button" id="import-depots-suite" class="bouton vert">
+              Continuer</button>
+          </div>
+        </div>
+      </li>
+
+      <li class="etape" data-etape="liste">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">3</span>
           <span class="etape-titre">La liste des étudiants</span>
           <span class="etape-resume" id="resume-liste"></span>
         </button>
         <div class="etape-corps">
+          <p class="note" id="import-deja-nommes"></p>
           <details id="import-aide">
             <summary>Où prendre cette liste dans Omnivox ?</summary>
             <pre class="aide-omnivox" id="import-aide-texte"></pre>
@@ -126,12 +157,20 @@
             <input type="hidden" id="import-liste">
             <span class="depot-texte"></span>
           </div>
+          <!-- La liste n'apprend rien quand l'organisation nomme déjà tout le
+               monde : la sauter est alors le geste juste, pas un raccourci. -->
+          <div class="actions">
+            <button type="button" id="import-liste-passer" class="bouton">
+              Passer, sans liste</button>
+            <span class="note">Les dépôts que rien ne nomme garderont le compte
+              qu'ils portent.</span>
+          </div>
         </div>
       </li>
 
       <li class="etape" data-etape="place">
         <button type="button" class="etape-tete">
-          <span class="etape-num">3</span>
+          <span class="etape-num">4</span>
           <span class="etape-titre">La place d'arrivée</span>
           <span class="etape-resume" id="resume-place"></span>
         </button>
@@ -164,7 +203,7 @@
 
       <li class="etape" data-etape="verifier">
         <button type="button" class="etape-tete">
-          <span class="etape-num">4</span>
+          <span class="etape-num">5</span>
           <span class="etape-titre">Vérifier les rapprochements</span>
           <span class="etape-resume" id="resume-verifier"></span>
         </button>
@@ -207,7 +246,7 @@
            fois les rapprochements arrêtés, pas à chaque correction. -->
       <li class="etape" data-etape="noms">
         <button type="button" class="etape-tete">
-          <span class="etape-num">5</span>
+          <span class="etape-num">6</span>
           <span class="etape-titre">Les noms que les dépôts prendront</span>
           <span class="etape-resume" id="resume-noms"></span>
         </button>
@@ -232,7 +271,7 @@
 
       <li class="etape" data-etape="journal">
         <button type="button" class="etape-tete">
-          <span class="etape-num">6</span>
+          <span class="etape-num">7</span>
           <span class="etape-titre">Journal</span>
           <span class="etape-resume" id="resume-journal"></span>
         </button>

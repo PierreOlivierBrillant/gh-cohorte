@@ -473,3 +473,156 @@ func TestImportNeDefaitPasUnChoixManuelAvecLeRegistre(t *testing.T) {
 		}
 	}
 }
+
+// Un compte que l'organisation nomme n'est pas un compte douteux, même si rien
+// ne donne accès au dépôt : il vient du registre, donc il existe et il désigne
+// quelqu'un. Le signaler ferait douter de ce qui est écrit.
+func TestImportNeDouteJamaisDunCompteQueLeRegistreNomme(t *testing.T) {
+	inventaire := depots("tp1-felixb", "tp1-lyonnais", "tp1-inconnu-x")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+		// Aucun accès n'est connu — la carte est vide.
+		Owners: nil,
+		Known: map[string]string{
+			"felixb":   "Félix Bourassa",
+			"lyonnais": "Étienne Lyonnais",
+		},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(plan.Unconfirmed) != 1 || plan.Unconfirmed[0] != "tp1-inconnu-x" {
+		t.Fatalf("non confirmés = %v : seul le compte que rien ne connaît doit l'être",
+			plan.Unconfirmed)
+	}
+}
+
+// Le doute reste entier quand le compte ne vient que du nom : c'est le cas qui
+// a motivé la lecture des accès, et un nom trouvé par ressemblance ne le lève
+// pas.
+func TestImportDouteEncoreDunCompteQueSeulLeNomDonne(t *testing.T) {
+	inventaire := depots("tp1-felixbourassa")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	// Le rapprochement a bien trouvé quelqu'un…
+	if len(plan.Pairings) != 1 || !plan.Pairings[0].Found() {
+		t.Fatalf("rapprochements = %+v", plan.Pairings)
+	}
+	// … et le compte reste pourtant à confirmer : il n'est lu que dans le nom.
+	if len(plan.Unconfirmed) != 1 {
+		t.Fatalf("non confirmés = %v", plan.Unconfirmed)
+	}
+}
+
+// Un travail ne se reprend pas toujours en entier : un dépôt d'essai, celui
+// d'une personne qui a abandonné. Ce qu'on décoche est écarté pour de bon.
+func TestImportNeReprendQueLesDepotsRetenus(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-felixbourassa", "tp1-essai")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+		Only: []string{"tp1-ladamlarocque", "tp1-felixbourassa"},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(plan.Moves) != 2 {
+		t.Fatalf("renommages = %+v", plan.Moves)
+	}
+	for _, ligne := range plan.Moves {
+		if strings.Contains(ligne.Repo, "essai") {
+			t.Fatalf("un dépôt écarté a été repris : %+v", plan.Moves)
+		}
+	}
+	// Il ne se rapproche pas non plus : il n'est plus de la partie.
+	for _, trouve := range plan.Pairings {
+		if trouve.Login == "essai" {
+			t.Fatalf("un dépôt écarté a été rapproché : %+v", trouve)
+		}
+	}
+}
+
+// Une sélection vide n'en est pas une : le travail est repris entier.
+func TestImportSansSelectionReprendToutLeTravail(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-felixbourassa")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true, Only: nil,
+	}, inventaire)
+	if err != nil || len(plan.Moves) != 2 {
+		t.Fatalf("plan = %+v, err = %v", plan, err)
+	}
+}
+
+// Tout décocher n'écrit rien, et le dit.
+func TestImportRefuseUneSelectionQuiNeGardeRien(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-felixbourassa")
+
+	_, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+		Only: []string{"tp1-personne-de-ce-nom"},
+	}, inventaire)
+	if err == nil || !strings.Contains(err.Error(), "Aucun dépôt retenu") {
+		t.Fatalf("erreur = %v", err)
+	}
+}
+
+// Les dépôts écartés ne comptent pas dans les travaux qu'un préfixe cachait :
+// ne garder que « kickmyb-firebase » ne doit plus poser de question.
+func TestImportSelectionResoutUnPrefixeFourreTout(t *testing.T) {
+	inventaire := depots(
+		"kickmyb-firebase-walid", "kickmyb-firebase-felixb", "kickmyb-android-lyonnais")
+	acces := map[string]string{
+		"kickmyb-firebase-walid":   "walid",
+		"kickmyb-firebase-felixb":  "felixb",
+		"kickmyb-android-lyonnais": "lyonnais",
+	}
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "kickmyb", Entries: inscrits(), Guess: true, Owners: acces,
+		Only: []string{"kickmyb-firebase-walid", "kickmyb-firebase-felixb"},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if plan.Divided() {
+		t.Fatalf("un seul travail reste sélectionné : %+v", plan.Splits)
+	}
+	if plan.Prefix != "kickmyb-firebase" || len(plan.Moves) != 2 {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
+
+// Quand l'organisation connaît déjà tout le monde, la liste d'Omnivox n'apprend
+// rien : la reprise doit pouvoir s'en passer.
+func TestImportSansListeQuandLOrganisationConnaitDeja(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-felixb")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: nil, Guess: true,
+		Known: map[string]string{
+			"ladamlarocque": "Laurent Adam-Larocque",
+			"felixb":        "Félix Bourassa",
+		},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	cibles := map[string]string{}
+	for _, ligne := range plan.Moves {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if cibles["tp1-ladamlarocque"] != "a26.5n6.1030.tp1.laurent-adam-larocque" ||
+		cibles["tp1-felixb"] != "a26.5n6.1030.tp1.felix-bourassa" {
+		t.Fatalf("cibles = %v", cibles)
+	}
+	if len(plan.Unmatched) != 0 || len(plan.Absent) != 0 {
+		t.Fatalf("plan = %+v", plan)
+	}
+}
