@@ -171,8 +171,14 @@
         <div class="etape-corps">
           <div id="import-avis" class="avis-pile"></div>
           <div class="barre-filtre">
-            <label class="case"><input type="checkbox" id="import-filtre">
-              <span>N'afficher que ce qui reste à vérifier</span></label>
+            <label class="ligne-champ">
+              <span class="note">Afficher</span>
+              <select id="import-filtre" class="champ">
+                <option value="tout">tous les dépôts</option>
+                <option value="verifier">ce qui reste à vérifier</option>
+                <option value="connu">ceux dont l'étudiant est connu</option>
+              </select>
+            </label>
             <span class="note" id="import-compte"></span>
           </div>
           <!-- Le tableau défile chez lui : la page garde la même hauteur, que
@@ -185,22 +191,29 @@
               <tbody></tbody>
             </table>
           </div>
+        </div>
+      </li>
+
+      <!-- Le renommage découle de l'étape du dessus : il se lit d'un bloc, une
+           fois les rapprochements arrêtés, pas à chaque correction. -->
+      <li class="etape" data-etape="noms">
+        <button type="button" class="etape-tete">
+          <span class="etape-num">5</span>
+          <span class="etape-titre">Les noms que les dépôts prendront</span>
+          <span class="etape-resume" id="resume-noms"></span>
+        </button>
+        <div class="etape-corps">
           <p class="note">Les dépôts prendront le <strong>nom complet</strong> de
             l'étudiant. Un compte laissé sans personne gardera le sien.</p>
           <label class="case"><input type="checkbox" id="import-nommes">
             <span>Ne reprendre que les dépôts dont l'étudiant est connu ; laisser
               les autres où ils sont</span></label>
-          <!-- Le renommage découle du tableau du dessus : il se vérifie d'un
-               coup d'œil quand on veut, pas à chaque correction. -->
-          <details>
-            <summary>Voir les noms que les dépôts prendront</summary>
-            <div class="tableau-defile court">
-              <table class="tableau" id="import-renommages">
-                <thead><tr><th>Dépôt</th><th>Deviendra</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </details>
+          <div class="tableau-defile">
+            <table class="tableau" id="import-renommages">
+              <thead><tr><th>Dépôt</th><th>Deviendra</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
           <div class="actions">
             <button type="button" id="import-appliquer" class="bouton vert">
               Reprendre ces dépôts</button>
@@ -210,7 +223,7 @@
 
       <li class="etape" data-etape="journal">
         <button type="button" class="etape-tete">
-          <span class="etape-num">5</span>
+          <span class="etape-num">6</span>
           <span class="etape-titre">Journal</span>
           <span class="etape-resume" id="resume-journal"></span>
         </button>

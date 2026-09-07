@@ -530,11 +530,11 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 /* Les listes longues défilent chez elles, en-tête figé. */
 .tableau-defile { max-height: min(18rem, 34vh); overflow-y: auto;
   border: 1px solid var(--bord); border-radius: 6px; }
-.tableau-defile.court { max-height: min(12rem, 30vh); }
 .tableau-defile .tableau { margin: 0; }
 .tableau-defile thead th { position: sticky; top: 0; background: var(--fond); z-index: 1; }
 .barre-filtre { display: flex; align-items: center; justify-content: space-between;
   gap: 1rem; flex-wrap: wrap; }
+.barre-filtre .champ { width: auto; }
 .choix-etudiant { max-width: 22rem; }
 
 /* Les travaux repérés : une ligne cliquable, la pastille détachée du nom. */

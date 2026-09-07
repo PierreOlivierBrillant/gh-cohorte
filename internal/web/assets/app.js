@@ -2974,7 +2974,7 @@ async function preparerImport() {
   importDevinee = {};
   dire('import-place-note', '');
   $('import-nommes').checked = false;
-  for (const nom of ['travail', 'liste', 'place', 'verifier', 'journal']) {
+  for (const nom of ['travail', 'liste', 'place', 'verifier', 'noms', 'journal']) {
     marquerEtape(nom, '');
   }
   ouvrirEtape('travail');
@@ -3179,12 +3179,14 @@ function dessinerRapprochements(plan) {
       el('td', {}, el('code', { texte: '@' + trouve.login })),
       el('td', {}, choix), raison);
     ligne.dataset.verifier = aVerifier(trouve) ? '1' : '';
+    ligne.dataset.connu = trouve.entry && trouve.entry.full_name ? '1' : '';
 
     choix.addEventListener('change', () => {
       importChoix.set(trouve.login, choix.value);
       raison.textContent = choix.value ? 'choisi à la main' : 'laissé sans personne';
       // Un choix rendu à la main est vérifié par définition.
       ligne.dataset.verifier = '';
+      ligne.dataset.connu = choix.value ? '1' : '';
       majOptions();
       compter();
       filtrer();
@@ -3222,10 +3224,13 @@ function planifierVerification() {
 $('import-filtre').addEventListener('change', filtrer);
 $('import-nommes').addEventListener('change', () => verifier(false));
 
+// filtrer ne change que ce qu'on regarde : les dépôts cachés sont repris comme
+// les autres. Ce qui entre ou non dans la reprise se décide à l'étape suivante.
 function filtrer() {
-  const seulement = $('import-filtre').checked;
+  const vue = $('import-filtre').value;
   for (const ligne of $('import-rapprochements').querySelectorAll('tbody tr')) {
-    ligne.hidden = seulement && ligne.dataset.verifier !== '1';
+    ligne.hidden = (vue === 'verifier' && ligne.dataset.verifier !== '1')
+      || (vue === 'connu' && ligne.dataset.connu !== '1');
   }
 }
 
@@ -3276,6 +3281,7 @@ function dessinerRenommages(plan) {
       el('td', {}, el('code', { texte: ligne.repo })),
       el('td', {}, el('code', { texte: ligne.target }))));
   }
+  marquerEtape('noms', `${(plan.moves || []).length} dépôt(s) renommés`);
 }
 
 // --- 5. écrire
