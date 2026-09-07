@@ -85,6 +85,7 @@ func (i *importSession) run() (int, error) {
 		Prefix: prefixe, Name: nom, Entries: entrees,
 		Profiles: i.profils(prefixe, repos), Guess: true,
 		NamedOnly: i.session.Options.NamedOnly, Owners: i.proprietaires,
+		Known: i.connus(),
 	}, repos)
 	if err != nil {
 		return ExitValidation, err
@@ -101,6 +102,7 @@ func (i *importSession) run() (int, error) {
 			Prefix: choisi, Name: nom, Entries: entrees,
 			Profiles: i.profils(choisi, repos), Guess: true,
 			NamedOnly: i.session.Options.NamedOnly, Owners: i.proprietaires,
+			Known: i.connus(),
 		}, repos)
 		if err != nil {
 			return ExitValidation, err
@@ -167,6 +169,33 @@ func (i *importSession) choisirTravail(dehors classroom.Foreign) (string, error)
 	}
 	options = append(options, ui.Option{Value: "", Label: "Revenir"})
 	return i.session.Prompt.Choose("Travail à reprendre", options, "")
+}
+
+// connus rend le nom complet des comptes que l'organisation sait déjà nommer :
+// son registre d'abord, puis les groupes déjà déclarés sur ce poste. Un compte
+// qui s'y trouve n'a pas à repasser par un rapprochement — la réponse est
+// écrite, et c'est autant de questions en moins.
+func (i *importSession) connus() map[string]string {
+	noms := map[string]string{}
+	registre, _ := i.session.names(i.org)
+	for _, etudiant := range registre.All() {
+		if nom := strings.TrimSpace(etudiant.FullName); nom != "" {
+			noms[strings.ToLower(etudiant.Username)] = nom
+		}
+	}
+	// Ce que le poste retient et que le registre ignore encore vaut aussi :
+	// une reprise faite avant la publication en est pleine.
+	store := classroom.Open(classroom.PathNextTo(i.session.ConfigFile))
+	for _, personne := range store.People(i.org) {
+		compte := strings.ToLower(strings.TrimSpace(personne.Username))
+		if compte == "" || strings.TrimSpace(personne.FullName) == "" {
+			continue
+		}
+		if _, deja := noms[compte]; !deja {
+			noms[compte] = personne.FullName
+		}
+	}
+	return noms
 }
 
 // acces relève, pour les dépôts d'un préfixe, le compte GitHub que leurs accès

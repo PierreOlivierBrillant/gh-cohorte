@@ -108,6 +108,11 @@ type ImportRequest struct {
 	// n'existent pas. Ce que la carte ne dit pas retombe sur le nom, faute de
 	// mieux — voir « Unconfirmed ».
 	Owners map[string]string
+	// Known donne le nom complet des comptes que l'organisation connaît déjà —
+	// son registre, et les groupes déjà déclarés. Un compte qui s'y trouve n'a
+	// rien à faire dans un rapprochement : la réponse est écrite, et la
+	// chercher par ressemblance ne ferait que la retrouver moins bien.
+	Known map[string]string
 	// Guess autorise le rapprochement des comptes que la liste ne nomme pas.
 	//
 	// Une fois qu'on a corrigé un rapprochement à l'écran, non : le jugement
@@ -156,7 +161,7 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 	for _, depot := range groupe.Repos {
 		logins = append(logins, depot.Suffix)
 	}
-	rapprochements := pair(entries, logins, demande.Profiles, demande.Guess)
+	rapprochements := pair(entries, logins, demande.Profiles, demande.Known, demande.Guess)
 
 	plan := Import{Prefix: groupe.Prefix, Name: name, Scope: arrivee.Scope(),
 		Pairings: rapprochements, NamedOnly: demande.NamedOnly,
@@ -297,15 +302,22 @@ func aReprendre(depots []groups.Repo, nommes map[string]bool, nommesSeulement bo
 // n'est jamais deviné : seuls les comptes qu'elle laisse en blanc passent par
 // le rapprochement, et les personnes déjà prises n'y sont plus candidates.
 func pair(entries []roster.Entry, logins []string,
-	profiles map[string]string, guess bool) []roster.Pairing {
+	profiles, connus map[string]string, guess bool) []roster.Pairing {
 	parCompte := map[string]roster.Entry{}
+	parNom := map[string]roster.Entry{}
 	for _, entree := range entries {
 		if compte := strings.ToLower(strings.TrimSpace(entree.Username)); compte != "" {
 			parCompte[compte] = entree
 		}
+		if cle := valid.Slugify(entree.FullName); cle != "" {
+			parNom[cle] = entree
+		}
 	}
 
 	rapprochements := make([]roster.Pairing, 0, len(logins))
+	// Un nom attribué ne peut plus l'être ailleurs : sans cela, le
+	// rapprochement le redonnerait à un second compte.
+	pris := map[string]bool{}
 	var reste []string
 	for _, login := range logins {
 		if entree, dite := parCompte[strings.ToLower(login)]; dite {
@@ -313,6 +325,24 @@ func pair(entries []roster.Entry, logins []string,
 				Login: login, Entry: entree, Score: 100,
 				Reason: "compte donné par la liste",
 			})
+			retenir(pris, entree.FullName)
+			continue
+		}
+		// Ce que l'organisation sait déjà vaut mieux que ce qu'on devinerait :
+		// c'est le même couple, écrit une fois pour toutes, et il n'y a plus
+		// rien à vérifier à l'écran.
+		if nom := strings.TrimSpace(connus[strings.ToLower(login)]); nom != "" {
+			entree, dans := parNom[valid.Slugify(nom)]
+			if !dans {
+				// La personne n'est pas dans cette liste-ci : son nom est
+				// connu quand même, et son dépôt est bien le sien.
+				entree = roster.Entry{FullName: nom}
+			}
+			rapprochements = append(rapprochements, roster.Pairing{
+				Login: login, Entry: entree, Score: 100,
+				Reason: "déjà connu de l'organisation",
+			})
+			retenir(pris, entree.FullName)
 			continue
 		}
 		reste = append(reste, login)
@@ -328,13 +358,23 @@ func pair(entries []roster.Entry, logins []string,
 
 	libres := make([]roster.Entry, 0, len(entries))
 	for _, entree := range entries {
-		if strings.TrimSpace(entree.Username) == "" {
+		cle := valid.Slugify(entree.FullName)
+		if strings.TrimSpace(entree.Username) == "" && (cle == "" || !pris[cle]) {
 			libres = append(libres, entree)
 		}
 	}
 	devines := roster.Match(libres, reste, profiles)
 
 	return ordonner(append(rapprochements, devines...), logins)
+}
+
+// retenir marque un nom comme attribué. Un nom vide n'en est pas un : il ne
+// prendrait la place de personne, et empêcherait toutes les entrées sans nom
+// d'être encore candidates.
+func retenir(pris map[string]bool, nom string) {
+	if cle := valid.Slugify(nom); cle != "" {
+		pris[cle] = true
+	}
 }
 
 // ordonner range les rapprochements dans l'ordre des dépôts, pour que la revue

@@ -392,3 +392,84 @@ func TestImportSignaleLesComptesQueLesAccesNontPasConfirmes(t *testing.T) {
 		t.Fatalf("les deux dépôts se reprennent quand même : %+v", plan.Moves)
 	}
 }
+
+// Un compte que l'organisation sait déjà nommer n'a rien à faire dans un
+// rapprochement : la réponse est écrite, et la chercher par ressemblance ne
+// ferait que la retrouver moins bien — quand elle la retrouve.
+func TestImportAssocieDembleeCeQueLOrganisationConnait(t *testing.T) {
+	inventaire := depots("tp1-xy42", "tp1-felixbourassa")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+		// « xy42 » ne ressemble à aucun nom de la liste : sans le registre, il
+		// resterait sans réponse et demanderait un coup d'œil.
+		Known: map[string]string{"xy42": "Étienne Lyonnais"},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	trouves := map[string]string{}
+	raisons := map[string]string{}
+	for _, trouve := range plan.Pairings {
+		trouves[trouve.Login] = trouve.Entry.FullName
+		raisons[trouve.Login] = trouve.Reason
+	}
+	if trouves["xy42"] != "Étienne Lyonnais" {
+		t.Fatalf("rapprochements = %+v", trouves)
+	}
+	if raisons["xy42"] != "déjà connu de l'organisation" {
+		t.Fatalf("raison = %q", raisons["xy42"])
+	}
+	// Le numéro d'étudiant de la liste est conservé : c'est la même personne.
+	for _, trouve := range plan.Pairings {
+		if trouve.Login == "xy42" && trouve.Entry.StudentID != "1983429" {
+			t.Fatalf("l'entrée de la liste devait servir : %+v", trouve.Entry)
+		}
+	}
+	// Et le nom pris ne peut plus être donné à un autre compte.
+	if trouves["tp1-felixbourassa"] == "Étienne Lyonnais" {
+		t.Fatalf("un nom a été attribué deux fois : %+v", trouves)
+	}
+}
+
+// Une personne que la liste ne contient pas mais que l'organisation connaît
+// garde son nom : son dépôt est bien le sien.
+func TestImportNommeUnCompteConnuAbsentDeLaListe(t *testing.T) {
+	inventaire := depots("tp1-ancienne", "tp1-felixbourassa")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+		Known: map[string]string{"ancienne": "Camille Tremblay"},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	cibles := map[string]string{}
+	for _, ligne := range plan.Moves {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if cibles["tp1-ancienne"] != "a26.5n6.1030.tp1.camille-tremblay" {
+		t.Fatalf("cibles = %v", cibles)
+	}
+}
+
+// Après une correction à l'écran, plus rien n'est deviné ni repris du registre :
+// le jugement rendu tient, y compris quand il consiste à ne rapprocher personne.
+func TestImportNeDefaitPasUnChoixManuelAvecLeRegistre(t *testing.T) {
+	inventaire := depots("tp1-xy42", "tp1-felixbourassa")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1",
+		// La liste renvoyée par l'écran ne rattache personne à « xy42 ».
+		Entries: []roster.Entry{{FullName: "Félix Bourassa", Username: "felixbourassa"}},
+		Guess:   false,
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	for _, trouve := range plan.Pairings {
+		if trouve.Login == "xy42" && trouve.Found() {
+			t.Fatalf("un choix « personne » a été défait : %+v", trouve)
+		}
+	}
+}

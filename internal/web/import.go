@@ -88,10 +88,41 @@ func (s *Server) importPlan(org string, body importInput) (
 		NamedOnly: body.NamedOnly, Owners: proprietaires,
 	}
 	if deviner {
+		// Ce que l'organisation sait déjà et les profils GitHub ne servent
+		// qu'à la première lecture. Une fois qu'on a corrigé à l'écran, le
+		// jugement rendu doit tenir — y compris quand il consiste à ne
+		// rapprocher personne, ce qu'un nom connu réattribuerait aussitôt.
+		demande.Known = s.connus(org)
 		demande.Profiles = s.profiles(org, body.Prefix, repos, proprietaires)
 	}
 	plan, err := classroom.PlanImport(arrivee, demande, repos)
 	return plan, arrivee, err
+}
+
+// connus rend le nom complet des comptes que l'organisation sait déjà nommer :
+// son registre d'abord, puis les groupes déjà déclarés sur ce poste. Un compte
+// qui s'y trouve n'a pas à repasser par un rapprochement — la réponse est
+// écrite, et c'est autant de vérifications en moins à l'écran.
+func (s *Server) connus(org string) map[string]string {
+	noms := map[string]string{}
+	registre, _ := s.names(org)
+	for _, etudiant := range registre.All() {
+		if nom := strings.TrimSpace(etudiant.FullName); nom != "" {
+			noms[strings.ToLower(etudiant.Username)] = nom
+		}
+	}
+	// Ce que le poste retient et que le registre ignore encore vaut aussi :
+	// une reprise faite avant la publication en est pleine.
+	for _, personne := range s.classrooms.People(org) {
+		compte := strings.ToLower(strings.TrimSpace(personne.Username))
+		if compte == "" || strings.TrimSpace(personne.FullName) == "" {
+			continue
+		}
+		if _, deja := noms[compte]; !deja {
+			noms[compte] = personne.FullName
+		}
+	}
+	return noms
 }
 
 // owners relève, pour les dépôts d'un préfixe, le compte GitHub que leurs accès

@@ -398,3 +398,33 @@ func TestUnPrefixeQuiCacheDeuxTravauxDemandeAChoisir(t *testing.T) {
 		t.Fatalf("plan = %+v", choisi)
 	}
 }
+
+// Le registre de l'organisation répond avant qu'on cherche : un compte qu'il
+// nomme est rapproché d'emblée, et ne demande plus de coup d'œil.
+func TestLeRegistreEviteUnRapprochementAChercher(t *testing.T) {
+	state := classroomOrg()
+	// « xy42 » ne ressemble à aucun nom de la liste ; le registre, lui, sait.
+	state.AddRepo("acme", "tp2-xy42", true)
+	h := nouveau(t, state)
+	h.json(http.MethodPost, "/api/classrooms", map[string]any{
+		"session": "a25", "course": "5n6", "group": "1030",
+		"students": []map[string]string{{"username": "xy42", "full_name": "Étienne Lyonnais"}},
+	}, nil)
+
+	var plan planVue
+	h.json(http.MethodPost, "/api/orgs/acme/import/preview", map[string]any{
+		"prefix": "tp2", "name": "tp2", "scope": "a26.5n6.1030",
+		"path": listeOmnivox(t),
+	}, &plan)
+
+	if len(plan.Pairings) != 1 {
+		t.Fatalf("rapprochements = %+v", plan.Pairings)
+	}
+	trouve := plan.Pairings[0]
+	if trouve.Entry.FullName != "Étienne Lyonnais" || trouve.Score != 100 {
+		t.Fatalf("rapprochement = %+v", trouve)
+	}
+	if trouve.Reason != "déjà connu de l'organisation" {
+		t.Fatalf("raison = %q", trouve.Reason)
+	}
+}
