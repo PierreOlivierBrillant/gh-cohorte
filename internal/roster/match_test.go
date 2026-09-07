@@ -154,3 +154,51 @@ func TestLeRapprochementEstStable(t *testing.T) {
 		t.Fatalf("ordre = %+v", premier)
 	}
 }
+
+func TestFindNameReconnaitDeuxEcrituresDunMemeNom(t *testing.T) {
+	liste := []roster.Entry{
+		{FullName: "Ahmad Walid Loudin", StudentID: "111"},
+		{FullName: "Guillaume Gobeil-Bouchard", StudentID: "222"},
+		{FullName: "Félix Bourassa", StudentID: "333"},
+	}
+	cas := []struct {
+		cherche, attendu string
+	}{
+		// Le registre garde le nom du profil GitHub, plus court que l'officiel.
+		{"Ahmad Loudin", "Ahmad Walid Loudin"},
+		{"Guillaume Bouchard", "Guillaume Gobeil-Bouchard"},
+		// L'écriture exacte, à l'accent et à la casse près.
+		{"FELIX BOURASSA", "Félix Bourassa"},
+		{"Felix Bourassa", "Félix Bourassa"},
+	}
+	for _, essai := range cas {
+		trouve, dans := roster.FindName(liste, essai.cherche)
+		if !dans || trouve.FullName != essai.attendu {
+			t.Errorf("FindName(%q) = %q, %v ; attendu %q",
+				essai.cherche, trouve.FullName, dans, essai.attendu)
+		}
+	}
+}
+
+func TestFindNameNeTranchePasDansLeDoute(t *testing.T) {
+	liste := []roster.Entry{
+		{FullName: "Jean Tremblay"},
+		{FullName: "Jean Marc Tremblay"},
+	}
+	// Deux personnes s'y prêtent : mieux vaut n'en nommer aucune.
+	if trouve, dans := roster.FindName(liste, "Jean Tremblay"); !dans ||
+		trouve.FullName != "Jean Tremblay" {
+		t.Fatalf("l'écriture exacte doit primer : %q, %v", trouve.FullName, dans)
+	}
+	if trouve, dans := roster.FindName(liste, "Tremblay Jean Marc Junior"); dans {
+		t.Fatalf("FindName = %q : deux personnes s'y prêtaient", trouve.FullName)
+	}
+	// Un prénom seul ne désigne personne.
+	if trouve, dans := roster.FindName([]roster.Entry{{FullName: "Ahmad Walid Loudin"}},
+		"Ahmad"); dans {
+		t.Fatalf("FindName = %q : un mot seul ne suffit pas", trouve.FullName)
+	}
+	if _, dans := roster.FindName(liste, ""); dans {
+		t.Fatal("un nom vide ne désigne personne")
+	}
+}

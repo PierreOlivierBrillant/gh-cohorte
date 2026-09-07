@@ -673,3 +673,64 @@ func TestImportNeDedoublePasUnTravailAuTiretDouble(t *testing.T) {
 		t.Fatalf("cibles = %v", cibles)
 	}
 }
+
+// Le cas rapporté : quatre étudiants associés par le registre étaient déclarés
+// absents du même souffle. Le registre garde le nom du profil GitHub, la liste
+// d'Omnivox le nom officiel — la même personne, comptée deux fois.
+func TestImportNeDitPasAbsentQuiVientDetreAssocie(t *testing.T) {
+	inventaire := depots("tp3-ahmadloudin", "tp3-ggobeilbouchard", "tp3-felixb")
+	liste := []roster.Entry{
+		{FullName: "Ahmad Walid Loudin", StudentID: "111"},
+		{FullName: "Guillaume Gobeil-Bouchard", StudentID: "222"},
+		{FullName: "Félix Bourassa", StudentID: "333"},
+		{FullName: "Sophie Tremblay", StudentID: "444"}, // celle-là n'a pas de dépôt
+	}
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp3", Entries: liste, Guess: true,
+		Known: map[string]string{
+			"ahmadloudin":     "Ahmad Loudin",
+			"ggobeilbouchard": "Guillaume Bouchard",
+			"felixb":          "Félix Bourassa",
+		},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	// Seule celle qui n'a vraiment aucun dépôt est absente.
+	if len(plan.Absent) != 1 || plan.Absent[0] != "Sophie Tremblay" {
+		t.Fatalf("absents = %v", plan.Absent)
+	}
+	// Et le nom retenu est celui de la liste, avec son numéro d'étudiant.
+	for _, trouve := range plan.Pairings {
+		if trouve.Login == "ahmadloudin" {
+			if trouve.Entry.FullName != "Ahmad Walid Loudin" || trouve.Entry.StudentID != "111" {
+				t.Fatalf("entrée retenue = %+v", trouve.Entry)
+			}
+		}
+	}
+	cibles := map[string]string{}
+	for _, ligne := range plan.Moves {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if cibles["tp3-ahmadloudin"] != "a26.5n6.1030.tp3.ahmad-walid-loudin" {
+		t.Fatalf("cibles = %v", cibles)
+	}
+}
+
+// Une accentuation ou une casse ne fait pas une personne de plus.
+func TestImportNeCompteQuUneFoisUnNomEcritAutrement(t *testing.T) {
+	inventaire := depots("tp1-fbourassa")
+	liste := []roster.Entry{{FullName: "FÉLIX BOURASSA", StudentID: "333"}}
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: liste, Guess: true,
+		Known: map[string]string{"fbourassa": "Felix Bourassa"},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(plan.Absent) != 0 {
+		t.Fatalf("absents = %v", plan.Absent)
+	}
+}

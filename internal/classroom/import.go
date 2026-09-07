@@ -184,7 +184,7 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 			continue
 		}
 		nommes[strings.ToLower(trouve.Login)] = true
-		vus[strings.ToLower(trouve.Entry.FullName)] = true
+		retenir(vus, trouve.Entry.FullName)
 		// Le compte vient du dépôt, le nom de la liste : c'est ce couple que
 		// le renommage et le registre attendent.
 		connus = append(connus, roster.Person{
@@ -192,7 +192,9 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 		})
 	}
 	for _, entree := range entries {
-		if !vus[strings.ToLower(entree.FullName)] {
+		// Comparé comme les noms le sont partout ailleurs : une accentuation
+		// ou une casse ne fait pas une personne de plus.
+		if cle := valid.Slugify(entree.FullName); cle == "" || !vus[cle] {
 			plan.Absent = append(plan.Absent, entree.FullName)
 		}
 	}
@@ -369,13 +371,9 @@ func aReprendre(depots []groups.Repo, nommes map[string]bool, nommesSeulement bo
 func pair(entries []roster.Entry, logins []string,
 	profiles, connus map[string]string, guess bool) []roster.Pairing {
 	parCompte := map[string]roster.Entry{}
-	parNom := map[string]roster.Entry{}
 	for _, entree := range entries {
 		if compte := strings.ToLower(strings.TrimSpace(entree.Username)); compte != "" {
 			parCompte[compte] = entree
-		}
-		if cle := valid.Slugify(entree.FullName); cle != "" {
-			parNom[cle] = entree
 		}
 	}
 
@@ -398,7 +396,10 @@ func pair(entries []roster.Entry, logins []string,
 		// rien à vérifier à l'écran. Passé la première lecture, non : un choix
 		// rendu à la main tient, et un nom connu le déferait à chaque fois.
 		if nom := strings.TrimSpace(connus[strings.ToLower(login)]); nom != "" && guess {
-			entree, dans := parNom[valid.Slugify(nom)]
+			// La liste fait foi quand elle porte cette personne, fût-ce sous
+			// une autre écriture : son nom y est officiel, et son numéro
+			// d'étudiant l'accompagne.
+			entree, dans := roster.FindName(entries, nom)
 			if !dans {
 				// La personne n'est pas dans cette liste-ci : son nom est
 				// connu quand même, et son dépôt est bien le sien.
