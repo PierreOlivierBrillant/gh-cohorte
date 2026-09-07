@@ -2944,6 +2944,9 @@ let importAttente = null;
 // sortie — une liste de noms, vide quand rien n'a été touché.
 let importDepots = [];
 let importRetenus = new Set();
+// Passer la liste est un choix, et il faut le distinguer d'une liste qu'on n'a
+// pas encore fournie : l'une laisse continuer, l'autre est un oubli.
+let importSansListe = false;
 
 // --- l'accordéon
 
@@ -2989,11 +2992,13 @@ function viderImport() {
   importDevinee = {};
   importDepots = [];
   importRetenus = new Set();
+  importSansListe = false;
 
   vider($('import-travaux'));
   vider($('import-depots').querySelector('tbody'));
   $('import-depots-compte').textContent = '';
   $('import-depots-tout').checked = true;
+  dire('import-deja-nommes', '');
   viderDepot('import-liste');
   for (const id of ['import-session', 'import-cours', 'import-groupe', 'import-nom']) {
     $(id).value = '';
@@ -3086,6 +3091,9 @@ function dessinerDepots() {
     corps.append(el('tr', {},
       el('td', { classe: 'etroit' }, el('label', { classe: 'case' }, coche)),
       el('td', {}, lien),
+      depot.student
+        ? el('td', { texte: depot.student })
+        : el('td', { classe: 'vide', texte: depot.login ? '@' + depot.login : '—' }),
       el('td', { classe: 'note', texte: depot.pushed_at || 'jamais' })));
   }
   majDepots();
@@ -3096,6 +3104,7 @@ function dessinerDepots() {
 function majDepots() {
   const total = importDepots.length;
   const gardes = importRetenus.size;
+  direDejaNommes();
   $('import-depots-compte').textContent = gardes === total
     ? `${total} dépôt(s) — tous repris`
     : `${gardes} dépôt(s) sur ${total}`;
@@ -3108,6 +3117,36 @@ function majDepots() {
   marquerEtape('verifier', '');
   marquerEtape('noms', '');
 }
+
+// direDejaNommes dit ce que l'organisation sait déjà des dépôts retenus. C'est
+// ce qui répond à la seule question de l'étape suivante : cette liste
+// a-t-elle encore quelque chose à apprendre ?
+function direDejaNommes() {
+  const retenus = importDepots.filter((depot) => importRetenus.has(depot.name));
+  const nommes = retenus.filter((depot) => depot.student).length;
+  if (retenus.length === 0) {
+    dire('import-deja-nommes', '');
+    return;
+  }
+  if (nommes === retenus.length) {
+    dire('import-deja-nommes', `Les ${retenus.length} dépôt(s) retenus sont déjà associés à `
+      + "un étudiant connu de l'organisation : la liste n'a rien à apprendre de plus.");
+    return;
+  }
+  dire('import-deja-nommes', `${nommes} des ${retenus.length} dépôt(s) retenus sont déjà `
+    + "associés à un étudiant connu de l'organisation ; la liste nommera les autres.");
+}
+
+$('import-liste-passer').addEventListener('click', () => {
+  viderDepot('import-liste');
+  importSansListe = true;
+  marquerEtape('liste', 'sans liste');
+  importNoms = [];
+  importChoix = new Map();
+  marquerEtape('verifier', '');
+  ouvrirEtape('place');
+  devinerPlace();
+});
 
 $('import-depots-tout').addEventListener('change', () => {
   const tout = $('import-depots-tout').checked;
@@ -3139,6 +3178,7 @@ function selection() {
 
 $('import-liste').addEventListener('change', async () => {
   const valeur = $('import-liste').value.trim();
+  importSansListe = false;
   marquerEtape('liste', valeur);
   // Une liste qui change annule les rapprochements déjà retenus : ils
   // désignaient les noms de l'ancienne.
@@ -3211,11 +3251,13 @@ function poser(id, valeur, ancienne) {
 
 // --- 5. la vérification
 
-// corpsImport rassemble ce que les trois premières étapes disent.
+// corpsImport rassemble ce que les premières étapes disent.
 function corpsImport() {
   const manque = [];
   if (!importTravail) manque.push('un travail');
-  if (!$('import-liste').value.trim()) manque.push('la liste des étudiants');
+  if (!importSansListe && !$('import-liste').value.trim()) {
+    manque.push('la liste des étudiants');
+  }
   const session = $('import-session').value.trim();
   const cours = $('import-cours').value.trim();
   const groupe = $('import-groupe').value.trim();

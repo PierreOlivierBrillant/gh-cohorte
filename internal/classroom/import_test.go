@@ -598,3 +598,31 @@ func TestImportSelectionResoutUnPrefixeFourreTout(t *testing.T) {
 		t.Fatalf("plan = %+v", plan)
 	}
 }
+
+// Quand l'organisation connaît déjà tout le monde, la liste d'Omnivox n'apprend
+// rien : la reprise doit pouvoir s'en passer.
+func TestImportSansListeQuandLOrganisationConnaitDeja(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-felixb")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: nil, Guess: true,
+		Known: map[string]string{
+			"ladamlarocque": "Laurent Adam-Larocque",
+			"felixb":        "Félix Bourassa",
+		},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	cibles := map[string]string{}
+	for _, ligne := range plan.Moves {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if cibles["tp1-ladamlarocque"] != "a26.5n6.1030.tp1.laurent-adam-larocque" ||
+		cibles["tp1-felixb"] != "a26.5n6.1030.tp1.felix-bourassa" {
+		t.Fatalf("cibles = %v", cibles)
+	}
+	if len(plan.Unmatched) != 0 || len(plan.Absent) != 0 {
+		t.Fatalf("plan = %+v", plan)
+	}
+}

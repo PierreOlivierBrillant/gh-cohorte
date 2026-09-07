@@ -480,3 +480,72 @@ func TestLaSelectionDeDepotsLimiteLaReprise(t *testing.T) {
 		t.Fatalf("le dépôt écarté a bougé : %v", noms)
 	}
 }
+
+// L'étape de la liste dit ce que l'organisation sait déjà : c'est ce qui
+// permet de la passer en connaissance de cause.
+func TestLesDepotsDisentQuiEstDejaConnu(t *testing.T) {
+	state := classroomOrg()
+	state.AddCollaborator("acme/tp1-ladamlarocque", "ladamlarocque", "push")
+	h := nouveau(t, state)
+	h.json(http.MethodPost, "/api/classrooms", map[string]any{
+		"session": "a25", "course": "5n6", "group": "1030",
+		"students": []map[string]string{
+			{"username": "ladamlarocque", "full_name": "Laurent Adam-Larocque"},
+		},
+	}, nil)
+
+	var vue struct {
+		Total int `json:"total"`
+		Known int `json:"known"`
+		Repos []struct {
+			Name    string `json:"name"`
+			Login   string `json:"login"`
+			Student string `json:"student"`
+		} `json:"repos"`
+	}
+	h.json(http.MethodPost, "/api/orgs/acme/import/repos",
+		map[string]any{"prefix": "tp1"}, &vue)
+
+	if vue.Total != 3 || vue.Known != 1 {
+		t.Fatalf("décompte = %d sur %d", vue.Known, vue.Total)
+	}
+	for _, depot := range vue.Repos {
+		if depot.Name != "tp1-ladamlarocque" {
+			continue
+		}
+		if depot.Login != "ladamlarocque" || depot.Student != "Laurent Adam-Larocque" {
+			t.Fatalf("dépôt = %+v", depot)
+		}
+	}
+}
+
+// La liste peut être passée : ce que l'organisation nomme suffit alors, et le
+// reste garde le compte qu'il porte.
+func TestLaRepriseSePasseDeListe(t *testing.T) {
+	state := classroomOrg()
+	h := nouveau(t, state)
+	h.json(http.MethodPost, "/api/classrooms", map[string]any{
+		"session": "a25", "course": "5n6", "group": "1030",
+		"students": []map[string]string{
+			{"username": "ladamlarocque", "full_name": "Laurent Adam-Larocque"},
+			{"username": "felixbourassa", "full_name": "Félix Bourassa"},
+			{"username": "lyonnais", "full_name": "Étienne Lyonnais"},
+		},
+	}, nil)
+
+	var plan planVue
+	h.json(http.MethodPost, "/api/orgs/acme/import/preview", map[string]any{
+		"prefix": "tp1", "name": "tp1", "scope": "a26.5n6.1030",
+	}, &plan)
+
+	if len(plan.Moves) != 3 || len(plan.Unmatched) != 0 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	cibles := map[string]string{}
+	for _, ligne := range plan.Moves {
+		cibles[ligne.Repo] = ligne.Target
+	}
+	if cibles["tp1-ladamlarocque"] != "a26.5n6.1030.tp1.laurent-adam-larocque" {
+		t.Fatalf("cibles = %v", cibles)
+	}
+}

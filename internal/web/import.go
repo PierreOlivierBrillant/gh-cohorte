@@ -63,12 +63,19 @@ func (s *Server) handleForeign(writer http.ResponseWriter, request *http.Request
 }
 
 // foreignRepo est un dépôt qu'on peut retenir ou écarter, tel que l'écran le
-// montre : son nom, où le lire sur GitHub, et sa dernière trace de vie.
+// montre : son nom, où le lire sur GitHub, sa dernière trace de vie, et qui est
+// derrière lui quand on le sait déjà.
 type foreignRepo struct {
 	Name     string `json:"name"`
 	URL      string `json:"url"`
 	Private  bool   `json:"private"`
 	PushedAt string `json:"pushed_at"`
+	// Login est le compte que les accès désignent, Student le nom complet que
+	// l'organisation lui donne. Savoir cela avant de cocher change ce qu'on
+	// coche — et savoir combien de dépôts sont déjà nommés dit si la liste des
+	// étudiants a encore quelque chose à apprendre.
+	Login   string `json:"login"`
+	Student string `json:"student"`
 }
 
 // handleForeignRepos énumère les dépôts d'un travail à reprendre. L'inventaire
@@ -85,15 +92,32 @@ func (s *Server) handleForeignRepos(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	groupe := groups.Build(body.Prefix, repos)
+	// Les accès se lisent ici plutôt qu'à la vérification : ils coûtent le même
+	// prix, le cache les garde, et ils disent dès maintenant qui est derrière
+	// chaque dépôt — ce qui est justement ce qu'on regarde pour cocher.
+	proprietaires := s.owners(org, body.Prefix, nil, repos)
+	connus := s.connus(org)
+
 	lignes := make([]foreignRepo, 0, groupe.Len())
+	nommes := 0
 	for _, depot := range groupe.Repos {
+		compte := depot.Suffix
+		if login := proprietaires[depot.Name]; login != "" {
+			compte = login
+		}
+		nom := connus[strings.ToLower(compte)]
+		if nom != "" {
+			nommes++
+		}
 		lignes = append(lignes, foreignRepo{
 			Name: depot.Name, URL: s.urlOf(org, depot),
 			Private: depot.Private, PushedAt: depot.PushedAt,
+			Login: compte, Student: nom,
 		})
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"prefix": groupe.Prefix, "repos": lignes,
+		"total": len(lignes), "known": nommes,
 	})
 }
 
@@ -220,7 +244,10 @@ func (s *Server) entries(body importInput) ([]roster.Entry, bool, error) {
 		}
 		liste = lue
 	default:
-		return nil, false, valid.Errorf("Aucune liste d'étudiants n'a été fournie.")
+		// Pas de liste : l'organisation connaît peut-être déjà tout le monde,
+		// et une liste n'apprendrait alors rien. Ce que le registre ignore
+		// restera sans nom, ce que la revue dira.
+		return nil, true, nil
 	}
 	if len(liste.Entries) == 0 {
 		return nil, false, valid.Errorf("Aucun étudiant dans la liste fournie.")

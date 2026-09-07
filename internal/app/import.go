@@ -63,7 +63,11 @@ func (i *importSession) run() (int, error) {
 	if err != nil {
 		return ExitValidation, err
 	}
-	entrees, fichier, err := i.charger()
+	// Qui a accès à quoi se lit avant la liste : c'est ce qui dit le compte de
+	// chaque dépôt, donc lesquels l'organisation nomme déjà — et si cette liste
+	// a encore quelque chose à apprendre.
+	i.proprietaires = i.acces(prefixe, i.retenus, repos)
+	entrees, fichier, err := i.charger(prefixe, repos)
 	if err != nil {
 		return ExitOK, err
 	}
@@ -84,9 +88,6 @@ func (i *importSession) run() (int, error) {
 	if err != nil {
 		return ExitValidation, err
 	}
-	// Qui a accès à quoi se lit avant le reste : c'est ce qui dit le compte de
-	// chaque dépôt, et donc où finit le travail dans son nom.
-	i.proprietaires = i.acces(prefixe, i.retenus, repos)
 	plan, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: prefixe, Name: nom, Entries: entrees,
 		Profiles: i.profils(prefixe, repos), Guess: true,
@@ -350,19 +351,25 @@ func depotsNommes(groupe groups.Group, demande string) ([]string, error) {
 
 // charger lit la liste des étudiants, et explique où la prendre. Le chemin est
 // rendu avec elle : le nom du fichier dit le cours et le groupe.
-func (i *importSession) charger() ([]roster.Entry, string, error) {
+func (i *importSession) charger(prefixe string, repos []groups.RepoInfo) (
+	[]roster.Entry, string, error) {
 	console := i.session.Console
 	chemin := strings.TrimSpace(i.session.Options.Roster)
 	if chemin == "" {
+		// Sans liste, la reprise se fait quand même : ce que l'organisation
+		// nomme déjà suffit souvent, et le reste gardera son compte. C'est un
+		// choix, pas un manque — au terminal comme au drapeau.
 		if !i.session.Interactive() {
-			return nil, "", valid.Errorf(
-				"Liste manquante : passez --roster en mode non interactif.")
+			return nil, "", nil
 		}
 		console.Blank()
 		console.Heading("Liste des étudiants")
+		i.direDejaNommes(prefixe, repos)
 		for _, ligne := range strings.Split(roster.OmnivoxHelp, "\n") {
 			console.Note("%s", ligne)
 		}
+		console.Note("Laissez vide pour passer : les dépôts que rien ne nomme " +
+			"garderont le compte qu'ils portent.")
 		reponse, err := i.session.Prompt.Ask(ui.Question{
 			Title:    "Chemin du fichier",
 			Default:  i.session.Settings.RosterPath,
@@ -371,7 +378,10 @@ func (i *importSession) charger() ([]roster.Entry, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
-		chemin = reponse
+		if chemin = strings.TrimSpace(reponse); chemin == "" {
+			console.Note("Sans liste : seuls les noms déjà connus serviront.")
+			return nil, "", nil
+		}
 	}
 	liste, err := roster.Load(chemin)
 	if err != nil {
@@ -385,6 +395,53 @@ func (i *importSession) charger() ([]roster.Entry, string, error) {
 	}
 	console.Printf("  %s étudiant(s) lus.", console.OK(itoa(len(liste.Entries))))
 	return liste.Entries, chemin, nil
+}
+
+// direDejaNommes dit ce que l'organisation sait déjà des dépôts retenus : c'est
+// ce qui répond à la seule question du moment — cette liste a-t-elle encore
+// quelque chose à apprendre ?
+func (i *importSession) direDejaNommes(prefixe string, repos []groups.RepoInfo) {
+	console := i.session.Console
+	connus := i.connus()
+	comptes := i.comptesRetenus(prefixe, repos)
+	total, nommes := len(comptes), 0
+	for _, compte := range comptes {
+		if connus[strings.ToLower(compte)] != "" {
+			nommes++
+		}
+	}
+	if total == 0 {
+		return
+	}
+	if nommes == total {
+		console.Printf("  %s",
+			console.OK(plural("Les %d dépôt(s) retenus sont déjà nommés par l'organisation.", total)))
+		return
+	}
+	console.Printf("  %s des %s dépôt(s) retenus sont déjà nommés par l'organisation.",
+		console.Info(itoa(nommes)), itoa(total))
+}
+
+// comptesRetenus rend, pour chaque dépôt que la reprise garde, le compte que
+// ses accès désignent — ou celui que son nom porte, faute de mieux.
+func (i *importSession) comptesRetenus(prefixe string,
+	repos []groups.RepoInfo) map[string]string {
+	gardes := map[string]bool{}
+	for _, nom := range i.retenus {
+		gardes[strings.ToLower(strings.TrimSpace(nom))] = true
+	}
+	comptes := map[string]string{}
+	for _, depot := range groups.Build(prefixe, repos).Repos {
+		if len(gardes) > 0 && !gardes[strings.ToLower(depot.Name)] {
+			continue
+		}
+		compte := depot.Suffix
+		if login := i.proprietaires[depot.Name]; login != "" {
+			compte = login
+		}
+		comptes[depot.Name] = compte
+	}
+	return comptes
 }
 
 // choisirPlace demande où les dépôts doivent arriver, en proposant ce qui a pu

@@ -127,7 +127,8 @@
           <div class="tableau-defile">
             <table class="tableau" id="import-depots">
               <thead><tr>
-                <th class="etroit"></th><th>Dépôt</th><th>Dernier envoi</th>
+                <th class="etroit"></th><th>Dépôt</th><th>Étudiant</th>
+                <th>Dernier envoi</th>
               </tr></thead>
               <tbody></tbody>
             </table>
@@ -146,6 +147,7 @@
           <span class="etape-resume" id="resume-liste"></span>
         </button>
         <div class="etape-corps">
+          <p class="note" id="import-deja-nommes"></p>
           <details id="import-aide">
             <summary>Où prendre cette liste dans Omnivox ?</summary>
             <pre class="aide-omnivox" id="import-aide-texte"></pre>
@@ -154,6 +156,14 @@
             tabindex="0" role="button">
             <input type="hidden" id="import-liste">
             <span class="depot-texte"></span>
+          </div>
+          <!-- La liste n'apprend rien quand l'organisation nomme déjà tout le
+               monde : la sauter est alors le geste juste, pas un raccourci. -->
+          <div class="actions">
+            <button type="button" id="import-liste-passer" class="bouton">
+              Passer, sans liste</button>
+            <span class="note">Les dépôts que rien ne nomme garderont le compte
+              qu'ils portent.</span>
           </div>
         </div>
       </li>

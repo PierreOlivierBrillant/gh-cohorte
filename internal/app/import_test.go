@@ -8,8 +8,11 @@ import (
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 )
 
 // classroomOrg monte une organisation telle que GitHub Classroom la laisse :
@@ -351,4 +354,41 @@ func TestImportRefuseUnDepotInconnuAuDrapeau(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("n'est pas un dépôt")
+}
+
+// Quand l'organisation nomme déjà tout le monde, la liste n'apprend rien : la
+// reprise se fait sans elle.
+func TestImportSansListeQuandLesNomsSontConnus(t *testing.T) {
+	state := classroomOrg(t)
+	h := nouveau(t, state)
+	// Un groupe déjà déclaré nomme les comptes de ce travail.
+	ancien, err := classroom.AtScope("acme", "a25.5n6.1030",
+		classroom.DefaultsFrom(config.Default()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ancien.Students = []roster.Person{
+		{FullName: "Laurent Adam-Larocque", Username: "ladamlarocque"},
+		{FullName: "Félix Bourassa", Username: "felixbourassa"},
+		{FullName: "Étienne Lyonnais", Username: "lyonnais"},
+	}
+	h.declarer(ancien)
+	h.Options.ImportRequested = true
+	h.Options.Import = "tp1"
+	h.Options.Into = "a26.5n6.1030"
+	h.Options.Yes = true // aucune liste passée
+
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.depots()
+	for _, attendu := range []string{
+		"a26.5n6.1030.tp1.laurent-adam-larocque",
+		"a26.5n6.1030.tp1.felix-bourassa",
+		"a26.5n6.1030.tp1.etienne-lyonnais",
+	} {
+		if !slices.Contains(noms, attendu) {
+			t.Fatalf("« %s » manque : %v", attendu, noms)
+		}
+	}
 }
