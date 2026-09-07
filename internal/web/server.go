@@ -212,6 +212,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/classrooms/{scope}/assignments/{name}", s.handleAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/access", s.handleAssignmentAccess)
 	mux.HandleFunc("GET /api/orgs/{org}/foreign", s.handleForeign)
+	mux.HandleFunc("POST /api/orgs/{org}/import/place", s.handleGuessPlace)
 	mux.HandleFunc("POST /api/orgs/{org}/import/preview", s.handleImportPreview)
 	mux.HandleFunc("POST /api/orgs/{org}/import", s.handleImport)
 	mux.HandleFunc("GET /api/orgs/{org}/registry", s.handleRegistryPreview)

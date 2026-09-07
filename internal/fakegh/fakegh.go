@@ -36,7 +36,10 @@ type RepoState struct {
 	IsTemplate    bool
 	Template      string // « owner/repo » du modèle utilisé à la création
 	PushedAt      string
-	URLOverride   string // adresse renvoyée à la place de github.com (tests de clonage)
+	// History porte les dates des commits, du plus récent au plus ancien —
+	// l'ordre dans lequel GitHub les rend.
+	History     []string
+	URLOverride string // adresse renvoyée à la place de github.com (tests de clonage)
 }
 
 // FullName renvoie « organisation/depot ».
@@ -302,6 +305,7 @@ var (
 	refsRe         = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/refs$`)
 	refRe          = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/ref/heads/(.+)$`)
 	refUpdateRe    = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/refs/heads/(.+)$`)
+	historyRe      = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/commits$`)
 )
 
 func (s *Server) handle(writer http.ResponseWriter, request *http.Request) {
@@ -511,6 +515,22 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 			"encoding": "base64",
 			"content":  base64.StdEncoding.EncodeToString(raw),
 		})
+		return
+	}
+	// L'historique d'un dépôt, du plus récent au plus ancien. La pagination
+	// est celle du vrai : c'est par elle qu'on remonte au premier commit.
+	if match := historyRe.FindStringSubmatch(path); match != nil {
+		full := match[1] + "/" + match[2]
+		repo, exists := state.Repos[full]
+		if !exists {
+			s.notFound(writer)
+			return
+		}
+		if len(repo.History) == 0 {
+			s.send(writer, 409, map[string]string{"message": "Git Repository is empty."})
+			return
+		}
+		s.sendHistory(writer, request, repo.History)
 		return
 	}
 	if match := commitRe.FindStringSubmatch(path); match != nil {
@@ -971,6 +991,40 @@ func (s *Server) sendPage(writer http.ResponseWriter, request *http.Request, rep
 				fmt.Sprintf("<%s>; rel=\"last\"", s.pageURL(request, dernier, perPage)))
 		}
 		writer.Header().Set("Link", strings.Join(liens, ", "))
+	}
+	s.send(writer, 200, payload)
+}
+
+// sendHistory rend une page de commits, du plus récent au plus ancien, avec le
+// « Link » qui permet de sauter directement à la dernière — c'est par là qu'on
+// atteint le premier commit sans dérouler tout l'historique.
+func (s *Server) sendHistory(writer http.ResponseWriter, request *http.Request, dates []string) {
+	perPage, _ := strconv.Atoi(request.URL.Query().Get("per_page"))
+	if perPage <= 0 {
+		perPage = 30
+	}
+	page, _ := strconv.Atoi(request.URL.Query().Get("page"))
+	if page <= 0 {
+		page = 1
+	}
+	debut := min((page-1)*perPage, len(dates))
+	fin := min(debut+perPage, len(dates))
+
+	payload := make([]map[string]any, 0, fin-debut)
+	for index, date := range dates[debut:fin] {
+		payload = append(payload, map[string]any{
+			"sha": fmt.Sprintf("commit%d", debut+index),
+			"commit": map[string]any{
+				"author": map[string]any{"date": date},
+			},
+		})
+	}
+	if fin < len(dates) {
+		dernier := (len(dates) + perPage - 1) / perPage
+		writer.Header().Set("Link", strings.Join([]string{
+			fmt.Sprintf("<%s>; rel=\"next\"", s.pageURL(request, page+1, perPage)),
+			fmt.Sprintf("<%s>; rel=\"last\"", s.pageURL(request, dernier, perPage)),
+		}, ", "))
 	}
 	s.send(writer, 200, payload)
 }

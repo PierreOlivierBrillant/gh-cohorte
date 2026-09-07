@@ -3,6 +3,7 @@ package classroom
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
@@ -199,4 +200,71 @@ func ordonner(rapprochements []roster.Pairing, logins []string) []roster.Pairing
 		ordonnes = append(ordonnes, parLogin[login])
 	}
 	return ordonnes
+}
+
+// --- deviner la place d'arrivée
+
+// Trois questions, trois sources. Le cours est dans le nom du fichier
+// d'Omnivox, le groupe dans sa colonne « Groupe », et la session dans la date
+// du premier commit d'un dépôt : un travail se fait pendant la session où on
+// l'a donné, et son plus vieux commit tombe dedans.
+//
+// Aucune des trois n'est sûre, et c'est pourquoi elles ne font que préremplir :
+// tout reste modifiable, et ce qui n'a pas pu être deviné reste vide plutôt que
+// d'être inventé.
+
+// Place est la place d'arrivée telle qu'on peut la deviner.
+type Place struct {
+	Session string `json:"session"`
+	Course  string `json:"course"`
+	Group   string `json:"group"`
+	// Groups nomme les groupes quand la liste en mêle plusieurs : aucun ne
+	// peut alors être choisi à la place de quelqu'un.
+	Groups []string `json:"groups,omitempty"`
+}
+
+// GuessPlace devine la place d'arrivée depuis la liste, son nom de fichier, et
+// la date du premier commit du travail. Une date nulle ne dit rien de la
+// session : le champ reste vide.
+func GuessPlace(filename string, entries []roster.Entry, premier time.Time) Place {
+	indices := roster.HintsFrom(filename, entries)
+	devinee := Place{Course: indices.Course, Group: indices.Group, Groups: indices.Groups}
+	if !premier.IsZero() {
+		devinee.Session = naming.SessionAt(premier)
+	}
+	return devinee
+}
+
+// depotsInterroges borne la recherche de la date : si les cinq premiers dépôts
+// d'un travail sont vides, c'est que personne n'a encore rien remis, et
+// interroger les trente-cinq autres ne changerait rien qu'au temps d'attente.
+const depotsInterroges = 5
+
+// FirstCommitLookup rend la date du premier commit d'un dépôt, ou une date
+// nulle s'il n'en a pas.
+type FirstCommitLookup func(repo string) (time.Time, error)
+
+// AssignmentStart cherche quand un travail a commencé : la date du plus vieux
+// commit qu'un de ses dépôts porte. Un seul suffit — ils ont tous été donnés le
+// même jour, et une session dure des mois.
+func AssignmentStart(prefix string, repos []groups.RepoInfo, lire FirstCommitLookup) time.Time {
+	groupe := groups.Build(prefix, repos)
+	for index, depot := range groupe.Repos {
+		if index >= depotsInterroges {
+			break
+		}
+		if moment, err := lire(depot.Name); err == nil && !moment.IsZero() {
+			return moment
+		}
+	}
+	return time.Time{}
+}
+
+// Scope rend la place sous la forme « a26.5n6.1030 », ou rien s'il manque un
+// niveau : une place à trous ne désigne aucun dépôt.
+func (p Place) Scope() string {
+	if p.Session == "" || p.Course == "" || p.Group == "" {
+		return ""
+	}
+	return naming.Prefix(p.Session, p.Course, p.Group)
 }

@@ -2971,6 +2971,8 @@ async function preparerImport() {
   importPlan = null;
   importNoms = [];
   importChoix = new Map();
+  importDevinee = {};
+  $('import-place-note').textContent = '';
   for (const nom of ['travail', 'liste', 'place', 'verifier', 'journal']) {
     marquerEtape(nom, '');
   }
@@ -2989,7 +2991,12 @@ async function preparerImport() {
           importTravail = travail.prefix;
           if (!$('import-nom').value.trim()) $('import-nom').value = travail.prefix;
           marquerEtape('travail', `${travail.prefix} · ${travail.count} dépôt(s)`);
-          ouvrirEtape($('import-liste').value.trim() ? 'place' : 'liste');
+          if (!$('import-liste').value.trim()) {
+            ouvrirEtape('liste');
+            return;
+          }
+          ouvrirEtape('place');
+          devinerPlace();
         },
       }),
       el('span', {}, el('code', { texte: travail.prefix }),
@@ -2999,7 +3006,7 @@ async function preparerImport() {
 
 // --- 2. la liste
 
-$('import-liste').addEventListener('change', () => {
+$('import-liste').addEventListener('change', async () => {
   const valeur = $('import-liste').value.trim();
   marquerEtape('liste', valeur);
   // Une liste qui change annule les rapprochements déjà retenus : ils
@@ -3007,8 +3014,61 @@ $('import-liste').addEventListener('change', () => {
   importNoms = [];
   importChoix = new Map();
   marquerEtape('verifier', '');
-  if (valeur && importTravail) ouvrirEtape('place');
+  if (!valeur || !importTravail) return;
+  ouvrirEtape('place');
+  await devinerPlace();
 });
+
+// laListe rassemble ce qui désigne la liste : son chemin quand elle en a un,
+// son contenu quand elle a été déposée, et son nom dans les deux cas — c'est
+// lui qui porte le cours et le groupe.
+function laListe() {
+  return {
+    prefix: importTravail,
+    path: cheminDepot('import-liste'),
+    filename: $('import-liste').value.trim(),
+    content: contenuDepot('import-liste') || null,
+  };
+}
+
+// --- 3. la place, devinée puis corrigée
+
+// Les trois champs arrivent préremplis : le cours est dans le nom du fichier
+// d'Omnivox, le groupe dans la colonne qui le porte, et la session dans la
+// date du plus vieux commit du travail. Rien n'est imposé — une devinette
+// propose, elle ne reprend jamais la main sur ce qu'on a tapé.
+let importDevinee = {};
+
+async function devinerPlace() {
+  const place = await api('POST',
+    `/api/orgs/${encode(etat.organisation)}/import/place`, laListe()).catch(() => null);
+  // Ne pas savoir deviner n'est pas une panne : les champs restent à remplir.
+  if (!place) return;
+
+  poser('import-session', place.session, importDevinee.session);
+  poser('import-cours', place.course, importDevinee.course);
+  poser('import-groupe', place.group, importDevinee.group);
+  importDevinee = place;
+
+  const note = $('import-place-note');
+  if ((place.groups || []).length) {
+    note.textContent = 'La liste mêle les groupes ' + place.groups.join(', ')
+      + ' : indiquez celui qui reçoit ces dépôts.';
+    return;
+  }
+  const devines = [place.session, place.course, place.group].filter(Boolean).length;
+  note.textContent = devines
+    ? 'Prérempli depuis la liste et le premier commit du travail. Corrigez au besoin.'
+    : '';
+}
+
+// poser remplit un champ deviné sans effacer ce qu'on a tapé soi-même.
+function poser(id, valeur, ancienne) {
+  const champ = $(id);
+  const actuel = champ.value.trim();
+  if (actuel && actuel !== ancienne) return;
+  champ.value = valeur || '';
+}
 
 // --- 3. la place, puis la vérification
 
@@ -3032,6 +3092,7 @@ function corpsImport() {
     name: $('import-nom').value.trim() || importTravail,
     scope: [session, cours, groupe].join('.'),
     path: cheminDepot('import-liste'),
+    filename: $('import-liste').value.trim(),
     content: contenuDepot('import-liste') || null,
   };
   // Dès qu'un rapprochement a été touché, c'est l'écran qui fait foi : le

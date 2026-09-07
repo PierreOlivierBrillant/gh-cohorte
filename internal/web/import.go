@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
@@ -26,9 +27,11 @@ type importInput struct {
 	Scope string `json:"scope"`
 	// Path est le fichier de la liste, Content ses octets quand elle a été
 	// déposée dans la page — un navigateur ne donne jamais le chemin d'un
-	// fichier déposé, mais il en donne le contenu.
-	Path    string `json:"path"`
-	Content []byte `json:"content"`
+	// fichier déposé, mais il en donne le contenu. Filename porte alors son
+	// nom, qui dit le cours et le groupe là où le chemin manque.
+	Path     string `json:"path"`
+	Filename string `json:"filename"`
+	Content  []byte `json:"content"`
 	// People remplace la liste quand un rapprochement a été corrigé à l'écran.
 	// Sa présence dit aussi que plus rien ne doit être deviné : le jugement
 	// rendu tient, y compris quand il consiste à ne rapprocher personne.
@@ -113,6 +116,37 @@ func (s *Server) entries(body importInput) ([]roster.Entry, bool, error) {
 		return nil, false, valid.Errorf("Aucun étudiant dans la liste fournie.")
 	}
 	return liste.Entries, true, nil
+}
+
+// handleGuessPlace devine la place d'arrivée, pour que les trois champs de
+// l'étape suivante arrivent déjà remplis.
+//
+// La date qui donne la session coûte deux requêtes sur un seul dépôt : c'est
+// le prix d'une devinette, et il ne dépend pas de la taille du travail.
+func (s *Server) handleGuessPlace(writer http.ResponseWriter, request *http.Request) {
+	org, body, err := s.importRequest(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	entrees, _, err := s.entries(body)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	repos, _, err := s.repos(org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	nom := body.Path
+	if nom == "" {
+		nom = body.Filename
+	}
+	debut := classroom.AssignmentStart(body.Prefix, repos, func(depot string) (time.Time, error) {
+		return s.deps.Client.FirstCommit(org, depot)
+	})
+	writeJSON(writer, http.StatusOK, classroom.GuessPlace(nom, entrees, debut))
 }
 
 // handleImportPreview montre le renommage sans rien écrire.

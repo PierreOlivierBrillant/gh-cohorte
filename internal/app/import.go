@@ -3,6 +3,7 @@ package app
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
@@ -52,11 +53,14 @@ func (i *importSession) run() (int, error) {
 	if err != nil || prefixe == "" {
 		return ExitOK, err
 	}
-	entrees, err := i.charger()
+	entrees, fichier, err := i.charger()
 	if err != nil {
 		return ExitOK, err
 	}
-	place, err := i.choisirPlace()
+	debut := classroom.AssignmentStart(prefixe, repos, func(depot string) (time.Time, error) {
+		return i.session.Client.FirstCommit(i.org, depot)
+	})
+	place, err := i.choisirPlace(classroom.GuessPlace(fichier, entrees, debut))
 	if err != nil {
 		return ExitOK, err
 	}
@@ -140,13 +144,14 @@ func (i *importSession) choisirTravail(dehors classroom.Foreign) (string, error)
 	return i.session.Prompt.Choose("Travail à reprendre", options, "")
 }
 
-// charger lit la liste des étudiants, et explique où la prendre.
-func (i *importSession) charger() ([]roster.Entry, error) {
+// charger lit la liste des étudiants, et explique où la prendre. Le chemin est
+// rendu avec elle : le nom du fichier dit le cours et le groupe.
+func (i *importSession) charger() ([]roster.Entry, string, error) {
 	console := i.session.Console
 	chemin := strings.TrimSpace(i.session.Options.Roster)
 	if chemin == "" {
 		if !i.session.Interactive() {
-			return nil, valid.Errorf(
+			return nil, "", valid.Errorf(
 				"Liste manquante : passez --roster en mode non interactif.")
 		}
 		console.Blank()
@@ -160,34 +165,43 @@ func (i *importSession) charger() ([]roster.Entry, error) {
 			Complete: complete.Path,
 		})
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		chemin = reponse
 	}
 	liste, err := roster.Load(chemin)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	for _, souci := range liste.Issues {
 		console.Warning("Ligne %d : %s", souci.Line, souci.Message)
 	}
 	if len(liste.Entries) == 0 {
-		return nil, valid.Errorf("Aucun étudiant dans « %s ».", chemin)
+		return nil, "", valid.Errorf("Aucun étudiant dans « %s ».", chemin)
 	}
 	console.Printf("  %s étudiant(s) lus.", console.OK(itoa(len(liste.Entries))))
-	return liste.Entries, nil
+	return liste.Entries, chemin, nil
 }
 
-// choisirPlace demande où les dépôts doivent arriver.
-func (i *importSession) choisirPlace() (string, error) {
+// choisirPlace demande où les dépôts doivent arriver, en proposant ce qui a pu
+// être deviné : le cours dans le nom du fichier, le groupe dans sa colonne, la
+// session dans le premier commit du travail. Rien n'est imposé — la proposition
+// s'efface d'un caractère.
+func (i *importSession) choisirPlace(devinee classroom.Place) (string, error) {
 	if place := strings.TrimSpace(i.session.Options.Into); place != "" {
 		return place, nil
 	}
 	if !i.session.Interactive() {
 		return "", valid.Errorf("Place manquante : passez --into en mode non interactif.")
 	}
+	console := i.session.Console
+	if len(devinee.Groups) > 0 {
+		console.Warning("La liste mêle les groupes %s : indiquez celui qui reçoit ces dépôts.",
+			strings.Join(devinee.Groups, ", "))
+	}
 	return i.session.Prompt.Ask(ui.Question{
-		Title: "Place d'arrivée, par exemple « a26.5n6.1030 »",
+		Title:   "Place d'arrivée, par exemple « a26.5n6.1030 »",
+		Default: devinee.Scope(),
 		Validate: func(valeur string) (string, error) {
 			return naming.Path(valeur, "Place")
 		},

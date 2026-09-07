@@ -188,3 +188,41 @@ func TestImportCorrigeUnRapprochementALaMain(t *testing.T) {
 		}
 	}
 }
+
+// La place d'arrivée arrive proposée : le cours vient du nom du fichier, le
+// groupe de sa colonne, la session du premier commit du travail.
+func TestImportProposeLaPlaceDArrivee(t *testing.T) {
+	state := classroomOrg(t)
+	// Un travail donné en septembre : c'est la session d'automne.
+	state.Repos["acme/tp1-lyonnais"].History = []string{"2026-09-14T08:00:00Z"}
+
+	h := nouveau(t, state)
+	h.Options.ImportRequested = true
+	h.Options.Import = "tp1"
+	h.Options.Roster = listeOmnivox(t, t.TempDir(),
+		`="1680229";="1040";="Adam-Larocque";="Laurent";="ADAL20059908";`,
+		`="1983429";="1040";="Lyonnais";="Étienne";="LYOE78040203";`,
+	)
+	// Le nom du fichier porte le cours et le groupe ; la colonne dit le groupe.
+	chemin := filepath.Join(filepath.Dir(h.Options.Roster),
+		"ListeEtudiants_cours4203N5EM_gr1040.csv")
+	if err := os.Rename(h.Options.Roster, chemin); err != nil {
+		t.Fatal(err)
+	}
+	h.Options.Roster = chemin
+
+	code, scripte := h.script(
+		"",    // la place proposée convient
+		"non", // rien à corriger
+		"oui", // renommer
+	)
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	if len(scripte.Questions) == 0 {
+		t.Fatalf("aucune question posée :\n%s", h.texte())
+	}
+	if !slices.Contains(h.depots(), "a26.3n5.1040.tp1.etienne-lyonnais") {
+		t.Fatalf("la place proposée n'a pas été suivie : %v", h.depots())
+	}
+}

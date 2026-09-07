@@ -214,3 +214,58 @@ func TestUnTravailAbsentEstRefuse(t *testing.T) {
 		t.Fatalf("message = %s", contenu)
 	}
 }
+
+// L'interface propose la place d'arrivée avant qu'on ait rien tapé : le cours
+// vient du nom du fichier, le groupe de sa colonne, la session du premier
+// commit du travail.
+func TestLInterfaceDevineLaPlaceDArrivee(t *testing.T) {
+	state := classroomOrg()
+	state.Repos["acme/tp1-lyonnais"].History = []string{"2027-02-03T10:00:00Z"}
+	h := nouveau(t, state)
+
+	var place struct {
+		Session string   `json:"session"`
+		Course  string   `json:"course"`
+		Group   string   `json:"group"`
+		Groups  []string `json:"groups"`
+	}
+	// Une liste déposée dans la page : pas de chemin, mais un contenu et un
+	// nom — et c'est le nom qui porte le cours.
+	contenu, err := os.ReadFile(listeOmnivox(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.json(http.MethodPost, "/api/orgs/acme/import/place", map[string]any{
+		"prefix": "tp1", "content": contenu,
+		"filename": "ListeEtudiants_cours4204N6EM_gr1030.csv",
+	}, &place)
+
+	// Février tombe dans la session d'hiver ; le printemps, lui, ne se devine
+	// jamais.
+	if place.Session != "h27" {
+		t.Fatalf("session = %q", place.Session)
+	}
+	if place.Course != "4N6" {
+		t.Fatalf("cours = %q", place.Course)
+	}
+	// La colonne « Groupe » de la liste l'emporte sur le nom du fichier.
+	if place.Group != "1030" || len(place.Groups) != 0 {
+		t.Fatalf("groupe = %q, groupes = %v", place.Group, place.Groups)
+	}
+}
+
+// Un dépôt sans historique ne dit rien de la session, et se taire vaut mieux
+// qu'inventer une place où des dépôts iraient atterrir.
+func TestSansHistoriqueLaSessionResteAChoisir(t *testing.T) {
+	h := nouveau(t, classroomOrg())
+	var place struct {
+		Session string `json:"session"`
+		Course  string `json:"course"`
+	}
+	h.json(http.MethodPost, "/api/orgs/acme/import/place", map[string]any{
+		"prefix": "tp1", "path": listeOmnivox(t),
+	}, &place)
+	if place.Session != "" {
+		t.Fatalf("session inventée : %q", place.Session)
+	}
+}

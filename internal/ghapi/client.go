@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -1038,3 +1039,53 @@ func repoPath(owner, repo string) string {
 }
 
 func itoa(value int64) string { return strconv.FormatInt(value, 10) }
+
+// FirstCommit rend la date du premier commit d'un dépôt.
+//
+// GitHub ne sait rendre les commits que du plus récent au plus ancien : le
+// premier est donc le dernier de la dernière page. Une page d'un seul commit
+// fait tenir la recherche en deux requêtes, quel que soit l'historique — c'est
+// ce que coûte une date qui sert à deviner, pas à décider.
+//
+// Un dépôt vide n'a pas de premier commit : GitHub répond 409, et la date
+// rendue est nulle sans que ce soit une erreur.
+func (c *Client) FirstCommit(owner, repo string) (time.Time, error) {
+	base := c.url(repoPath(owner, repo) + "/commits?per_page=1")
+	moment, link, err := c.commitPage(base + "&page=1")
+	if err != nil || moment.IsZero() {
+		return moment, err
+	}
+	if dernier := lastPage(link); dernier > 1 {
+		moment, _, err = c.commitPage(base + "&page=" + strconv.Itoa(dernier))
+	}
+	return moment, err
+}
+
+// commitPage lit une page de commits et rend la date du premier qu'elle porte.
+func (c *Client) commitPage(address string) (time.Time, string, error) {
+	content, link, err := c.fetchPage(address)
+	if err != nil {
+		var echec *Error
+		// Un dépôt vide, ou dont on ne voit pas l'historique, ne dit rien —
+		// et ne devoir rien dire n'est pas un échec.
+		if errors.As(err, &echec) &&
+			(echec.Status == http.StatusConflict || echec.Status == http.StatusNotFound) {
+			return time.Time{}, "", nil
+		}
+		return time.Time{}, "", err
+	}
+	var commits []struct {
+		Commit struct {
+			Author struct {
+				Date time.Time `json:"date"`
+			} `json:"author"`
+		} `json:"commit"`
+	}
+	if err := json.Unmarshal(content, &commits); err != nil {
+		return time.Time{}, "", &Error{Message: "Historique illisible : " + err.Error()}
+	}
+	if len(commits) == 0 {
+		return time.Time{}, link, nil
+	}
+	return commits[0].Commit.Author.Date, link, nil
+}

@@ -3,6 +3,7 @@ package classroom_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
@@ -182,5 +183,79 @@ func TestSansRapprochementRienNEstDevine(t *testing.T) {
 	// L'ordre des dépôts est tenu même quand rien n'est reconnu.
 	if len(plan.Pairings) != 2 || plan.Pairings[0].Login != "ladamlarocque" {
 		t.Fatalf("rapprochements = %+v", plan.Pairings)
+	}
+}
+
+// La place d'arrivée se devine : le cours dans le nom du fichier, le groupe
+// dans la colonne qui le porte, la session dans le premier commit du travail.
+func TestLaPlaceDArriveeSeDevine(t *testing.T) {
+	entrees := []roster.Entry{
+		{FullName: "Étienne Lyonnais", Group: "1040"},
+		{FullName: "Mei Chen", Group: "1040"},
+	}
+	premier := time.Date(2026, time.September, 14, 8, 0, 0, 0, time.UTC)
+	place := classroom.GuessPlace("ListeEtudiants_cours4203N5EM_gr1040.csv", entrees, premier)
+	if place.Scope() != "a26.3N5.1040" {
+		t.Fatalf("place = %+v", place)
+	}
+}
+
+// Les mois du printemps sont ceux de l'hiver : « p26 » se compose et se lit,
+// mais aucune date ne le désigne, alors la devinette ne le propose jamais.
+func TestLePrintempsNeSeDevinePas(t *testing.T) {
+	saisons := map[time.Month]string{
+		time.January: "h26", time.April: "h26", time.May: "h26",
+		time.June: "e26", time.July: "e26",
+		time.August: "a26", time.December: "a26",
+	}
+	for mois, attendu := range saisons {
+		moment := time.Date(2026, mois, 15, 0, 0, 0, 0, time.UTC)
+		if devinee := classroom.GuessPlace("", nil, moment); devinee.Session != attendu {
+			t.Fatalf("%s → %q, attendu %q", mois, devinee.Session, attendu)
+		}
+	}
+}
+
+// Ce qui n'a pas pu être deviné reste vide : inventer une place ferait
+// renommer des dépôts au mauvais endroit.
+func TestCeQuiNeSeDevinePasResteVide(t *testing.T) {
+	place := classroom.GuessPlace("cohorte.csv", nil, time.Time{})
+	if place.Session != "" || place.Course != "" || place.Group != "" {
+		t.Fatalf("place inventée : %+v", place)
+	}
+	if place.Scope() != "" {
+		t.Fatalf("une place à trous a produit une portée : %q", place.Scope())
+	}
+}
+
+// La recherche de la date s'arrête après quelques dépôts : si les premiers sont
+// vides, personne n'a encore rien remis, et interroger tout le groupe ne
+// changerait rien qu'au temps d'attente.
+func TestLaDateSeChercheDansQuelquesDepotsSeulement(t *testing.T) {
+	var noms []string
+	inventaire := depots("tp1-a", "tp1-b", "tp1-c", "tp1-d", "tp1-e", "tp1-f", "tp1-g")
+	debut := classroom.AssignmentStart("tp1", inventaire, func(depot string) (time.Time, error) {
+		noms = append(noms, depot)
+		return time.Time{}, nil
+	})
+	if !debut.IsZero() {
+		t.Fatalf("une date est sortie de dépôts vides : %s", debut)
+	}
+	if len(noms) != 5 {
+		t.Fatalf("%d dépôts interrogés : %v", len(noms), noms)
+	}
+}
+
+// Le premier dépôt qui répond suffit : les suivants ne sont pas dérangés.
+func TestLaDateSArreteAuPremierDepotQuiRepond(t *testing.T) {
+	var demandes int
+	attendu := time.Date(2027, time.February, 3, 10, 0, 0, 0, time.UTC)
+	debut := classroom.AssignmentStart("tp1", depots("tp1-a", "tp1-b", "tp1-c"),
+		func(string) (time.Time, error) {
+			demandes++
+			return attendu, nil
+		})
+	if !debut.Equal(attendu) || demandes != 1 {
+		t.Fatalf("début = %s après %d demande(s)", debut, demandes)
 	}
 }
