@@ -428,3 +428,55 @@ func TestLeRegistreEviteUnRapprochementAChercher(t *testing.T) {
 		t.Fatalf("raison = %q", trouve.Reason)
 	}
 }
+
+// Les dépôts se choisissent un à un : ce qu'on écarte n'est ni repris, ni
+// rapproché.
+func TestLaSelectionDeDepotsLimiteLaReprise(t *testing.T) {
+	h := nouveau(t, classroomOrg())
+
+	// L'écran demande d'abord ce que le travail contient, pour le montrer.
+	var vue struct {
+		Prefix string `json:"prefix"`
+		Repos  []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"repos"`
+	}
+	h.json(http.MethodPost, "/api/orgs/acme/import/repos",
+		map[string]any{"prefix": "tp1"}, &vue)
+	if len(vue.Repos) != 3 {
+		t.Fatalf("dépôts = %+v", vue.Repos)
+	}
+	// Chaque nom mène au dépôt : l'écran en fait un lien.
+	for _, depot := range vue.Repos {
+		if !strings.Contains(depot.URL, "/acme/"+depot.Name) {
+			t.Fatalf("adresse = %q", depot.URL)
+		}
+	}
+
+	var plan planVue
+	h.json(http.MethodPost, "/api/orgs/acme/import/preview", map[string]any{
+		"prefix": "tp1", "name": "tp1", "scope": "a26.5n6.1030",
+		"path": listeOmnivox(t),
+		"only": []string{"tp1-ladamlarocque", "tp1-felixbourassa"},
+	}, &plan)
+
+	if len(plan.Moves) != 2 || len(plan.Pairings) != 2 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	for _, ligne := range plan.Moves {
+		if ligne.Repo == "tp1-lyonnais" {
+			t.Fatalf("un dépôt écarté a été repris : %+v", plan.Moves)
+		}
+	}
+
+	// Et la reprise elle-même s'y tient.
+	h.travail(http.MethodPost, "/api/orgs/acme/import", map[string]any{
+		"prefix": "tp1", "name": "tp1", "scope": "a26.5n6.1030",
+		"path": listeOmnivox(t),
+		"only": []string{"tp1-ladamlarocque", "tp1-felixbourassa"},
+	})
+	if noms := h.depots(); !slices.Contains(noms, "tp1-lyonnais") {
+		t.Fatalf("le dépôt écarté a bougé : %v", noms)
+	}
+}

@@ -519,3 +519,82 @@ func TestImportDouteEncoreDunCompteQueSeulLeNomDonne(t *testing.T) {
 		t.Fatalf("non confirmés = %v", plan.Unconfirmed)
 	}
 }
+
+// Un travail ne se reprend pas toujours en entier : un dépôt d'essai, celui
+// d'une personne qui a abandonné. Ce qu'on décoche est écarté pour de bon.
+func TestImportNeReprendQueLesDepotsRetenus(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-felixbourassa", "tp1-essai")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+		Only: []string{"tp1-ladamlarocque", "tp1-felixbourassa"},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if len(plan.Moves) != 2 {
+		t.Fatalf("renommages = %+v", plan.Moves)
+	}
+	for _, ligne := range plan.Moves {
+		if strings.Contains(ligne.Repo, "essai") {
+			t.Fatalf("un dépôt écarté a été repris : %+v", plan.Moves)
+		}
+	}
+	// Il ne se rapproche pas non plus : il n'est plus de la partie.
+	for _, trouve := range plan.Pairings {
+		if trouve.Login == "essai" {
+			t.Fatalf("un dépôt écarté a été rapproché : %+v", trouve)
+		}
+	}
+}
+
+// Une sélection vide n'en est pas une : le travail est repris entier.
+func TestImportSansSelectionReprendToutLeTravail(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-felixbourassa")
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true, Only: nil,
+	}, inventaire)
+	if err != nil || len(plan.Moves) != 2 {
+		t.Fatalf("plan = %+v, err = %v", plan, err)
+	}
+}
+
+// Tout décocher n'écrit rien, et le dit.
+func TestImportRefuseUneSelectionQuiNeGardeRien(t *testing.T) {
+	inventaire := depots("tp1-ladamlarocque", "tp1-felixbourassa")
+
+	_, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "tp1", Entries: inscrits(), Guess: true,
+		Only: []string{"tp1-personne-de-ce-nom"},
+	}, inventaire)
+	if err == nil || !strings.Contains(err.Error(), "Aucun dépôt retenu") {
+		t.Fatalf("erreur = %v", err)
+	}
+}
+
+// Les dépôts écartés ne comptent pas dans les travaux qu'un préfixe cachait :
+// ne garder que « kickmyb-firebase » ne doit plus poser de question.
+func TestImportSelectionResoutUnPrefixeFourreTout(t *testing.T) {
+	inventaire := depots(
+		"kickmyb-firebase-walid", "kickmyb-firebase-felixb", "kickmyb-android-lyonnais")
+	acces := map[string]string{
+		"kickmyb-firebase-walid":   "walid",
+		"kickmyb-firebase-felixb":  "felixb",
+		"kickmyb-android-lyonnais": "lyonnais",
+	}
+
+	plan, err := classroom.PlanImport(arrivee(), classroom.ImportRequest{
+		Prefix: "kickmyb", Entries: inscrits(), Guess: true, Owners: acces,
+		Only: []string{"kickmyb-firebase-walid", "kickmyb-firebase-felixb"},
+	}, inventaire)
+	if err != nil {
+		t.Fatalf("plan refusé : %v", err)
+	}
+	if plan.Divided() {
+		t.Fatalf("un seul travail reste sélectionné : %+v", plan.Splits)
+	}
+	if plan.Prefix != "kickmyb-firebase" || len(plan.Moves) != 2 {
+		t.Fatalf("plan = %+v", plan)
+	}
+}

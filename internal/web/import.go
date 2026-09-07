@@ -35,6 +35,8 @@ type importInput struct {
 	// NamedOnly laisse où ils sont les dépôts dont on ne connaît pas la
 	// personne.
 	NamedOnly bool `json:"named_only"`
+	// Only nomme les dépôts retenus. Vide, le travail est repris entier.
+	Only []string `json:"only"`
 	// People remplace la liste quand un rapprochement a été corrigé à l'écran.
 	// Sa présence dit aussi que plus rien ne doit être deviné : le jugement
 	// rendu tient, y compris quand il consiste à ne rapprocher personne.
@@ -60,6 +62,41 @@ func (s *Server) handleForeign(writer http.ResponseWriter, request *http.Request
 	})
 }
 
+// foreignRepo est un dépôt qu'on peut retenir ou écarter, tel que l'écran le
+// montre : son nom, où le lire sur GitHub, et sa dernière trace de vie.
+type foreignRepo struct {
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	Private  bool   `json:"private"`
+	PushedAt string `json:"pushed_at"`
+}
+
+// handleForeignRepos énumère les dépôts d'un travail à reprendre. L'inventaire
+// est déjà en main : c'est une lecture, pas une requête de plus.
+func (s *Server) handleForeignRepos(writer http.ResponseWriter, request *http.Request) {
+	org, body, err := s.importRequest(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	repos, _, err := s.repos(org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	groupe := groups.Build(body.Prefix, repos)
+	lignes := make([]foreignRepo, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		lignes = append(lignes, foreignRepo{
+			Name: depot.Name, URL: s.urlOf(org, depot),
+			Private: depot.Private, PushedAt: depot.PushedAt,
+		})
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"prefix": groupe.Prefix, "repos": lignes,
+	})
+}
+
 // importPlan compose ce qu'une importation ferait.
 //
 // La liste vient du fichier, ou de ce que l'interface renvoie après correction :
@@ -82,10 +119,11 @@ func (s *Server) importPlan(org string, body importInput) (
 	}
 	// Qui a accès à quoi se lit avant tout le reste : c'est ce qui dit le
 	// compte de chaque dépôt, et donc où finit le travail dans son nom.
-	proprietaires := s.owners(org, body.Prefix, repos)
+	proprietaires := s.owners(org, body.Prefix, body.Only, repos)
 	demande := classroom.ImportRequest{
 		Prefix: body.Prefix, Name: body.Name, Entries: entrees, Guess: deviner,
 		NamedOnly: body.NamedOnly, Owners: proprietaires, Known: s.connus(org),
+		Only: body.Only,
 	}
 	if deviner {
 		// Les profils GitHub ne servent qu'à la première lecture : après une
@@ -127,14 +165,27 @@ func (s *Server) connus(org string) map[string]string {
 // owners relève, pour les dépôts d'un préfixe, le compte GitHub que leurs accès
 // désignent. Un appel par dépôt la première fois, rien ensuite : le cache les
 // retient, et l'écran les redemande à chaque correction de rapprochement.
-func (s *Server) owners(org, prefix string, repos []groups.RepoInfo) map[string]string {
+func (s *Server) owners(org, prefix string, seulement []string,
+	repos []groups.RepoInfo) map[string]string {
 	groupe := groups.Build(prefix, repos)
 	if groupe.Len() == 0 {
 		return nil
 	}
+	// Un dépôt écarté ne sera ni repris ni rapproché : lire ses accès coûterait
+	// une requête pour rien.
+	retenus := map[string]bool{}
+	for _, nom := range seulement {
+		retenus[strings.ToLower(strings.TrimSpace(nom))] = true
+	}
 	noms := make([]string, 0, groupe.Len())
 	for _, depot := range groupe.Repos {
+		if len(retenus) > 0 && !retenus[strings.ToLower(depot.Name)] {
+			continue
+		}
 		noms = append(noms, depot.Name)
+	}
+	if len(noms) == 0 {
+		return nil
 	}
 	trouves := s.resolver(org).Owners(org, noms, s.deps.Viewer, nil)
 	comptes := make(map[string]string, len(trouves))

@@ -34,6 +34,9 @@ type Options struct {
 	ImportRequested bool
 	// Into est la place d'arrivée d'une importation : « a26.5n6.1030 ».
 	Into string
+	// Repos restreint une reprise aux dépôts nommés, séparés par des virgules.
+	// Vide, le travail est repris entier.
+	Repos string
 	// NamedOnly laisse où ils sont les dépôts d'une importation dont on ne
 	// connaît pas la personne, plutôt que de les reprendre sous le compte
 	// qu'ils portent.
@@ -143,6 +146,7 @@ Drapeaux :
   --never-pushed           ne lister que les dépôts sans aucun envoi
   --sort nom|compte|envoi  colonne de tri de la liste (défaut : nom)
   --sort-desc              trier du plus grand au plus petit
+  --repos DEPOTS           ne reprendre que ces dépôts (noms séparés par des virgules)
   --named-only             ne reprendre que les dépôts dont l'étudiant est connu
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
@@ -226,6 +230,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.BoolVar(&options.SortDesc, "sort-desc", false, "trier du plus grand au plus petit")
 
 	set.StringVar(&options.Into, "into", "", "place d'arrivée d'une importation")
+	set.StringVar(&options.Repos, "repos", "",
+		"dépôts à reprendre, séparés par des virgules (défaut : tous)")
 	set.BoolVar(&options.NamedOnly, "named-only", false,
 		"ne reprendre que les dépôts dont l'étudiant est connu")
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")

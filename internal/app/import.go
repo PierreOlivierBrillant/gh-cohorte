@@ -27,6 +27,8 @@ import (
 type importSession struct {
 	session *Session
 	org     string
+	// retenus nomme les dépôts que la reprise garde. Vide, elle les prend tous.
+	retenus []string
 	// proprietaires dit, pour un dépôt, le compte GitHub que ses accès
 	// désignent. Relevé une fois le travail choisi, il sert à chaque plan
 	// refait : un rapprochement corrigé ne doit pas rendre son compte au nom.
@@ -57,6 +59,10 @@ func (i *importSession) run() (int, error) {
 	if err != nil || prefixe == "" {
 		return ExitOK, err
 	}
+	i.retenus, err = i.choisirDepots(prefixe, repos)
+	if err != nil {
+		return ExitValidation, err
+	}
 	entrees, fichier, err := i.charger()
 	if err != nil {
 		return ExitOK, err
@@ -80,12 +86,12 @@ func (i *importSession) run() (int, error) {
 	}
 	// Qui a accès à quoi se lit avant le reste : c'est ce qui dit le compte de
 	// chaque dépôt, et donc où finit le travail dans son nom.
-	i.proprietaires = i.acces(prefixe, repos)
+	i.proprietaires = i.acces(prefixe, i.retenus, repos)
 	plan, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: prefixe, Name: nom, Entries: entrees,
 		Profiles: i.profils(prefixe, repos), Guess: true,
 		NamedOnly: i.session.Options.NamedOnly, Owners: i.proprietaires,
-		Known: i.connus(),
+		Known: i.connus(), Only: i.retenus,
 	}, repos)
 	if err != nil {
 		return ExitValidation, err
@@ -102,7 +108,7 @@ func (i *importSession) run() (int, error) {
 			Prefix: choisi, Name: nom, Entries: entrees,
 			Profiles: i.profils(choisi, repos), Guess: true,
 			NamedOnly: i.session.Options.NamedOnly, Owners: i.proprietaires,
-			Known: i.connus(),
+			Known: i.connus(), Only: i.retenus,
 		}, repos)
 		if err != nil {
 			return ExitValidation, err
@@ -201,14 +207,27 @@ func (i *importSession) connus() map[string]string {
 // acces relève, pour les dépôts d'un préfixe, le compte GitHub que leurs accès
 // désignent. C'est un appel par dépôt la première fois, et rien ensuite : le
 // cache les retient d'une reprise à l'autre.
-func (i *importSession) acces(prefixe string, repos []groups.RepoInfo) map[string]string {
+func (i *importSession) acces(prefixe string, seulement []string,
+	repos []groups.RepoInfo) map[string]string {
 	groupe := groups.Build(prefixe, repos)
 	if groupe.Len() == 0 {
 		return nil
 	}
+	// Un dépôt écarté ne sera ni repris ni rapproché : lire ses accès coûterait
+	// une requête pour rien.
+	gardes := map[string]bool{}
+	for _, nom := range seulement {
+		gardes[strings.ToLower(strings.TrimSpace(nom))] = true
+	}
 	noms := make([]string, 0, groupe.Len())
 	for _, depot := range groupe.Repos {
+		if len(gardes) > 0 && !gardes[strings.ToLower(depot.Name)] {
+			continue
+		}
 		noms = append(noms, depot.Name)
+	}
+	if len(noms) == 0 {
+		return nil
 	}
 	resolveur := identity.New(i.session.Client, i.session.Cache, i.session.Options.Jobs)
 	spin := ui.NewSpinner(i.session.Console, "Accès aux dépôts…")
@@ -253,6 +272,80 @@ func (i *importSession) choisirParmiLesCaches(plan classroom.Import) (string, er
 	}
 	options = append(options, ui.Option{Value: "", Label: "Revenir"})
 	return i.session.Prompt.Choose("Travail à reprendre", options, "")
+}
+
+// choisirDepots retient les dépôts à reprendre. Un travail ne se reprend pas
+// toujours en entier : un dépôt d'essai, celui d'une personne qui a abandonné,
+// celui d'une équipe qui remettra ailleurs.
+//
+// Tout est retenu d'entrée — écarter est le geste rare —, et une sélection qui
+// garde tout n'en est pas une : elle rend une liste vide, celle d'une reprise
+// ordinaire.
+func (i *importSession) choisirDepots(prefixe string, repos []groups.RepoInfo) (
+	[]string, error) {
+	groupe := groups.Build(prefixe, repos)
+	if groupe.Len() == 0 {
+		return nil, valid.Errorf("Aucun dépôt ne commence par « %s ».", prefixe)
+	}
+	if demande := strings.TrimSpace(i.session.Options.Repos); demande != "" {
+		return depotsNommes(groupe, demande)
+	}
+	if !i.session.Interactive() {
+		return nil, nil
+	}
+
+	console := i.session.Console
+	console.Blank()
+	console.Heading("Dépôts à reprendre")
+	options := make([]ui.Option, 0, groupe.Len())
+	coches := make([]bool, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		envoi := depot.PushedAt
+		if envoi == "" {
+			envoi = "jamais"
+		}
+		options = append(options, ui.Option{
+			Value: depot.Name, Label: depot.Name + "  " + console.Dim(envoi),
+		})
+		coches = append(coches, true)
+	}
+	indices, err := i.session.Prompt.MultiSelect("Dépôts à reprendre", options, coches)
+	if err != nil {
+		return nil, err
+	}
+	if len(indices) == 0 {
+		return nil, valid.Errorf("Aucun dépôt retenu : il n'y a rien à reprendre.")
+	}
+	if len(indices) == groupe.Len() {
+		return nil, nil
+	}
+	gardes := make([]string, 0, len(indices))
+	for _, index := range indices {
+		gardes = append(gardes, groupe.Repos[index].Name)
+	}
+	return gardes, nil
+}
+
+// depotsNommes lit la sélection passée en ligne de commande, et refuse un nom
+// qui ne désigne aucun dépôt du travail : le taper de travers ne doit pas
+// passer pour un choix.
+func depotsNommes(groupe groups.Group, demande string) ([]string, error) {
+	gardes := make([]string, 0, groupe.Len())
+	for _, morceau := range strings.Split(demande, ",") {
+		nom := strings.TrimSpace(morceau)
+		if nom == "" {
+			continue
+		}
+		depot, _, trouve := groupe.Find(nom)
+		if !trouve {
+			return nil, valid.Errorf("« %s » n'est pas un dépôt de « %s ».", nom, groupe.Prefix)
+		}
+		gardes = append(gardes, depot.Name)
+	}
+	if len(gardes) == 0 {
+		return nil, valid.Errorf("--repos ne nomme aucun dépôt.")
+	}
+	return gardes, nil
 }
 
 // charger lit la liste des étudiants, et explique où la prendre. Le chemin est
@@ -522,7 +615,7 @@ func (i *importSession) corriger(arrivee classroom.Classroom, plan classroom.Imp
 		refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 			Prefix: plan.Prefix, Name: plan.Name,
 			Entries: entreesRetenues(noms, retenus), NamedOnly: plan.NamedOnly,
-			Owners: i.proprietaires, Known: i.connus(),
+			Owners: i.proprietaires, Known: i.connus(), Only: i.retenus,
 		}, repos)
 		if err != nil {
 			return plan, err
@@ -552,7 +645,7 @@ func (i *importSession) laisserLesInconnus(arrivee classroom.Classroom,
 	refait, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: plan.Prefix, Name: plan.Name,
 		Entries: entreesRetenues(noms, retenus), NamedOnly: true,
-		Owners: i.proprietaires, Known: i.connus(),
+		Owners: i.proprietaires, Known: i.connus(), Only: i.retenus,
 	}, repos)
 	if err != nil {
 		return plan, err

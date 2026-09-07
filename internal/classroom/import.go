@@ -102,6 +102,11 @@ type ImportRequest struct {
 	// Profiles associe un compte au nom affiché de son profil GitHub. C'est
 	// l'indice le plus sûr après le numéro d'étudiant ; il peut être nil.
 	Profiles map[string]string
+	// Only restreint la reprise aux dépôts nommés, un travail n'ayant pas
+	// toujours à être repris en entier : un dépôt d'essai, celui d'une
+	// personne qui a abandonné, celui d'une équipe qui remettra ailleurs. Vide,
+	// tout le travail est repris.
+	Only []string
 	// Owners donne, pour un nom de dépôt, le compte GitHub que ses accès
 	// désignent. C'est la seule source sûre : un nom de dépôt ne dit pas où
 	// finit le travail, et le découper au jugé invente des comptes qui
@@ -137,6 +142,10 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 	groupe := groups.Build(prefix, repos)
 	if groupe.Len() == 0 {
 		return Import{}, valid.Errorf("Aucun dépôt ne commence par « %s ».", prefix)
+	}
+	if groupe = retenus(groupe, demande.Only); groupe.Len() == 0 {
+		return Import{}, valid.Errorf(
+			"Aucun dépôt retenu : la sélection ne garde rien de « %s ».", prefix)
 	}
 
 	// Les accès disent qui est derrière chaque dépôt ; le nom, lui, ne dit
@@ -196,6 +205,31 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 	}
 	plan.Moves = lignes
 	return plan, nil
+}
+
+// retenus applique la sélection : un travail n'a pas toujours à être repris en
+// entier. Une sélection vide n'en est pas une — elle laisse le travail entier,
+// et c'est ce que fait une reprise qu'on n'a pas pris la peine de restreindre.
+//
+// Les dépôts écartés le sont pour de bon : ils ne sont ni renommés, ni
+// rapprochés, ni comptés dans les travaux que le préfixe cachait.
+func retenus(groupe groups.Group, seulement []string) groups.Group {
+	if len(seulement) == 0 {
+		return groupe
+	}
+	voulus := make(map[string]bool, len(seulement))
+	for _, nom := range seulement {
+		if nom = strings.TrimSpace(nom); nom != "" {
+			voulus[strings.ToLower(nom)] = true
+		}
+	}
+	gardes := make([]groups.Repo, 0, len(groupe.Repos))
+	for _, depot := range groupe.Repos {
+		if voulus[strings.ToLower(depot.Name)] {
+			gardes = append(gardes, depot)
+		}
+	}
+	return groups.Group{Prefix: groupe.Prefix, Repos: gardes}
 }
 
 // depotLu est un dépôt du travail, tel que ses accès l'éclairent : le compte de

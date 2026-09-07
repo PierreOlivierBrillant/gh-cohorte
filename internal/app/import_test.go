@@ -159,6 +159,7 @@ func TestImportCorrigeUnRapprochementALaMain(t *testing.T) {
 	)
 
 	code, _ := h.script(
+		"tous",            // reprendre tous les dépôts du travail
 		"oui",             // corriger un rapprochement
 		"lyonnais",        // le compte à reprendre
 		"Sophie Tremblay", // la personne qu'il désigne vraiment
@@ -212,10 +213,11 @@ func TestImportProposeLaPlaceDArrivee(t *testing.T) {
 	h.Options.Roster = chemin
 
 	code, scripte := h.script(
-		"",    // la place proposée convient
-		"non", // rien à corriger
-		"non", // reprendre aussi le dépôt sans étudiant connu
-		"oui", // renommer
+		"tous", // reprendre tous les dépôts du travail
+		"",     // la place proposée convient
+		"non",  // rien à corriger
+		"non",  // reprendre aussi le dépôt sans étudiant connu
+		"oui",  // renommer
 	)
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
@@ -241,9 +243,10 @@ func TestImportPeutLaisserLesDepotsSansEtudiant(t *testing.T) {
 	h.Options.Roster = liste(t)
 
 	code, _ := h.script(
-		"non", // rien à corriger
-		"oui", // laisser où ils sont ceux qu'on ne connaît pas
-		"oui", // renommer
+		"tous", // reprendre tous les dépôts du travail
+		"non",  // rien à corriger
+		"oui",  // laisser où ils sont ceux qu'on ne connaît pas
+		"oui",  // renommer
 	)
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
@@ -276,4 +279,76 @@ func TestImportNamedOnlyAuDrapeau(t *testing.T) {
 		t.Fatalf("le dépôt inconnu a été repris : %v", h.depots())
 	}
 	h.contient("dépôt(s) sans étudiant connu", "laissés où ils sont")
+}
+
+// Un travail ne se reprend pas toujours en entier : on choisit les dépôts, et
+// les autres restent où ils sont.
+func TestImportNeReprendQueLesDepotsChoisis(t *testing.T) {
+	h := nouveau(t, classroomOrg(t))
+	h.Options.ImportRequested = true
+	h.Options.Import = "tp1"
+	h.Options.Into = "a26.5n6.1030"
+	h.Options.Roster = liste(t)
+
+	code, _ := h.script(
+		"1,2", // deux dépôts sur trois
+		"non", // rien à corriger
+		"oui", // renommer
+	)
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.depots()
+	repris := 0
+	for _, nom := range noms {
+		if strings.HasPrefix(nom, "a26.5n6.1030.tp1.") {
+			repris++
+		}
+	}
+	if repris != 2 {
+		t.Fatalf("%d dépôt(s) repris, deux attendus : %v", repris, noms)
+	}
+	if !slices.Contains(noms, "tp1-lyonnais") {
+		t.Fatalf("le dépôt écarté a été repris quand même : %v", noms)
+	}
+}
+
+// Le même choix se prend au drapeau, sans personne pour répondre.
+func TestImportChoisitLesDepotsAuDrapeau(t *testing.T) {
+	h := nouveau(t, classroomOrg(t))
+	h.Options.ImportRequested = true
+	h.Options.Import = "tp1"
+	h.Options.Into = "a26.5n6.1030"
+	h.Options.Roster = liste(t)
+	h.Options.Repos = "tp1-ladamlarocque"
+	h.Options.Yes = true
+
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	noms := h.depots()
+	if !slices.Contains(noms, "a26.5n6.1030.tp1.laurent-adam-larocque") {
+		t.Fatalf("le dépôt choisi n'a pas été repris : %v", noms)
+	}
+	for _, reste := range []string{"tp1-felixbourassa", "tp1-lyonnais"} {
+		if !slices.Contains(noms, reste) {
+			t.Fatalf("« %s » a été repris alors qu'il n'était pas choisi : %v", reste, noms)
+		}
+	}
+}
+
+// Un nom tapé de travers n'est pas un choix : il est refusé plutôt qu'ignoré.
+func TestImportRefuseUnDepotInconnuAuDrapeau(t *testing.T) {
+	h := nouveau(t, classroomOrg(t))
+	h.Options.ImportRequested = true
+	h.Options.Import = "tp1"
+	h.Options.Into = "a26.5n6.1030"
+	h.Options.Roster = liste(t)
+	h.Options.Repos = "tp1-personne-de-ce-nom"
+	h.Options.Yes = true
+
+	if code := h.muet(); code != app.ExitValidation {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("n'est pas un dépôt")
 }

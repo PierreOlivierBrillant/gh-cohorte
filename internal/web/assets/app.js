@@ -2939,6 +2939,11 @@ let importTravail = '';
 let importNoms = [];
 let importChoix = new Map();
 let importAttente = null;
+// Les dépôts du travail, et ceux qu'on garde. Tout est coché d'entrée : écarter
+// un dépôt est le geste rare, et le reste du parcours n'en connaît que la
+// sortie — une liste de noms, vide quand rien n'a été touché.
+let importDepots = [];
+let importRetenus = new Set();
 
 // --- l'accordéon
 
@@ -2982,8 +2987,13 @@ function viderImport() {
   importNoms = [];
   importChoix = new Map();
   importDevinee = {};
+  importDepots = [];
+  importRetenus = new Set();
 
   vider($('import-travaux'));
+  vider($('import-depots').querySelector('tbody'));
+  $('import-depots-compte').textContent = '';
+  $('import-depots-tout').checked = true;
   viderDepot('import-liste');
   for (const id of ['import-session', 'import-cours', 'import-groupe', 'import-nom']) {
     $(id).value = '';
@@ -3000,7 +3010,7 @@ function viderImport() {
   $('import-compte').textContent = '';
   $('import-etat').textContent = '';
   dire('import-place-note', '');
-  for (const nom of ['travail', 'liste', 'place', 'verifier', 'noms', 'journal']) {
+  for (const nom of ['travail', 'depots', 'liste', 'place', 'verifier', 'noms', 'journal']) {
     marquerEtape(nom, '');
   }
   ouvrirEtape('travail');
@@ -3032,12 +3042,7 @@ async function preparerImport() {
           importTravail = travail.prefix;
           if (!$('import-nom').value.trim()) $('import-nom').value = travail.prefix;
           marquerEtape('travail', `${travail.prefix} · ${travail.count} dépôt(s)`);
-          if (!$('import-liste').value.trim()) {
-            ouvrirEtape('liste');
-            return;
-          }
-          ouvrirEtape('place');
-          devinerPlace();
+          chargerDepots(travail.prefix);
         },
       }),
       el('span', {}, el('code', { texte: travail.prefix }),
@@ -3045,7 +3050,92 @@ async function preparerImport() {
   }
 }
 
-// --- 2. la liste
+// --- 2. les dépôts à reprendre
+
+// chargerDepots demande les dépôts du travail choisi et les coche tous. Ils
+// viennent du serveur plutôt que d'un filtrage à l'écran : savoir quels dépôts
+// portent un préfixe est une règle de lecture des noms, et elle n'a pas à être
+// réécrite ici.
+async function chargerDepots(prefixe) {
+  const vue = await tenter(() => api('POST',
+    `/api/orgs/${encode(etat.organisation)}/import/repos`, { prefix: prefixe }), 'Dépôts');
+  if (!vue) return;
+  importDepots = vue.repos || [];
+  importRetenus = new Set(importDepots.map((depot) => depot.name));
+  dessinerDepots();
+  ouvrirEtape('depots');
+}
+
+function dessinerDepots() {
+  const corps = $('import-depots').querySelector('tbody');
+  vider(corps);
+  for (const depot of importDepots) {
+    const coche = el('input', {
+      type: 'checkbox', checked: importRetenus.has(depot.name),
+      onchange: (evenement) => {
+        if (evenement.target.checked) importRetenus.add(depot.name);
+        else importRetenus.delete(depot.name);
+        majDepots();
+      },
+    });
+    // Le nom mène au dépôt : c'est le seul moyen de trancher pour de bon,
+    // sans quitter la reprise pour aller le chercher sur GitHub.
+    const lien = el('a', {
+      href: depot.url, target: '_blank', rel: 'noopener noreferrer',
+    }, el('code', { texte: depot.name }));
+    corps.append(el('tr', {},
+      el('td', { classe: 'etroit' }, el('label', { classe: 'case' }, coche)),
+      el('td', {}, lien),
+      el('td', { classe: 'note', texte: depot.pushed_at || 'jamais' })));
+  }
+  majDepots();
+}
+
+// majDepots redit ce que la sélection garde, et remet la case du bandeau
+// d'accord avec elle.
+function majDepots() {
+  const total = importDepots.length;
+  const gardes = importRetenus.size;
+  $('import-depots-compte').textContent = gardes === total
+    ? `${total} dépôt(s) — tous repris`
+    : `${gardes} dépôt(s) sur ${total}`;
+  $('import-depots-tout').checked = gardes === total && total > 0;
+  $('import-depots-tout').indeterminate = gardes > 0 && gardes < total;
+  marquerEtape('depots', $('import-depots-compte').textContent);
+  // Une sélection changée périme ce qui en découlait : les rapprochements
+  // regardaient d'autres dépôts.
+  importPlan = null;
+  marquerEtape('verifier', '');
+  marquerEtape('noms', '');
+}
+
+$('import-depots-tout').addEventListener('change', () => {
+  const tout = $('import-depots-tout').checked;
+  importRetenus = new Set(tout ? importDepots.map((depot) => depot.name) : []);
+  dessinerDepots();
+});
+
+$('import-depots-suite').addEventListener('click', () => {
+  if (importRetenus.size === 0) {
+    message('Aucun dépôt retenu : cochez-en au moins un.', 'alerte');
+    return;
+  }
+  if (!$('import-liste').value.trim()) {
+    ouvrirEtape('liste');
+    return;
+  }
+  ouvrirEtape('place');
+  devinerPlace();
+});
+
+// selection rend les dépôts retenus, ou rien quand ils le sont tous : le plan
+// n'a pas à distinguer « tout coché » de « pas encore touché ».
+function selection() {
+  if (importRetenus.size === 0 || importRetenus.size === importDepots.length) return [];
+  return importDepots.map((depot) => depot.name).filter((nom) => importRetenus.has(nom));
+}
+
+// --- 3. la liste
 
 $('import-liste').addEventListener('change', async () => {
   const valeur = $('import-liste').value.trim();
@@ -3066,13 +3156,14 @@ $('import-liste').addEventListener('change', async () => {
 function laListe() {
   return {
     prefix: importTravail,
+    only: selection(),
     path: cheminDepot('import-liste'),
     filename: $('import-liste').value.trim(),
     content: contenuDepot('import-liste') || null,
   };
 }
 
-// --- 3. la place, devinée puis corrigée
+// --- 4. la place, devinée puis corrigée
 
 // Les trois champs arrivent préremplis : le cours est dans le nom du fichier
 // d'Omnivox, le groupe dans la colonne qui le porte, et la session dans la
@@ -3118,7 +3209,7 @@ function poser(id, valeur, ancienne) {
   champ.value = valeur || '';
 }
 
-// --- 3. la place, puis la vérification
+// --- 5. la vérification
 
 // corpsImport rassemble ce que les trois premières étapes disent.
 function corpsImport() {
@@ -3137,6 +3228,7 @@ function corpsImport() {
 
   const corps = {
     prefix: importTravail,
+    only: selection(),
     name: $('import-nom').value.trim() || importTravail,
     scope: [session, cours, groupe].join('.'),
     path: cheminDepot('import-liste'),
@@ -3384,7 +3476,7 @@ function dessinerRenommages(plan) {
   marquerEtape('noms', `${(plan.moves || []).length} dépôt(s) renommés`);
 }
 
-// --- 5. écrire
+// --- 6. écrire
 
 $('import-appliquer').addEventListener('click', async () => {
   const corps = corpsImport();
