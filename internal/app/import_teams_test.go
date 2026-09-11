@@ -94,12 +94,18 @@ func TestImportEnEquipeSimule(t *testing.T) {
 }
 
 // L'assistant ne pose la question qu'en la justifiant : plusieurs personnes sur
-// un même dépôt, c'est le seul indice qu'un travail a été fait en équipe.
+// un même dépôt, c'est le seul indice qu'un travail a été fait en équipe. La
+// liste, elle, sert toujours : les équipes disent qui a fait le travail, pas
+// comment ces gens s'appellent.
 func TestAssistantDemandeSiLeTravailEstEnEquipe(t *testing.T) {
 	h := nouveau(t, equipeOrg(t))
 	h.Options.ImportRequested = true
 	h.Options.Import = "projet"
 	h.Options.Into = "a26.5n6.01"
+	h.Options.Roster = listeOmnivox(t, t.TempDir(),
+		`="1680229";="1010";="Côté";="Émilie";="COTE20059908";`,
+		`="2143020";="1010";="Picard";="Jean-Luc";="PICJ68040412";`,
+	)
 
 	code, scripte := h.script(
 		"tous",   // reprendre tous les dépôts du travail
@@ -116,6 +122,8 @@ func TestAssistantDemandeSiLeTravailEstEnEquipe(t *testing.T) {
 	if !slices.Contains(h.depots(), "a26.5n6.01.projet.alpha") {
 		t.Fatalf("les dépôts n'ont pas été repris : %v", h.depots())
 	}
+	// Les comptes ont été nommés par la liste : c'est ce qui manquait.
+	h.contient("Rapprochement des comptes", "Émilie Côté", "Jean-Luc Picard")
 }
 
 // Un travail individuel ne déclenche pas la question : chaque dépôt n'a qu'une
@@ -136,6 +144,9 @@ func TestAssistantNeDemandeRienSurUnTravailIndividuel(t *testing.T) {
 	h.Options.Import = "tp1"
 	h.Options.Into = "a26.5n6.01"
 
+	h.Options.Roster = listeOmnivox(t, t.TempDir(),
+		`="1680229";="1010";="Côté";="Émilie";="COTE20059908";`,
+	)
 	_, scripte := h.script(
 		"tous", // reprendre tous les dépôts
 		"non",  // rien à corriger

@@ -6,6 +6,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -36,14 +37,57 @@ func (s *Server) teamImportPlan(org string, body importInput) (
 	if err != nil {
 		return classroom.TeamImport{}, vide, err
 	}
-	plan, err := classroom.PlanTeamImport(arrivee, classroom.TeamImportRequest{
+	entrees, deviner, err := s.entries(body)
+	if err != nil {
+		return classroom.TeamImport{}, vide, err
+	}
+	membres := s.membres(org, body.Prefix, body.Only, repos)
+	demande := classroom.TeamImportRequest{
 		Prefix: body.Prefix, Name: body.Name, Only: body.Only,
-		Members:  s.membres(org, body.Prefix, body.Only, repos),
+		Members:  membres,
 		Known:    s.connus(org),
 		Existing: equipes,
 		Chosen:   body.Crews,
-	}, repos)
+		Entries:  entrees,
+		Guess:    deviner,
+	}
+	if deviner {
+		// Les profils GitHub ne servent qu'à la première lecture : après une
+		// correction, plus rien n'est deviné.
+		demande.Profiles = s.profilsDesMembres(org, membres)
+	}
+	plan, err := classroom.PlanTeamImport(arrivee, demande, repos)
 	return plan, arrivee, err
+}
+
+// profilsDesMembres retrouve le nom affiché du profil GitHub de chaque membre.
+// C'est l'indice le plus sûr après le numéro d'étudiant, et le seul dont on
+// dispose quand la liste ne porte aucun compte.
+func (s *Server) profilsDesMembres(org string,
+	equipes map[string]identity.Crew) map[string]string {
+	vus := map[string]bool{}
+	pairs := make([]identity.Pair, 0, len(equipes))
+	for _, crew := range equipes {
+		for _, membre := range crew.Members {
+			if vus[strings.ToLower(membre.Login)] {
+				continue
+			}
+			vus[strings.ToLower(membre.Login)] = true
+			// Le compte sert de clé comme de question : c'est son profil qu'on
+			// demande, et c'est par lui que le rapprochement le retrouve.
+			pairs = append(pairs, identity.Pair{Repo: membre.Login, Login: membre.Login})
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	profils := map[string]string{}
+	for compte, nom := range s.resolver(org).Resolve(pairs, true, nil) {
+		if nom != "" {
+			profils[strings.ToLower(compte)] = nom
+		}
+	}
+	return profils
 }
 
 // handleTeamImport reprend un travail d'équipe : les dépôts changent de nom,

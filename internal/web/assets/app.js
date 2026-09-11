@@ -3601,12 +3601,14 @@ function direDejaNommes() {
 // n'a plus lieu d'être, et ce qu'on vérifie n'est plus le même.
 function majNatureImport() {
   $('import-colonne').textContent = importEquipe ? 'Équipe' : 'Étudiant';
-  etape('liste').hidden = importEquipe;
+  // La liste sert dans les deux cas : les équipes disent qui a fait le travail,
+  // elle dit comment ces gens s'appellent.
   $('import-equipes-bloc').hidden = !importEquipe;
-  $('import-rapprochements-bloc').hidden = importEquipe;
   $('import-nommes-bloc').hidden = importEquipe;
   document.querySelector('#import-stepper .etape[data-etape="verifier"] .etape-titre')
-    .textContent = importEquipe ? 'Vérifier les équipes' : 'Vérifier les rapprochements';
+    .textContent = importEquipe
+      ? 'Vérifier les équipes et les noms'
+      : 'Vérifier les rapprochements';
   dire('import-noms-note', importEquipe
     ? "Les dépôts prendront le nom de leur équipe. Chaque équipe sera créée sur "
       + "GitHub sous la nomenclature du groupe, et recevra le sien."
@@ -3667,9 +3669,7 @@ $('import-depots-suite').addEventListener('click', () => {
     message('Aucun dépôt retenu : cochez-en au moins un.', 'alerte');
     return;
   }
-  // Un travail d'équipe ne rapproche rien d'une liste : il n'y en a pas à
-  // demander.
-  if (!importEquipe && !$('import-liste').value.trim()) {
+  if (!$('import-liste').value.trim()) {
     ouvrirEtape('liste');
     return;
   }
@@ -3776,7 +3776,7 @@ function poser(id, valeur, ancienne) {
 function corpsImport() {
   const manque = [];
   if (!importTravail) manque.push('un travail');
-  if (!importEquipe && !importSansListe && !$('import-liste').value.trim()) {
+  if (!importSansListe && !$('import-liste').value.trim()) {
     manque.push('la liste des étudiants');
   }
   const session = $('import-session').value.trim();
@@ -3836,6 +3836,13 @@ async function verifier(complet) {
   if (plan.team_work) {
     $('import-suite-bloc').hidden = false;
     dessinerEquipesReprises(plan);
+    // Les comptes se nomment comme ailleurs : c'est le même rapprochement, le
+    // même tableau, et les mêmes corrections.
+    if (complet) {
+      lireNoms(plan);
+      dessinerRapprochements(plan);
+    }
+    compter();
     dessinerRenommages(plan);
     if (complet) ouvrirEtape('verifier');
     return;
@@ -3904,7 +3911,19 @@ function dessinerEquipesReprises(plan) {
         + "ni accès, ni commit. « Composer… » permet de le dire ; sans quoi leur "
         + "équipe naîtra vide." }));
   }
-  $('import-compte').textContent = '';
+  // Les équipes disent qui a fait le travail ; elles ne disent pas son nom.
+  if ((plan.unmatched || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `${plan.unmatched.length} compte(s) qu'aucun nom ne désigne : `
+        + plan.unmatched.map((compte) => '@' + compte).join(', ')
+        + ". Ils rejoindront le groupe sous leur compte ; le tableau ci-dessous "
+        + "permet de les nommer." }));
+  }
+  if ((plan.absent || []).length) {
+    avis.append(el('div', { classe: 'avis',
+      texte: `${plan.absent.length} étudiant(s) de la liste ne sont dans aucune `
+        + 'équipe : ' + plan.absent.join(', ') + '.' }));
+  }
   marquerEtape('verifier', `${equipes.length} équipe(s)`);
 }
 

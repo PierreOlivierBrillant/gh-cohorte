@@ -55,7 +55,15 @@ type repriseEquipe struct {
 		FullName string `json:"full_name"`
 		Username string `json:"username"`
 	} `json:"students"`
-	Silent []string `json:"silent"`
+	Pairings []struct {
+		Login string `json:"login"`
+		Entry struct {
+			FullName string `json:"full_name"`
+		} `json:"entry"`
+	} `json:"pairings"`
+	Unmatched []string `json:"unmatched"`
+	Absent    []string `json:"absent"`
+	Silent    []string `json:"silent"`
 }
 
 // apercuEquipe demande l'aperçu d'une reprise en équipe.
@@ -415,5 +423,83 @@ func TestRepriseEnEquipeNeMetPersonneDansDeuxEquipes(t *testing.T) {
 	}
 	if len(trouve["alpha"]) != 0 {
 		t.Fatalf("alpha ne devrait pas la reprendre : %v", trouve["alpha"])
+	}
+}
+
+// ------------------------------------------------ nommer les membres
+
+// Les équipes disent qui a fait le travail ; c'est la liste qui dit comment ces
+// gens s'appellent. Sans ce rapprochement, le groupe n'aurait que des comptes.
+func TestRepriseEnEquipeNommeLesMembres(t *testing.T) {
+	state := classroomEquipes()
+	h := nouveau(t, state)
+	// Les profils GitHub portent les noms : c'est l'indice qui rapproche.
+	state.Users["emilie-cote"] = "Émilie Côté"
+	state.Users["jlpicard"] = "Jean-Luc Picard"
+
+	vue := h.apercuEquipe(map[string]any{
+		"prefix": "backend", "scope": "a25.5w5.1010",
+		"content": []byte("nom_complet;no étudiant\nÉmilie Côté;1680229\n" +
+			"Jean-Luc Picard;2143020\nÉtienne Lyonnais;1983429\n"),
+	})
+	noms := map[string]string{}
+	for _, personne := range vue.Students {
+		noms[personne.Username] = personne.FullName
+	}
+	if noms["emilie-cote"] != "Émilie Côté" || noms["jlpicard"] != "Jean-Luc Picard" {
+		t.Fatalf("les membres devraient être nommés : %+v", vue.Students)
+	}
+	// Une personne de la liste qu'aucune équipe ne réclame est signalée.
+	if len(vue.Absent) != 1 || vue.Absent[0] != "Étienne Lyonnais" {
+		t.Fatalf("Étienne n'est dans aucune équipe : %v", vue.Absent)
+	}
+	// Et le rapprochement se montre, compte par compte.
+	if len(vue.Pairings) == 0 {
+		t.Fatalf("le rapprochement devrait être rendu : %+v", vue)
+	}
+}
+
+// Un compte qu'aucun nom ne désigne rejoint quand même le groupe : son équipe
+// l'y a mis, et le taire le ferait disparaître.
+func TestRepriseEnEquipeInscritUnCompteSansNom(t *testing.T) {
+	h := nouveau(t, classroomEquipes())
+	vue := h.apercuEquipe(map[string]any{
+		"prefix": "backend", "scope": "a25.5w5.1010",
+		"content": []byte("nom_complet;no étudiant\nPersonne Inconnue;1111111\n"),
+	})
+	comptes := map[string]bool{}
+	for _, personne := range vue.Students {
+		comptes[personne.Username] = true
+	}
+	for _, compte := range []string{"emilie-cote", "jlpicard", "aminata-d", "walid"} {
+		if !comptes[compte] {
+			t.Fatalf("@%s devrait rejoindre le groupe : %+v", compte, vue.Students)
+		}
+	}
+	if len(vue.Unmatched) != 4 {
+		t.Fatalf("les quatre comptes sont sans nom : %v", vue.Unmatched)
+	}
+}
+
+// Le nom corrigé à l'écran a le dernier mot, et monte au registre.
+func TestRepriseEnEquipeRetientLeNomCorrige(t *testing.T) {
+	h := nouveau(t, classroomEquipes())
+	h.travail(http.MethodPost, "/api/orgs/acme/import", map[string]any{
+		"prefix": "backend", "scope": "a25.5w5.1010", "teams": true,
+		"people": []map[string]string{
+			{"full_name": "Émilie Côté", "username": "emilie-cote"},
+		},
+	})
+	var liste struct {
+		Students []struct {
+			FullName string `json:"full_name"`
+			Username string `json:"username"`
+		} `json:"students"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/a25.5w5.1010", nil, &liste)
+	for _, personne := range liste.Students {
+		if personne.Username == "emilie-cote" && personne.FullName != "Émilie Côté" {
+			t.Fatalf("le nom corrigé devrait tenir : %+v", personne)
+		}
 	}
 }

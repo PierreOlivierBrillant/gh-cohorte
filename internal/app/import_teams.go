@@ -7,6 +7,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 )
@@ -53,22 +54,60 @@ func aLire(prefixe string, seulement []string, repos []groups.RepoInfo) []string
 	return noms
 }
 
+// profilsDesMembres retrouve le nom affiché du profil GitHub de chaque membre.
+// C'est l'indice le plus sûr après le numéro d'étudiant, et le seul dont on
+// dispose quand la liste ne porte aucun compte.
+func (i *importSession) profilsDesMembres(
+	equipes map[string]identity.Crew) map[string]string {
+	vus := map[string]bool{}
+	pairs := make([]identity.Pair, 0, len(equipes))
+	for _, crew := range equipes {
+		for _, membre := range crew.Members {
+			if vus[strings.ToLower(membre.Login)] {
+				continue
+			}
+			vus[strings.ToLower(membre.Login)] = true
+			pairs = append(pairs, identity.Pair{Repo: membre.Login, Login: membre.Login})
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	resolveur := identity.New(i.session.Client, i.session.Cache, i.session.Options.Jobs)
+	spin := ui.NewSpinner(i.session.Console, "Profils GitHub…")
+	spin.Start()
+	trouves := resolveur.Resolve(pairs, true, nil)
+	spin.Stop()
+
+	profils := map[string]string{}
+	for compte, nom := range trouves {
+		if nom != "" {
+			profils[strings.ToLower(compte)] = nom
+		}
+	}
+	return profils
+}
+
 // enEquipe déroule la reprise d'un travail d'équipe, une fois le travail, les
 // dépôts et la place choisis.
 func (i *importSession) enEquipe(arrivee classroom.Classroom, prefixe, nom string,
-	repos []groups.RepoInfo) (int, error) {
+	entrees []roster.Entry, repos []groups.RepoInfo) (int, error) {
 	console := i.session.Console
 
 	infos, err := i.session.Client.LoadOrgTeams(i.org, i.session.Options.Jobs)
 	if err != nil {
 		return ExitFailure, err
 	}
+	membres := i.membres(prefixe, i.retenus, repos)
 	demande := classroom.TeamImportRequest{
 		Prefix: prefixe, Name: nom, Only: i.retenus,
-		Members:  i.membres(prefixe, i.retenus, repos),
+		Members:  membres,
 		Known:    i.connus(),
 		Existing: arrivee.Teams(infos),
 		Chosen:   map[string][]string{},
+		Entries:  entrees,
+		Profiles: i.profilsDesMembres(membres),
+		Guess:    true,
 	}
 	plan, err := classroom.PlanTeamImport(arrivee, demande, repos)
 	if err != nil {
@@ -174,8 +213,40 @@ func (i *importSession) montrerEquipes(plan classroom.TeamImport) {
 		})
 	}
 	console.Table([]string{"Équipe", "Dépôt", "Membres", "État"}, lignes, 50)
+
+	// Les équipes disent qui a fait le travail ; elles ne disent pas son nom.
+	// C'est la liste du groupe qui le donne, et ce rapprochement-là se vérifie
+	// comme celui d'un travail individuel.
+	console.Blank()
+	console.Heading("Rapprochement des comptes")
+	comptes := make([][]string, 0, len(plan.Pairings))
+	for _, trouve := range plan.Pairings {
+		nom, raison := trouve.Entry.FullName, trouve.Reason
+		switch {
+		case trouve.Ambiguous:
+			nom = console.Warn("à trancher : " + strings.Join(trouve.Rivals, ", "))
+		case !trouve.Found():
+			nom, raison = console.Warn("personne trouvée"), ""
+		case trouve.Score < roster.Probable:
+			nom = console.Warn(nom + " ?")
+		}
+		comptes = append(comptes, []string{"@" + trouve.Login, nom, raison})
+	}
+	console.Table([]string{"Compte", "Étudiant", "Reconnu par"}, comptes, 0)
+
+	console.Blank()
 	console.Printf("  %s personne(s) rejoindront « %s ».",
 		console.OK(itoa(len(plan.Students))), plan.Scope)
+	if len(plan.Unmatched) > 0 {
+		console.Printf("  %s : %s",
+			console.Warn(plural("%d compte(s) sans nom connu", len(plan.Unmatched))),
+			console.Dim("inscrits sous leur compte ; leur nom se corrige ensuite"))
+	}
+	if len(plan.Absent) > 0 {
+		console.Printf("  %s : %s",
+			console.Warn(plural("%d étudiant(s) dans aucune équipe", len(plan.Absent))),
+			console.Dim(strings.Join(plan.Absent, ", ")))
+	}
 	if len(plan.Silent) > 0 {
 		console.Warning("Rien ne dit qui a fait %s — ni équipe GitHub, ni accès, "+
 			"ni commit. Sans réponse, leur équipe naîtra vide.",

@@ -1,7 +1,6 @@
 package classroom
 
 import (
-	"sort"
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
@@ -58,8 +57,18 @@ type TeamImport struct {
 	// Moves est le renommage lui-même.
 	Moves []Move `json:"moves"`
 	// Students sont les personnes que la reprise inscrira au groupe : les
-	// membres de toutes les équipes, réunis.
+	// membres de toutes les équipes, réunis et nommés.
 	Students []roster.Person `json:"students"`
+	// Pairings dit, compte par compte, qui a été reconnu et pourquoi. Les
+	// équipes disent qui a fait le travail ; elles ne disent pas son nom, et
+	// c'est la liste du groupe qui le donne.
+	Pairings []roster.Pairing `json:"pairings"`
+	// Unmatched nomme les comptes qu'aucune personne de la liste ne nomme. Ils
+	// rejoignent quand même le groupe : leur équipe les y a mis, et leur nom
+	// se corrige ensuite.
+	Unmatched []string `json:"unmatched"`
+	// Absent nomme les personnes de la liste qu'aucune équipe ne réclame.
+	Absent []string `json:"absent"`
 	// Silent nomme les dépôts dont les accès ne désignent personne. L'équipe
 	// sera créée vide : le dépôt lui appartiendra, mais il faudra dire qui en
 	// est.
@@ -88,6 +97,16 @@ type TeamImportRequest struct {
 	// Known nomme les comptes que l'organisation connaît déjà, pour que les
 	// personnes inscrites au groupe le soient sous leur nom.
 	Known map[string]string
+	// Entries est la liste du groupe. Les équipes disent qui a fait le
+	// travail ; c'est elle qui dit comment ces gens s'appellent.
+	Entries []roster.Entry
+	// Profiles associe un compte au nom affiché de son profil GitHub : l'indice
+	// le plus sûr après le numéro d'étudiant. Il peut être nil.
+	Profiles map[string]string
+	// Guess autorise le rapprochement des comptes que la liste ne nomme pas.
+	// Une fois qu'on a corrigé un rapprochement à l'écran, non : le jugement
+	// rendu doit tenir, y compris quand il consiste à ne rapprocher personne.
+	Guess bool
 	// Existing sont les équipes que le groupe a déjà : une reprise ne recrée
 	// pas ce qui est là, elle le complète.
 	Existing []teams.Team
@@ -229,7 +248,41 @@ func PlanTeamImport(arrivee Classroom, demande TeamImportRequest,
 		plan.Teams = append(plan.Teams, equipe)
 	}
 
-	plan.Students = inscrits(membres, demande.Known)
+	// Les équipes disent qui a fait le travail ; la liste dit comment ces gens
+	// s'appellent. C'est le même rapprochement que pour un travail individuel,
+	// appliqué aux membres plutôt qu'aux propriétaires des dépôts.
+	logins := make([]string, 0, len(membres))
+	for _, equipe := range plan.Teams {
+		logins = append(logins, equipe.Members...)
+	}
+	plan.Pairings = pair(demande.Entries, logins,
+		demande.Profiles, demande.Known, demande.Guess)
+
+	nommes := map[string]bool{}
+	vus := map[string]bool{}
+	people := make([]roster.Person, 0, len(logins))
+	for _, trouve := range plan.Pairings {
+		if !trouve.Found() {
+			plan.Unmatched = append(plan.Unmatched, trouve.Login)
+			// Un compte sans nom rejoint quand même le groupe : son équipe l'y
+			// a mis, et le taire le ferait disparaître de la liste.
+			people = append(people, roster.Person{Username: trouve.Login})
+			continue
+		}
+		nommes[strings.ToLower(trouve.Login)] = true
+		retenir(vus, trouve.Entry.FullName)
+		people = append(people, roster.Person{
+			FullName: trouve.Entry.FullName, Username: trouve.Login,
+		})
+	}
+	for _, entree := range demande.Entries {
+		// Comparé comme les noms le sont partout ailleurs : une accentuation
+		// ou une casse ne fait pas une personne de plus.
+		if cle := valid.Slugify(entree.FullName); cle == "" || !vus[cle] {
+			plan.Absent = append(plan.Absent, entree.FullName)
+		}
+	}
+	plan.Students = dedupe(people)
 	// Le renommage est celui de n'importe quel déplacement : sans personne à
 	// reconnaître, chaque dépôt garde le dernier niveau de son nom — c'est-à-
 	// dire le nom de son équipe, slugifié comme elle.
@@ -253,24 +306,6 @@ func cible(arrivee Classroom, travail, equipe string) string {
 // mêmes règles qu'ailleurs : un niveau du nom d'un dépôt, rien de plus.
 func teamAssignmentName(value string) (string, error) {
 	return valid.SlugFragment(value, "Nom du travail")
-}
-
-// inscrits rend les membres sous forme de personnes, nommées quand
-// l'organisation les connaît. Un compte qu'elle ne nomme pas est inscrit quand
-// même : son nom viendra du registre, ou d'une correction.
-func inscrits(comptes map[string]bool, connus map[string]string) []roster.Person {
-	logins := make([]string, 0, len(comptes))
-	for compte := range comptes {
-		logins = append(logins, compte)
-	}
-	sort.Strings(logins)
-	people := make([]roster.Person, 0, len(logins))
-	for _, login := range logins {
-		people = append(people, roster.Person{
-			FullName: connus[strings.ToLower(login)], Username: login,
-		})
-	}
-	return dedupe(people)
 }
 
 func contient(liste []string, valeur string) bool {

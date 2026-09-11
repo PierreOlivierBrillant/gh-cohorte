@@ -75,12 +75,11 @@ func (i *importSession) run() (int, error) {
 	if err != nil {
 		return ExitOK, err
 	}
-	var entrees []roster.Entry
-	fichier := ""
-	if !equipe {
-		if entrees, fichier, err = i.charger(prefixe, repos); err != nil {
-			return ExitOK, err
-		}
+	// La liste sert dans les deux cas : les équipes disent qui a fait le
+	// travail, elle dit comment ces gens s'appellent.
+	entrees, fichier, err := i.charger(prefixe, repos)
+	if err != nil {
+		return ExitOK, err
 	}
 	debut := classroom.AssignmentStart(prefixe, repos, func(depot string) (time.Time, error) {
 		return i.session.Client.FirstCommit(i.org, depot)
@@ -100,7 +99,7 @@ func (i *importSession) run() (int, error) {
 		return ExitValidation, err
 	}
 	if equipe {
-		return i.enEquipe(arrivee, prefixe, nom, repos)
+		return i.enEquipe(arrivee, prefixe, nom, entrees, repos)
 	}
 	plan, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: prefixe, Name: nom, Entries: entrees,
@@ -420,12 +419,22 @@ func (i *importSession) charger(prefixe string, repos []groups.RepoInfo) (
 		for _, ligne := range strings.Split(roster.OmnivoxHelp, "\n") {
 			console.Note("%s", ligne)
 		}
-		console.Note("Laissez vide pour passer : les dépôts que rien ne nomme " +
-			"garderont le compte qu'ils portent.")
+		// La question accepte une réponse vide, et le dit : sans liste, la
+		// reprise se fait quand même. Un chemin mémorisé serait repris par une
+		// réponse vide — il faut alors effacer le champ, et le dire aussi.
+		retenu := strings.TrimSpace(i.session.Settings.RosterPath)
+		if retenu == "" {
+			console.Note("Laissez vide pour passer : les dépôts que rien ne nomme " +
+				"garderont le compte qu'ils portent.")
+		} else {
+			console.Note("Entrée reprend « %s » ; effacez le champ pour passer "+
+				"sans liste.", retenu)
+		}
 		reponse, err := i.session.Prompt.Ask(ui.Question{
-			Title:    "Chemin du fichier",
-			Default:  i.session.Settings.RosterPath,
-			Complete: complete.Path,
+			Title:      "Chemin du fichier",
+			Default:    retenu,
+			AllowEmpty: true,
+			Complete:   complete.Path,
 		})
 		if err != nil {
 			return nil, "", err
