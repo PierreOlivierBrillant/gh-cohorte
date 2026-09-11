@@ -35,6 +35,10 @@ type importInput struct {
 	// NamedOnly laisse où ils sont les dépôts dont on ne connaît pas la
 	// personne.
 	NamedOnly bool `json:"named_only"`
+	// Teams dit que le travail a été fait en équipe : ce qui suit le préfixe
+	// nomme alors une équipe, pas une personne, et il n'y a rien à rapprocher
+	// d'une liste.
+	Teams bool `json:"teams"`
 	// Only nomme les dépôts retenus. Vide, le travail est repris entier.
 	Only []string `json:"only"`
 	// People remplace la liste quand un rapprochement a été corrigé à l'écran.
@@ -191,23 +195,7 @@ func (s *Server) connus(org string) map[string]string {
 // retient, et l'écran les redemande à chaque correction de rapprochement.
 func (s *Server) owners(org, prefix string, seulement []string,
 	repos []groups.RepoInfo) map[string]string {
-	groupe := groups.Build(prefix, repos)
-	if groupe.Len() == 0 {
-		return nil
-	}
-	// Un dépôt écarté ne sera ni repris ni rapproché : lire ses accès coûterait
-	// une requête pour rien.
-	retenus := map[string]bool{}
-	for _, nom := range seulement {
-		retenus[strings.ToLower(strings.TrimSpace(nom))] = true
-	}
-	noms := make([]string, 0, groupe.Len())
-	for _, depot := range groupe.Repos {
-		if len(retenus) > 0 && !retenus[strings.ToLower(depot.Name)] {
-			continue
-		}
-		noms = append(noms, depot.Name)
-	}
+	noms := s.aLire(prefix, seulement, repos)
 	if len(noms) == 0 {
 		return nil
 	}
@@ -219,6 +207,54 @@ func (s *Server) owners(org, prefix string, seulement []string,
 		}
 	}
 	return comptes
+}
+
+// aLire nomme les dépôts d'un préfixe dont les accès sont à lire. Un dépôt
+// écarté ne sera ni repris ni rapproché : lire les siens coûterait une requête
+// pour rien.
+func (s *Server) aLire(prefix string, seulement []string,
+	repos []groups.RepoInfo) []string {
+	groupe := groups.Build(prefix, repos)
+	if groupe.Len() == 0 {
+		return nil
+	}
+	retenus := map[string]bool{}
+	for _, nom := range seulement {
+		retenus[strings.ToLower(strings.TrimSpace(nom))] = true
+	}
+	noms := make([]string, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		if len(retenus) > 0 && !retenus[strings.ToLower(depot.Name)] {
+			continue
+		}
+		noms = append(noms, depot.Name)
+	}
+	return noms
+}
+
+// membres rend, pour chaque dépôt, les comptes qui y ont accès : dans un
+// travail d'équipe, c'est l'équipe elle-même.
+//
+// L'enseignant est écarté — il a accès à tout — et le second passage sur les
+// accès ne coûte rien : « owners » les a déjà mis en cache.
+func (s *Server) membres(org, prefix string, seulement []string,
+	repos []groups.RepoInfo) map[string][]string {
+	noms := s.aLire(prefix, seulement, repos)
+	if len(noms) == 0 {
+		return nil
+	}
+	equipes := make(map[string][]string, len(noms))
+	for nom, proprietaire := range s.resolver(org).Owners(org, noms, s.deps.Viewer, nil) {
+		comptes := make([]string, 0, len(proprietaire.Access))
+		for _, compte := range proprietaire.Access {
+			if compte == "" || strings.EqualFold(compte, s.deps.Viewer) {
+				continue
+			}
+			comptes = append(comptes, compte)
+		}
+		equipes[nom] = comptes
+	}
+	return equipes
 }
 
 // entries rend la liste du groupe et dit s'il reste quelque chose à deviner.
@@ -293,6 +329,17 @@ func (s *Server) handleImportPreview(writer http.ResponseWriter, request *http.R
 		fail(writer, err)
 		return
 	}
+	// Une reprise en équipe suit les mêmes écrans : c'est ici qu'elle bifurque,
+	// et le corps de la réponse dit laquelle des deux il décrit.
+	if body.Teams {
+		plan, _, err := s.teamImportPlan(org, body)
+		if err != nil {
+			fail(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, plan)
+		return
+	}
 	plan, _, err := s.importPlan(org, body)
 	if err != nil {
 		fail(writer, err)
@@ -307,6 +354,10 @@ func (s *Server) handleImport(writer http.ResponseWriter, request *http.Request)
 	org, body, err := s.importRequest(request)
 	if err != nil {
 		fail(writer, err)
+		return
+	}
+	if body.Teams {
+		s.handleTeamImport(writer, org, body)
 		return
 	}
 	plan, arrivee, err := s.importPlan(org, body)

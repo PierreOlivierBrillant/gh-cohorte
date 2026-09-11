@@ -121,6 +121,21 @@
           <span class="etape-resume" id="resume-depots"></span>
         </button>
         <div class="etape-corps">
+          <!-- Rien dans les noms ne distingue « projet-alpha » de
+               « projet-walid » : c'est ici, devant la liste des dépôts, que la
+               question se tranche. -->
+          <fieldset class="groupe-radio">
+            <legend class="etiquette">Nature du travail</legend>
+            <label class="case"><input type="radio" name="import-nature"
+              value="individuel" id="import-individuel" checked>
+              <span><strong>Individuel</strong><span class="aide">Ce qui suit le
+                préfixe nomme une personne.</span></span></label>
+            <label class="case"><input type="radio" name="import-nature"
+              value="equipe" id="import-equipe">
+              <span><strong>En équipe</strong><span class="aide">Ce qui suit le
+                préfixe nomme une équipe ; ses membres viennent des accès au
+                dépôt.</span></span></label>
+          </fieldset>
           <div class="barre-filtre">
             <label class="case"><input type="checkbox" id="import-depots-tout" checked>
               <span id="import-depots-compte"></span></label>
@@ -128,7 +143,8 @@
           <div class="tableau-defile">
             <table class="tableau" id="import-depots">
               <thead><tr>
-                <th class="etroit"></th><th>Dépôt</th><th>Étudiant</th>
+                <th class="etroit"></th><th>Dépôt</th>
+                <th id="import-colonne">Étudiant</th>
                 <th>Dernier envoi</th>
               </tr></thead>
               <tbody></tbody>
@@ -210,6 +226,21 @@
         </button>
         <div class="etape-corps">
           <div id="import-avis" class="avis-pile"></div>
+
+          <!-- Un travail d'équipe ne rapproche rien d'une liste : ce qu'il y a
+               à vérifier, c'est qui compose chaque équipe. -->
+          <div id="import-equipes-bloc" hidden>
+            <div class="tableau-defile">
+              <table class="tableau" id="import-equipes">
+                <thead><tr>
+                  <th>Équipe</th><th>Dépôt</th><th>Membres</th><th>État</th>
+                </tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="import-rapprochements-bloc">
           <div class="barre-filtre">
             <label class="ligne-champ">
               <span class="note">Afficher</span>
@@ -231,14 +262,15 @@
               <tbody></tbody>
             </table>
           </div>
+          </div>
           <!-- Une étape ouverte cache les suivantes : sans cette sortie, le
                choix du sort des dépôts sans étudiant et le bouton qui écrit
                n'existent plus que derrière un en-tête qu'il faut deviner. -->
           <div class="actions" id="import-suite-bloc">
             <button type="button" id="import-suite" class="bouton vert">
               Continuer vers les noms</button>
-            <span class="note">Le sort des dépôts sans étudiant s'y décide, et la
-              reprise s'y lance.</span>
+            <span class="note" id="import-suite-note">Le sort des dépôts sans
+              étudiant s'y décide, et la reprise s'y lance.</span>
           </div>
         </div>
       </li>
@@ -252,9 +284,10 @@
           <span class="etape-resume" id="resume-noms"></span>
         </button>
         <div class="etape-corps">
-          <p class="note">Les dépôts prendront le <strong>nom complet</strong> de
-            l'étudiant. Un compte laissé sans personne gardera le sien.</p>
-          <label class="case"><input type="checkbox" id="import-nommes">
+          <p class="note" id="import-noms-note">Les dépôts prendront le
+            <strong>nom complet</strong> de l'étudiant. Un compte laissé sans
+            personne gardera le sien.</p>
+          <label class="case" id="import-nommes-bloc"><input type="checkbox" id="import-nommes">
             <span>Ne reprendre que les dépôts dont l'étudiant est connu ; laisser
               les autres où ils sont</span></label>
           <div class="tableau-defile">

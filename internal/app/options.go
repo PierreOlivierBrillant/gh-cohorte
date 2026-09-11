@@ -65,7 +65,8 @@ type Options struct {
 	Assignment string
 	// Teams dit que le travail se distribue aux équipes : un dépôt par équipe
 	// plutôt qu'un dépôt par personne. En mode gestion, sans autre drapeau
-	// d'équipe, il liste les équipes du groupe.
+	// d'équipe, il liste les équipes du groupe ; à la reprise, il dit que le
+	// dernier niveau des noms désigne une équipe et non une personne.
 	Teams bool
 	// Team désigne la ou les équipes visées. En gestion, une seule à la fois ;
 	// à la distribution, celles à servir — les autres attendront.
@@ -137,6 +138,7 @@ Utilisation :
   gh cohorte --students --session a26         étudiants de la session a26
   gh cohorte --import                         reprendre des dépôts nommés autrement
   gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+  gh cohorte --import projet --teams --into a26.5n6.01 -y
   gh cohorte --publish-registry --dry-run     ce que publier les noms ferait
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
@@ -170,7 +172,8 @@ Drapeaux :
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
   --teams                  travail d'équipe : un dépôt par équipe, partagé avec elle
-                           (avec --manage seul : liste les équipes du groupe)
+                           (avec --manage seul : liste les équipes du groupe ;
+                            avec --import : le dernier niveau nomme une équipe)
   --team NOM[,NOM]         équipe visée ; à la distribution, celles à servir
   --team-members COMPTES   composition exacte de l'équipe visée (la crée au besoin)
   --team-add COMPTES       inscrire des comptes dans l'équipe (ils quittent la leur)

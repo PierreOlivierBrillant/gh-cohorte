@@ -3391,6 +3391,11 @@ let importRetenus = new Set();
 // pas encore fournie : l'une laisse continuer, l'autre est un oubli.
 let importSansListe = false;
 
+// Un travail d'équipe se reprend autrement : ce qui suit le préfixe nomme une
+// équipe, ses membres viennent des accès au dépôt, et il n'y a pas de liste à
+// rapprocher.
+let importEquipe = false;
+
 // --- l'accordéon
 
 // Une seule étape ouverte à la fois : la page garde la même hauteur, que le
@@ -3436,6 +3441,10 @@ function viderImport() {
   importDepots = [];
   importRetenus = new Set();
   importSansListe = false;
+  importEquipe = false;
+  $('import-individuel').checked = true;
+  $('import-equipe').checked = false;
+  majNatureImport();
 
   vider($('import-travaux'));
   vider($('import-depots').querySelector('tbody'));
@@ -3534,9 +3543,11 @@ function dessinerDepots() {
     corps.append(el('tr', {},
       el('td', { classe: 'etroit' }, el('label', { classe: 'case' }, coche)),
       el('td', {}, lien),
-      depot.student
-        ? el('td', { texte: depot.student })
-        : el('td', { classe: 'vide', texte: depot.login ? '@' + depot.login : '—' }),
+      importEquipe
+        ? el('td', {}, el('strong', { texte: equipeDe(depot.name) }))
+        : (depot.student
+          ? el('td', { texte: depot.student })
+          : el('td', { classe: 'vide', texte: depot.login ? '@' + depot.login : '—' })),
       el('td', { classe: 'note', texte: depot.pushed_at || 'jamais' })));
   }
   majDepots();
@@ -3580,6 +3591,53 @@ function direDejaNommes() {
     + "associés à un étudiant connu de l'organisation ; la liste nommera les autres.");
 }
 
+// majNatureImport accorde l'écran à la nature du travail : l'étape de la liste
+// n'a plus lieu d'être, et ce qu'on vérifie n'est plus le même.
+function majNatureImport() {
+  $('import-colonne').textContent = importEquipe ? 'Équipe' : 'Étudiant';
+  etape('liste').hidden = importEquipe;
+  $('import-equipes-bloc').hidden = !importEquipe;
+  $('import-rapprochements-bloc').hidden = importEquipe;
+  $('import-nommes-bloc').hidden = importEquipe;
+  document.querySelector('#import-stepper .etape[data-etape="verifier"] .etape-titre')
+    .textContent = importEquipe ? 'Vérifier les équipes' : 'Vérifier les rapprochements';
+  dire('import-noms-note', importEquipe
+    ? "Les dépôts prendront le nom de leur équipe. Chaque équipe sera créée sur "
+      + "GitHub sous la nomenclature du groupe, et recevra le sien."
+    : "Les dépôts prendront le nom complet de l'étudiant. Un compte laissé sans "
+      + 'personne gardera le sien.');
+  dire('import-suite-note', importEquipe
+    ? "La reprise s'y lance."
+    : "Le sort des dépôts sans étudiant s'y décide, et la reprise s'y lance.");
+  renumeroterImport();
+}
+
+// renumeroterImport renumérote les étapes visibles. Sauter celle de la liste
+// laisserait sinon lire « 1, 2, 4 » : un trou dans un compte se lit comme une
+// étape manquée, pas comme une étape sans objet.
+function renumeroterImport() {
+  let rang = 0;
+  for (const bloc of document.querySelectorAll('#import-stepper .etape')) {
+    if (bloc.hidden) continue;
+    rang += 1;
+    bloc.querySelector('.etape-num').textContent = String(rang);
+  }
+}
+
+for (const id of ['import-individuel', 'import-equipe']) {
+  $(id).addEventListener('change', () => {
+    importEquipe = $('import-equipe').checked;
+    // Ce qui découlait de l'autre nature ne vaut plus rien.
+    importPlan = null;
+    importNoms = [];
+    importChoix = new Map();
+    marquerEtape('verifier', '');
+    marquerEtape('noms', '');
+    majNatureImport();
+    dessinerDepots();
+  });
+}
+
 $('import-liste-passer').addEventListener('click', () => {
   viderDepot('import-liste');
   importSansListe = true;
@@ -3602,13 +3660,26 @@ $('import-depots-suite').addEventListener('click', () => {
     message('Aucun dépôt retenu : cochez-en au moins un.', 'alerte');
     return;
   }
-  if (!$('import-liste').value.trim()) {
+  // Un travail d'équipe ne rapproche rien d'une liste : il n'y en a pas à
+  // demander.
+  if (!importEquipe && !$('import-liste').value.trim()) {
     ouvrirEtape('liste');
     return;
   }
   ouvrirEtape('place');
   devinerPlace();
 });
+
+// equipeDe lit le nom de l'équipe dans celui du dépôt : ce qui suit le préfixe,
+// et rien de plus. Le serveur le slugifiera ; l'écran le montre tel quel.
+function equipeDe(depot) {
+  const prefixe = (importTravail || '').toLowerCase();
+  const nom = depot.toLowerCase();
+  if (!prefixe || !nom.startsWith(prefixe) || nom.length <= prefixe.length + 1) {
+    return depot;
+  }
+  return depot.slice(prefixe.length + 1);
+}
 
 // selection rend les dépôts retenus, ou rien quand ils le sont tous : le plan
 // n'a pas à distinguer « tout coché » de « pas encore touché ».
@@ -3698,7 +3769,7 @@ function poser(id, valeur, ancienne) {
 function corpsImport() {
   const manque = [];
   if (!importTravail) manque.push('un travail');
-  if (!importSansListe && !$('import-liste').value.trim()) {
+  if (!importEquipe && !importSansListe && !$('import-liste').value.trim()) {
     manque.push('la liste des étudiants');
   }
   const session = $('import-session').value.trim();
@@ -3720,6 +3791,7 @@ function corpsImport() {
     filename: $('import-liste').value.trim(),
     content: contenuDepot('import-liste') || null,
     named_only: $('import-nommes').checked,
+    teams: importEquipe,
   };
   // Dès qu'un rapprochement a été touché, c'est l'écran qui fait foi : le
   // serveur ne redevine plus rien, y compris là où on a choisi « personne ».
@@ -3749,6 +3821,15 @@ async function verifier(complet) {
   if (!plan) return;
   importPlan = plan;
   marquerEtape('place', plan.scope);
+  // Un travail d'équipe n'a rien à rapprocher : ce qu'il y a à vérifier, c'est
+  // la composition de chaque équipe.
+  if (plan.team_work) {
+    $('import-suite-bloc').hidden = false;
+    dessinerEquipesReprises(plan);
+    dessinerRenommages(plan);
+    if (complet) ouvrirEtape('verifier');
+    return;
+  }
   // Le préfixe deviné cachait plusieurs travaux : les accès viennent de le
   // dire, et il n'y a rien à rapprocher tant qu'on n'a pas choisi lequel.
   if ((plan.splits || []).length > 1) {
@@ -3765,6 +3846,42 @@ async function verifier(complet) {
   dessinerRenommages(plan);
   compter();
   if (complet) ouvrirEtape('verifier');
+}
+
+// dessinerEquipesReprises montre ce que la reprise reconstituera : une équipe
+// par dépôt, ses membres tels que les accès les donnent, et si elle est déjà là.
+function dessinerEquipesReprises(plan) {
+  const equipes = plan.teams || [];
+  const corps = $('import-equipes').querySelector('tbody');
+  vider(corps);
+  for (const equipe of equipes) {
+    const membres = equipe.members || [];
+    corps.append(el('tr', {},
+      el('td', {}, el('strong', { texte: equipe.short })),
+      el('td', {}, el('code', { texte: equipe.repo })),
+      membres.length
+        ? el('td', {}, el('span', { classe: 'etiquettes' }, membres.map((compte) =>
+            el('span', { classe: 'jeton', texte: '@' + compte }))))
+        : el('td', { classe: 'vide', texte: 'aucun accès : équipe vide' }),
+      el('td', { classe: 'note', texte: equipe.exists ? 'déjà là' : 'à créer' })));
+  }
+
+  const avis = $('import-avis');
+  vider(avis);
+  const personnes = (plan.students || []).length;
+  avis.append(el('div', { classe: 'avis' },
+    el('p', { texte: `${equipes.length} équipe(s) seront composées, et `
+      + `${personnes} personne(s) rejoindront « ${plan.scope} ». L'accès au dépôt `
+      + "est accordé à l'équipe, pas à ses membres un par un." })));
+  // Un dépôt que personne n'a touché ne dit pas qui en est : le taire ferait
+  // croire à une équipe vide par choix.
+  if ((plan.silent || []).length) {
+    avis.append(el('div', { classe: 'avis alerte',
+      texte: `Aucun accès sur ${plan.silent.join(', ')} : leur équipe naîtra vide, `
+        + "et il restera à dire qui en fait partie." }));
+  }
+  $('import-compte').textContent = '';
+  marquerEtape('verifier', `${equipes.length} équipe(s)`);
 }
 
 // montrerTravauxCaches propose les travaux qu'un préfixe fourre-tout
@@ -3973,8 +4090,11 @@ $('import-appliquer').addEventListener('click', async () => {
   const accord = await demander('Reprendre ces dépôts', el('div', {},
     el('p', { texte: `${importPlan.moves.length} dépôt(s) seront renommés vers `
       + `« ${importPlan.scope} ». GitHub garde une redirection depuis chaque ancien nom.` }),
-    el('p', { classe: 'note',
-      texte: "Le groupe sera déclaré, et les noms montés au registre de l'organisation." })),
+    el('p', { classe: 'note', texte: importEquipe
+      ? `${(importPlan.teams || []).length} équipe(s) seront créées sur GitHub et `
+        + 'recevront leur dépôt. Le groupe sera déclaré, et les noms montés au '
+        + "registre de l'organisation."
+      : "Le groupe sera déclaré, et les noms montés au registre de l'organisation." })),
     'Reprendre');
   if (!accord) return;
 
@@ -3986,7 +4106,10 @@ $('import-appliquer').addEventListener('click', async () => {
     { journal: $('import-journal'), barre: $('import-barre') });
   if (!bilan) return;
   marquerEtape('journal', `${bilan.renamed} dépôt(s) repris`);
-  message(`${bilan.renamed} dépôt(s) repris dans « ${bilan.scope} ».`);
+  message(bilan.team_work
+    ? `${bilan.renamed} dépôt(s) repris dans « ${bilan.scope} », `
+      + `${bilan.teams} équipe(s) composée(s).`
+    : `${bilan.renamed} dépôt(s) repris dans « ${bilan.scope} ».`);
   await ouvrirGroupe(bilan.scope, true);
 });
 

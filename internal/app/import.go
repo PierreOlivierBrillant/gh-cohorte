@@ -67,9 +67,20 @@ func (i *importSession) run() (int, error) {
 	// chaque dépôt, donc lesquels l'organisation nomme déjà — et si cette liste
 	// a encore quelque chose à apprendre.
 	i.proprietaires = i.acces(prefixe, i.retenus, repos)
-	entrees, fichier, err := i.charger(prefixe, repos)
+
+	// Un travail d'équipe se reprend autrement : le dernier niveau du nom
+	// désigne une équipe, il n'y a donc rien à rapprocher d'une liste — et pas
+	// de liste à charger.
+	equipe, err := i.enEquipeDemandee(prefixe, repos)
 	if err != nil {
 		return ExitOK, err
+	}
+	var entrees []roster.Entry
+	fichier := ""
+	if !equipe {
+		if entrees, fichier, err = i.charger(prefixe, repos); err != nil {
+			return ExitOK, err
+		}
 	}
 	debut := classroom.AssignmentStart(prefixe, repos, func(depot string) (time.Time, error) {
 		return i.session.Client.FirstCommit(i.org, depot)
@@ -87,6 +98,9 @@ func (i *importSession) run() (int, error) {
 		classroom.DefaultsFrom(i.session.Settings))
 	if err != nil {
 		return ExitValidation, err
+	}
+	if equipe {
+		return i.enEquipe(arrivee, prefixe, nom, repos)
 	}
 	plan, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: prefixe, Name: nom, Entries: entrees,
@@ -144,6 +158,44 @@ func (i *importSession) run() (int, error) {
 		}
 	}
 	return i.appliquer(arrivee, plan)
+}
+
+// enEquipeDemandee dit si le travail à reprendre a été fait en équipe.
+//
+// Le drapeau tranche s'il est là. Sinon la question ne se pose que lorsque les
+// accès la rendent plausible : un dépôt individuel n'a qu'une personne, et
+// poser la question devant une cohorte entière de dépôts à un collaborateur
+// ajouterait une étape à tout le monde pour le cas d'un seul.
+func (i *importSession) enEquipeDemandee(prefixe string,
+	repos []groups.RepoInfo) (bool, error) {
+	if i.session.Options.Teams {
+		return true, nil
+	}
+	if !i.session.Interactive() || !plusieurs(i.membres(prefixe, i.retenus, repos)) {
+		return false, nil
+	}
+	i.session.Console.Note(
+		"Plusieurs personnes ont accès à un même dépôt : ce travail a peut-être " +
+			"été fait en équipe.")
+	choix, err := i.session.Prompt.Choose("Ce travail a-t-il été fait en équipe ?",
+		ui.Options(
+			"individuel", "Individuel — ce qui suit le préfixe nomme une personne",
+			"equipe", "En équipe — ce qui suit le préfixe nomme une équipe",
+		), "individuel")
+	if err != nil {
+		return false, err
+	}
+	return choix == "equipe", nil
+}
+
+// plusieurs dit qu'un dépôt au moins est partagé par plus d'une personne.
+func plusieurs(membres map[string][]string) bool {
+	for _, comptes := range membres {
+		if len(comptes) > 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // choisirTravail propose les travaux devinés, ou retient celui qu'on a nommé.

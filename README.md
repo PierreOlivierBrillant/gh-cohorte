@@ -118,9 +118,14 @@ reprennent d'un bloc : l'outil lit les travaux que leurs préfixes dessinent,
 rapproche les comptes des étudiants de la liste, puis renomme vers la
 nomenclature. GitHub garde une redirection depuis chaque ancien nom.
 
+Un travail fait en équipe se reprend de même, en disant que ce qui suit le
+préfixe nomme une équipe et non une personne : il n'y a alors aucune liste à
+rapprocher, les membres venant des accès au dépôt.
+
 ```bash
 gh cohorte --import                                    # lister les travaux repérés
 gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+gh cohorte --import projet --teams --into a26.5n6.1030  # travail d'équipe
 ```
 
 ## Nommage des dépôts
