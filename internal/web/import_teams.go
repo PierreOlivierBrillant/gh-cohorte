@@ -41,6 +41,7 @@ func (s *Server) teamImportPlan(org string, body importInput) (
 		Members:  s.membres(org, body.Prefix, body.Only, repos),
 		Known:    s.connus(org),
 		Existing: equipes,
+		Chosen:   body.Crews,
 	}, repos)
 	return plan, arrivee, err
 }

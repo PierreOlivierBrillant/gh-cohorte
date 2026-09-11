@@ -1,6 +1,7 @@
 package ghapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -135,4 +136,63 @@ func (c *Client) LoadOrgTeams(org string, jobs int) ([]teams.Info, error) {
 	}
 	wait.Wait()
 	return found, nil
+}
+
+// ListRepoTeams renvoie les équipes qui ont accès à un dépôt.
+//
+// C'est par là qu'un travail d'équipe fait avec GitHub Classroom se relit : le
+// dépôt n'y est pas partagé avec des collaborateurs, mais avec une équipe. Ses
+// membres ne sont donc visibles nulle part ailleurs — la liste des
+// collaborateurs directs revient vide, et le dépôt paraît n'appartenir à
+// personne.
+func (c *Client) ListRepoTeams(owner, repo string) ([]teams.Info, error) {
+	var all []teams.Info
+	err := c.paginate(repoPath(owner, repo)+"/teams", nil, func(content []byte) (int, error) {
+		var page []Team
+		if err := json.Unmarshal(content, &page); err != nil {
+			return 0, err
+		}
+		for _, item := range page {
+			all = append(all, teams.Info{
+				Slug: item.Slug, Name: item.Name, Description: item.Description,
+			})
+		}
+		return len(page), nil
+	})
+	return all, err
+}
+
+// ListContributors renvoie les comptes qui ont écrit dans un dépôt, du plus
+// prolifique au moins prolifique.
+//
+// C'est le dernier recours pour savoir qui a fait un travail : ni accès ni
+// équipe ne le disent toujours, mais ce qui a été poussé, si. Un dépôt sans
+// aucun commit répond 204 ; ce n'est pas une erreur, seulement une réponse
+// vide.
+func (c *Client) ListContributors(owner, repo string) ([]string, error) {
+	var all []string
+	err := c.paginate(repoPath(owner, repo)+"/contributors", nil, func(content []byte) (int, error) {
+		// Un dépôt sans aucun commit répond 204, sans corps : ce n'est pas une
+		// réponse illisible, c'est une réponse vide.
+		if len(bytes.TrimSpace(content)) == 0 {
+			return 0, nil
+		}
+		var page []struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		}
+		if err := json.Unmarshal(content, &page); err != nil {
+			return 0, err
+		}
+		for _, item := range page {
+			// Les robots — « github-classroom[bot] », les actions — écrivent
+			// eux aussi : ils ne font partie d'aucune équipe.
+			if strings.EqualFold(item.Type, "Bot") || strings.Contains(item.Login, "[bot]") {
+				continue
+			}
+			all = append(all, item.Login)
+		}
+		return len(page), nil
+	})
+	return all, err
 }

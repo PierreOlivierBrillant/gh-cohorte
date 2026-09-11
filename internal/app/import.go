@@ -188,10 +188,10 @@ func (i *importSession) enEquipeDemandee(prefixe string,
 	return choix == "equipe", nil
 }
 
-// plusieurs dit qu'un dépôt au moins est partagé par plus d'une personne.
-func plusieurs(membres map[string][]string) bool {
-	for _, comptes := range membres {
-		if len(comptes) > 1 {
+// plusieurs dit qu'un dépôt au moins rassemble plus d'une personne.
+func plusieurs(equipes map[string]identity.Crew) bool {
+	for _, crew := range equipes {
+		if len(crew.Members) > 1 {
 			return true
 		}
 	}

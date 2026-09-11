@@ -81,6 +81,8 @@ type State struct {
 	Teams        map[string]*TeamState
 	TeamRepos    map[string]map[string]string // « org/équipe » → dépôt → droit
 	DeletedTeams []string
+	// Contributors dit qui a écrit dans un dépôt : « org/depot » → comptes.
+	Contributors map[string][]string
 
 	Collaborators map[string]map[string]string // dépôt → compte → droit
 	Invitations   map[string][]invitation
@@ -140,6 +142,7 @@ func NewState() *State {
 			"acme/direction":   newTeam("acme", "direction"),
 		},
 		TeamRepos:      map[string]map[string]string{},
+		Contributors:   map[string][]string{},
 		Collaborators:  map[string]map[string]string{},
 		Invitations:    map[string][]invitation{},
 		Blobs:          map[string][]byte{},

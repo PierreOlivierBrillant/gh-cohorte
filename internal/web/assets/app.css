@@ -286,6 +286,9 @@ main { padding: 1.5rem; max-width: 1100px; }
 /* Un membre que la liste du groupe ne connaît pas : il a l'accès sans être
    inscrit nulle part, et cela doit se voir. */
 .jeton.etranger { color: var(--erreur); border-style: dashed; }
+/* Un membre qu'on a mis là soi-même, par opposition à ceux que GitHub a
+   désignés : la différence compte quand on relit une composition. */
+.jeton.choisi { color: var(--lien); border-color: var(--lien); }
 .etiquettes { display: flex; gap: .4rem; flex-wrap: wrap; }
 
 /* ------------------------------------------------------------------- étapes */

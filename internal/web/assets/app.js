@@ -3396,6 +3396,11 @@ let importSansListe = false;
 // rapprocher.
 let importEquipe = false;
 
+// Ce qu'on a tranché à l'écran, équipe par équipe. Une entrée ici a le dernier
+// mot : le serveur ne redevine plus rien pour cette équipe, y compris quand on
+// a choisi de n'y mettre personne.
+let importCrews = new Map();
+
 // --- l'accordéon
 
 // Une seule étape ouverte à la fois : la page garde la même hauteur, que le
@@ -3442,6 +3447,7 @@ function viderImport() {
   importRetenus = new Set();
   importSansListe = false;
   importEquipe = false;
+  importCrews = new Map();
   $('import-individuel').checked = true;
   $('import-equipe').checked = false;
   majNatureImport();
@@ -3631,6 +3637,7 @@ for (const id of ['import-individuel', 'import-equipe']) {
     importPlan = null;
     importNoms = [];
     importChoix = new Map();
+    importCrews = new Map();
     marquerEtape('verifier', '');
     marquerEtape('noms', '');
     majNatureImport();
@@ -3793,6 +3800,9 @@ function corpsImport() {
     named_only: $('import-nommes').checked,
     teams: importEquipe,
   };
+  if (importEquipe && importCrews.size) {
+    corps.crews = Object.fromEntries(importCrews);
+  }
   // Dès qu'un rapprochement a été touché, c'est l'écran qui fait foi : le
   // serveur ne redevine plus rien, y compris là où on a choisi « personne ».
   if (importNoms.length) {
@@ -3856,14 +3866,27 @@ function dessinerEquipesReprises(plan) {
   vider(corps);
   for (const equipe of equipes) {
     const membres = equipe.members || [];
+    const sources = equipe.sources || {};
     corps.append(el('tr', {},
       el('td', {}, el('strong', { texte: equipe.short })),
       el('td', {}, el('code', { texte: equipe.repo })),
       membres.length
+        // D'où vient chaque membre se lit au survol : une composition devinée
+        // doit pouvoir être démentie, et pour cela il faut voir sur quoi elle
+        // repose.
         ? el('td', {}, el('span', { classe: 'etiquettes' }, membres.map((compte) =>
-            el('span', { classe: 'jeton', texte: '@' + compte }))))
-        : el('td', { classe: 'vide', texte: 'aucun accès : équipe vide' }),
-      el('td', { classe: 'note', texte: equipe.exists ? 'déjà là' : 'à créer' })));
+            el('span', {
+              classe: 'jeton' + (sources[compte] === 'choisi' ? ' choisi' : ''),
+              texte: '@' + compte,
+              title: sources[compte] ? 'reconnu par : ' + sources[compte] : '',
+            }))))
+        : el('td', { classe: 'vide',
+            texte: 'personne : ni équipe, ni accès, ni commit' }),
+      el('td', { classe: 'note', texte: equipe.exists ? 'déjà là' : 'à créer' }),
+      el('td', { classe: 'etroit' }, el('button', {
+        classe: 'bouton petit', type: 'button', texte: 'Composer…',
+        onclick: () => composerEquipeReprise(plan, equipe),
+      }))));
   }
 
   const avis = $('import-avis');
@@ -3877,11 +3900,57 @@ function dessinerEquipesReprises(plan) {
   // croire à une équipe vide par choix.
   if ((plan.silent || []).length) {
     avis.append(el('div', { classe: 'avis alerte',
-      texte: `Aucun accès sur ${plan.silent.join(', ')} : leur équipe naîtra vide, `
-        + "et il restera à dire qui en fait partie." }));
+      texte: `Rien ne dit qui a fait ${plan.silent.join(', ')} — ni équipe GitHub, `
+        + "ni accès, ni commit. « Composer… » permet de le dire ; sans quoi leur "
+        + "équipe naîtra vide." }));
   }
   $('import-compte').textContent = '';
   marquerEtape('verifier', `${equipes.length} équipe(s)`);
+}
+
+// composerEquipeReprise laisse dire qui est dans une équipe, quand ce que
+// GitHub en montre ne suffit pas — un dépôt que personne n'a touché, une équipe
+// que l'outil n'a pas su lire. Ce qu'on y tranche tient : la vérification
+// suivante ne le redevine plus.
+async function composerEquipeReprise(plan, equipe) {
+  // Le vivier est ce que la reprise a trouvé partout : c'est là qu'on va
+  // chercher quelqu'un rangé dans la mauvaise équipe.
+  const vivier = new Set();
+  for (const autre of plan.teams || []) {
+    for (const compte of autre.members || []) vivier.add(compte);
+  }
+  const coches = new Set((equipe.members || []).map((compte) => compte.toLowerCase()));
+  for (const compte of equipe.members || []) vivier.add(compte);
+
+  const liste = el('div', { classe: 'liste-cases' },
+    [...vivier].sort().map((compte) => el('label', { classe: 'case' },
+      el('input', {
+        type: 'checkbox', value: compte, checked: coches.has(compte.toLowerCase()),
+      }),
+      el('span', {}, el('span', { classe: 'compte', texte: '@' + compte })))));
+  const autres = el('input', {
+    classe: 'champ', type: 'text', placeholder: 'compte1, compte2',
+  });
+  const corps = el('div', {},
+    el('p', { classe: 'note', texte:
+      `Qui compose « ${equipe.short} » ? Le dépôt ${equipe.repo} lui reviendra, `
+      + "et l'accès est accordé à l'équipe entière." }),
+    vivier.size ? liste : el('p', { classe: 'note vide',
+      texte: "La reprise n'a trouvé personne sur ce travail." }),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: "Ajouter d'autres comptes" }), autres,
+      el('span', { classe: 'aide', texte: 'Séparés par des virgules.' })));
+
+  if (!await demander(`Composer ${equipe.short}`, corps, 'Retenir')) return;
+  const voulus = [...liste.querySelectorAll('input:checked')].map((coche) => coche.value);
+  for (const compte of autres.value.split(/[,\s]+/)) {
+    const propre = compte.trim().replace(/^@/, '');
+    if (propre && !voulus.some((autre) => autre.toLowerCase() === propre.toLowerCase())) {
+      voulus.push(propre);
+    }
+  }
+  importCrews.set(equipe.short, voulus);
+  await verifier(true);
 }
 
 // montrerTravauxCaches propose les travaux qu'un préfixe fourre-tout

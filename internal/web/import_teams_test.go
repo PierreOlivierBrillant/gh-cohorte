@@ -39,12 +39,13 @@ type repriseEquipe struct {
 	Name     string `json:"name"`
 	Scope    string `json:"scope"`
 	Teams    []struct {
-		Short   string   `json:"short"`
-		Name    string   `json:"name"`
-		Repo    string   `json:"repo"`
-		Target  string   `json:"target"`
-		Members []string `json:"members"`
-		Exists  bool     `json:"exists"`
+		Short   string            `json:"short"`
+		Name    string            `json:"name"`
+		Repo    string            `json:"repo"`
+		Target  string            `json:"target"`
+		Members []string          `json:"members"`
+		Sources map[string]string `json:"sources"`
+		Exists  bool              `json:"exists"`
 	} `json:"teams"`
 	Moves []struct {
 		Repo   string `json:"repo"`
@@ -242,5 +243,177 @@ func TestRepriseEnEquipeRespecteLaSelection(t *testing.T) {
 	}
 	if len(vue.Moves) != 1 {
 		t.Fatalf("un seul renommage attendu : %+v", vue.Moves)
+	}
+}
+
+// ------------------------------------------ d'où viennent les membres
+
+// classroomEquipes monte une organisation telle que GitHub Classroom laisse un
+// travail d'équipe : le dépôt n'a aucun collaborateur direct, il est partagé
+// avec une équipe.
+func classroomEquipes() *fakegh.State {
+	state := fakegh.NewState()
+	state.Users["walid"] = "Walid Hakkani"
+	state.AddRepo("acme", "backend-gunners", true)
+	state.AddRepo("acme", "backend-mcdev", true)
+	state.AddTeam("acme", "Gunners", "emilie-cote", "jlpicard")
+	state.AddTeam("acme", "McDev", "aminata-d", "walid")
+	state.ShareRepo("acme", fakegh.TeamSlug("Gunners"), "acme/backend-gunners", "push")
+	state.ShareRepo("acme", fakegh.TeamSlug("McDev"), "acme/backend-mcdev", "push")
+	// L'équipe enseignante voit tout : elle n'est l'équipe de personne.
+	state.ShareRepo("acme", "enseignants", "acme/backend-gunners", "push")
+	state.ShareRepo("acme", "enseignants", "acme/backend-mcdev", "push")
+	return state
+}
+
+// Le cas de GitHub Classroom : aucun collaborateur direct, mais une équipe
+// GitHub par dépôt. C'est là qu'il faut aller chercher les membres.
+func TestRepriseEnEquipeLitLEquipeGitHubDuDepot(t *testing.T) {
+	state := classroomEquipes()
+	state.AddTeam("acme", "enseignants-ignores") // pour ne pas confondre les slugs
+	h := nouveau(t, state)
+
+	vue := h.apercuEquipe(map[string]any{"prefix": "backend", "scope": "a25.5w5.1010"})
+	trouve := map[string][]string{}
+	sources := map[string]map[string]string{}
+	for _, equipe := range vue.Teams {
+		trouve[equipe.Short] = equipe.Members
+		sources[equipe.Short] = equipe.Sources
+	}
+	if strings.Join(trouve["gunners"], ",") != "emilie-cote,jlpicard" {
+		t.Fatalf("membres de gunners = %v", trouve["gunners"])
+	}
+	if strings.Join(trouve["mcdev"], ",") != "aminata-d,walid" {
+		t.Fatalf("membres de mcdev = %v", trouve["mcdev"])
+	}
+	// Et l'écran doit pouvoir dire d'où ils viennent.
+	if sources["gunners"]["emilie-cote"] != "équipe" {
+		t.Fatalf("sources de gunners = %v", sources["gunners"])
+	}
+	if len(vue.Silent) != 0 {
+		t.Fatalf("aucune équipe ne devrait être vide : %v", vue.Silent)
+	}
+}
+
+// Une équipe que plusieurs dépôts du travail partagent n'est l'équipe de
+// personne : c'est celle qui enseigne, et ses membres n'ont rien à faire dans
+// les équipes d'étudiants.
+func TestRepriseEnEquipeEcarteLEquipeEnseignante(t *testing.T) {
+	state := classroomEquipes()
+	// L'équipe enseignante a un membre bien à elle.
+	state.Teams["acme/enseignants"].Members["correcteur"] = "member"
+	state.Users["correcteur"] = "Correctrice"
+	h := nouveau(t, state)
+
+	vue := h.apercuEquipe(map[string]any{"prefix": "backend", "scope": "a25.5w5.1010"})
+	for _, equipe := range vue.Teams {
+		for _, compte := range equipe.Members {
+			if compte == "correcteur" {
+				t.Fatalf("« %s » ne devrait pas recevoir l'équipe enseignante : %v",
+					equipe.Short, equipe.Members)
+			}
+		}
+	}
+}
+
+// Quand ni l'équipe ni les accès ne disent rien, ceux qui ont poussé du code
+// le disent.
+func TestRepriseEnEquipeLitLesAuteursDeCommits(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "projet-alpha", true)
+	state.AddRepo("acme", "projet-beta", true)
+	state.AddContributors("acme/projet-alpha", "emilie-cote", "jlpicard")
+	state.AddContributors("acme/projet-beta", "aminata-d")
+	h := nouveau(t, state)
+
+	vue := h.apercuEquipe(map[string]any{"prefix": "projet", "scope": "a26.5n6.01"})
+	for _, equipe := range vue.Teams {
+		if equipe.Short == "alpha" {
+			if strings.Join(equipe.Members, ",") != "emilie-cote,jlpicard" {
+				t.Fatalf("membres d'alpha = %v", equipe.Members)
+			}
+			if equipe.Sources["emilie-cote"] != "commits" {
+				t.Fatalf("sources d'alpha = %v", equipe.Sources)
+			}
+		}
+	}
+	if len(vue.Silent) != 0 {
+		t.Fatalf("les commits suffisent à peupler les équipes : %v", vue.Silent)
+	}
+}
+
+// Ce qu'on tranche à l'écran tient : le serveur ne redevine plus rien pour
+// cette équipe, y compris quand on choisit de n'y mettre personne.
+func TestRepriseEnEquipeRetientLaCompositionChoisie(t *testing.T) {
+	h := nouveau(t, equipeOrg())
+	vue := h.apercuEquipe(map[string]any{
+		"prefix": "projet", "scope": "a26.5n6.01",
+		"crews": map[string][]string{"alpha": {"aminata-d"}},
+	})
+	for _, equipe := range vue.Teams {
+		if equipe.Short != "alpha" {
+			continue
+		}
+		if strings.Join(equipe.Members, ",") != "aminata-d" {
+			t.Fatalf("la composition choisie devrait tenir : %v", equipe.Members)
+		}
+		if equipe.Sources["aminata-d"] != "choisi" {
+			t.Fatalf("sources d'alpha = %v", equipe.Sources)
+		}
+	}
+
+	// Et jusqu'à l'écriture.
+	h.travail(http.MethodPost, "/api/orgs/acme/import", map[string]any{
+		"prefix": "projet", "scope": "a26.5n6.01", "teams": true,
+		"crews": map[string][]string{"alpha": {"aminata-d"}},
+	})
+	membres := h.State.TeamMembers("acme", fakegh.TeamSlug("a26.5n6.01.alpha"))
+	if strings.Join(membres, ",") != "aminata-d" {
+		t.Fatalf("membres d'alpha sur GitHub = %v", membres)
+	}
+}
+
+// Une équipe qu'on vide à la main reste vide : c'est une décision, pas un oubli.
+func TestRepriseEnEquipePeutViderUneEquipe(t *testing.T) {
+	h := nouveau(t, equipeOrg())
+	vue := h.apercuEquipe(map[string]any{
+		"prefix": "projet", "scope": "a26.5n6.01",
+		"crews": map[string][]string{"alpha": {}},
+	})
+	for _, equipe := range vue.Teams {
+		if equipe.Short == "alpha" && len(equipe.Members) != 0 {
+			t.Fatalf("alpha devrait être vide : %v", equipe.Members)
+		}
+	}
+	if len(vue.Silent) != 1 || vue.Silent[0] != "projet-alpha" {
+		t.Fatalf("une équipe vide doit être signalée : %v", vue.Silent)
+	}
+}
+
+// Une personne n'est que d'une équipe à la fois : une composition tranchée à
+// l'écran ne doit pas être défaite par celle que l'équipe suivante devine.
+func TestRepriseEnEquipeNeMetPersonneDansDeuxEquipes(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "projet-alpha", true)
+	state.AddRepo("acme", "projet-beta", true)
+	// Aminata a poussé dans les deux : rien ne dit d'elle-même de quelle
+	// équipe elle est.
+	state.AddContributors("acme/projet-alpha", "aminata-d")
+	state.AddContributors("acme/projet-beta", "aminata-d", "jlpicard")
+	h := nouveau(t, state)
+
+	vue := h.apercuEquipe(map[string]any{
+		"prefix": "projet", "scope": "a26.5n6.01",
+		"crews": map[string][]string{"beta": {"aminata-d", "jlpicard"}},
+	})
+	trouve := map[string][]string{}
+	for _, equipe := range vue.Teams {
+		trouve[equipe.Short] = equipe.Members
+	}
+	if strings.Join(trouve["beta"], ",") != "aminata-d,jlpicard" {
+		t.Fatalf("la composition choisie devrait tenir : %v", trouve["beta"])
+	}
+	if len(trouve["alpha"]) != 0 {
+		t.Fatalf("alpha ne devrait pas la reprendre : %v", trouve["alpha"])
 	}
 }

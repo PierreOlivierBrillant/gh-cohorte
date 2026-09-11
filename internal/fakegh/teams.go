@@ -98,6 +98,24 @@ func (s *State) TeamMembers(org, slug string) []string {
 	return membres
 }
 
+// AddContributors dit qui a écrit dans un dépôt, du plus prolifique au moins.
+func (s *State) AddContributors(fullName string, logins ...string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.Contributors[fullName] = append(s.Contributors[fullName], logins...)
+}
+
+// ShareRepo partage un dépôt avec une équipe, comme GitHub Classroom le fait.
+func (s *State) ShareRepo(org, slug, fullName, permission string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	cle := org + "/" + slug
+	if s.TeamRepos[cle] == nil {
+		s.TeamRepos[cle] = map[string]string{}
+	}
+	s.TeamRepos[cle][fullName] = permission
+}
+
 // TeamRepoNames renvoie les dépôts partagés avec une équipe, triés. Ils y sont
 // nommés « organisation/dépôt », comme le chemin de l'API les donne.
 func (s *State) TeamRepoNames(org, slug string) []string {
@@ -116,6 +134,8 @@ var (
 	teamMembersRe = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/members$`)
 	teamMemberRe  = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/memberships/([^/]+)$`)
 	teamReposRe   = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/repos$`)
+	repoTeamsRe   = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/teams$`)
+	contribRe     = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/contributors$`)
 )
 
 // teamsGet répond aux lectures d'équipes ; faux quand la route n'en est pas une.
@@ -166,6 +186,47 @@ func (s *Server) teamsGet(writer http.ResponseWriter, path string) bool {
 			return true
 		}
 		s.send(writer, 200, teamPayload(equipe))
+		return true
+	}
+	if match := repoTeamsRe.FindStringSubmatch(path); match != nil {
+		org, depot := match[1], match[2]
+		if _, existe := state.Repos[org+"/"+depot]; !existe {
+			s.notFound(writer)
+			return true
+		}
+		cles := make([]string, 0)
+		for cle, partages := range state.TeamRepos {
+			if _, partage := partages[org+"/"+depot]; partage {
+				cles = append(cles, cle)
+			}
+		}
+		sort.Strings(cles)
+		payload := make([]map[string]any, 0, len(cles))
+		for _, cle := range cles {
+			if equipe, connue := state.Teams[cle]; connue {
+				payload = append(payload, teamPayload(equipe))
+			}
+		}
+		s.send(writer, 200, payload)
+		return true
+	}
+	if match := contribRe.FindStringSubmatch(path); match != nil {
+		full := match[1] + "/" + match[2]
+		if _, existe := state.Repos[full]; !existe {
+			s.notFound(writer)
+			return true
+		}
+		auteurs := state.Contributors[full]
+		if len(auteurs) == 0 {
+			// GitHub répond 204 pour un dépôt sans aucun commit.
+			writer.WriteHeader(204)
+			return true
+		}
+		payload := make([]map[string]any, 0, len(auteurs))
+		for _, login := range auteurs {
+			payload = append(payload, map[string]any{"login": login, "type": "User"})
+		}
+		s.send(writer, 200, payload)
 		return true
 	}
 	return false

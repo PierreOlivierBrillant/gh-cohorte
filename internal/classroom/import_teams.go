@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
@@ -34,8 +35,12 @@ type ImportedTeam struct {
 	// Repo est le dépôt tel qu'il s'appelle, Target tel qu'il s'appellera.
 	Repo   string `json:"repo"`
 	Target string `json:"target"`
-	// Members sont les comptes que les accès du dépôt désignent.
-	Members []string `json:"members"`
+	// Members sont les comptes qui composeront l'équipe, et Sources dit d'où
+	// chacun vient — de l'équipe GitHub du dépôt, de ses accès, ou de ses
+	// commits. Une composition devinée doit pouvoir être démentie, et pour cela
+	// il faut voir sur quoi elle repose.
+	Members []string          `json:"members"`
+	Sources map[string]string `json:"sources,omitempty"`
 	// Exists dit que l'équipe est déjà là : la reprise la complétera plutôt
 	// que de la créer.
 	Exists bool `json:"exists"`
@@ -73,10 +78,13 @@ type TeamImportRequest struct {
 	// Only restreint la reprise aux dépôts nommés. Vide, le travail est repris
 	// entier.
 	Only []string
-	// Members donne, pour un nom de dépôt, les comptes qui y ont accès : ce
-	// sont eux, l'équipe. L'enseignant en a déjà été retiré — il a accès à
-	// tout, et n'est donc l'indice de rien.
-	Members map[string][]string
+	// Members donne, pour un nom de dépôt, les comptes qui l'ont fait, et ce
+	// qui les y a fait reconnaître. L'enseignant en a déjà été retiré — il a
+	// accès à tout, et n'est donc l'indice de rien.
+	Members map[string]identity.Crew
+	// Chosen impose la composition d'une équipe, par son nom court. C'est le
+	// dernier mot : ce qui a été corrigé à l'écran ne se redevine pas.
+	Chosen map[string][]string
 	// Known nomme les comptes que l'organisation connaît déjà, pour que les
 	// personnes inscrites au groupe le soient sous leur nom.
 	Known map[string]string
@@ -84,6 +92,13 @@ type TeamImportRequest struct {
 	// pas ce qui est là, elle le complète.
 	Existing []teams.Team
 }
+
+// Sources d'un membre que « identity » ne donne pas : ce qu'une équipe déjà
+// déclarée retient, et ce qu'une main a tranché.
+const (
+	FromTeamItself = "équipe du groupe"
+	ChosenByHand   = "choisi"
+)
 
 // PlanTeamImport compose la reprise d'un travail d'équipe : une équipe par
 // dépôt, le renommage, et les personnes que cela inscrit au groupe.
@@ -107,12 +122,22 @@ func PlanTeamImport(arrivee Classroom, demande TeamImportRequest,
 		return TeamImport{}, err
 	}
 
+	// Les compositions tranchées à l'écran arrivent telles qu'on les a écrites :
+	// c'est le nom court, mis en forme, qui les retrouve.
+	choisis := make(map[string][]string, len(demande.Chosen))
+	for court, voulus := range demande.Chosen {
+		if nom, err := teams.ShortName(court); err == nil {
+			choisis[strings.ToLower(nom)] = voulus
+		}
+	}
+
 	plan := TeamImport{
 		TeamWork: true, Prefix: groupe.Prefix, Name: nom, Scope: arrivee.Scope(),
 		Teams: make([]ImportedTeam, 0, groupe.Len()),
 	}
 	vues := map[string]string{} // nom court → dépôt qui l'a déjà pris
-	membres := map[string]bool{}
+	depots := make([]groups.Repo, 0, groupe.Len())
+	courts := make([]string, 0, groupe.Len())
 	for _, depot := range groupe.Repos {
 		court, err := teams.ShortName(depot.Suffix)
 		if err != nil {
@@ -126,32 +151,80 @@ func PlanTeamImport(arrivee Classroom, demande TeamImportRequest,
 				precedent, depot.Name, court)
 		}
 		vues[strings.ToLower(court)] = depot.Name
+		depots = append(depots, depot)
+		courts = append(courts, court)
+	}
 
+	// Une personne n'est que d'une équipe à la fois : ce qui a été tranché à
+	// l'écran est donc composé d'abord, et ce qui est deviné ne vient pas le
+	// défaire en réclamant quelqu'un qui a déjà sa place.
+	ordre := make([]int, 0, len(depots))
+	for rang, court := range courts {
+		if _, decide := choisis[strings.ToLower(court)]; decide {
+			ordre = append(ordre, rang)
+		}
+	}
+	for rang, court := range courts {
+		if _, decide := choisis[strings.ToLower(court)]; !decide {
+			ordre = append(ordre, rang)
+		}
+	}
+
+	membres := map[string]bool{}
+	places := map[string]bool{} // comptes déjà rangés dans une équipe
+	composees := make(map[int]ImportedTeam, len(depots))
+	for _, rang := range ordre {
+		depot, court := depots[rang], courts[rang]
 		equipe := ImportedTeam{
 			Short: court, Name: arrivee.TeamName(court), Repo: depot.Name,
-			Target: cible(arrivee, nom, court),
+			Target: cible(arrivee, nom, court), Sources: map[string]string{},
 		}
-		if deja, existe := teams.Find(demande.Existing, court); existe {
-			// L'équipe est déjà là : ses membres restent, ceux du dépôt s'y
-			// ajoutent. Une reprise ne défait pas ce qui a été composé.
-			equipe.Exists, equipe.Members = true, deja.Members
+		if _, existe := teams.Find(demande.Existing, court); existe {
+			equipe.Exists = true
 		}
-		for _, compte := range demande.Members[depot.Name] {
+		ajouter := func(compte, source string) {
 			if compte = strings.TrimSpace(compte); compte == "" {
-				continue
+				return
 			}
-			if !contient(equipe.Members, compte) {
-				equipe.Members = append(equipe.Members, compte)
+			if places[strings.ToLower(compte)] {
+				return
 			}
+			places[strings.ToLower(compte)] = true
+			equipe.Members = append(equipe.Members, compte)
+			equipe.Sources[compte] = source
 		}
-		sort.Slice(equipe.Members, func(i, j int) bool {
-			return strings.ToLower(equipe.Members[i]) < strings.ToLower(equipe.Members[j])
-		})
-		if len(equipe.Members) == 0 {
-			plan.Silent = append(plan.Silent, depot.Name)
+
+		// Une composition arrêtée à l'écran a le dernier mot : la redeviner
+		// déferait ce qu'on vient de décider, y compris quand cela consiste à
+		// n'y mettre personne.
+		if voulus, decide := choisis[strings.ToLower(court)]; decide {
+			for _, compte := range voulus {
+				ajouter(compte, ChosenByHand)
+			}
+		} else {
+			if deja, existe := teams.Find(demande.Existing, court); existe {
+				// L'équipe est déjà là : ses membres restent, ceux du dépôt s'y
+				// ajoutent. Une reprise ne défait pas ce qui a été composé.
+				for _, compte := range deja.Members {
+					ajouter(compte, FromTeamItself)
+				}
+			}
+			for _, membre := range demande.Members[depot.Name].Members {
+				ajouter(membre.Login, membre.Source)
+			}
 		}
 		for _, compte := range equipe.Members {
 			membres[strings.ToLower(compte)] = true
+		}
+		composees[rang] = equipe
+	}
+
+	// Rendues dans l'ordre des dépôts, et non dans celui où elles ont été
+	// composées : l'écran doit les lire comme il les a montrées.
+	for rang := range depots {
+		equipe := composees[rang]
+		if len(equipe.Members) == 0 {
+			plan.Silent = append(plan.Silent, equipe.Repo)
 		}
 		plan.Teams = append(plan.Teams, equipe)
 	}

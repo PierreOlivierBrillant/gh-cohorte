@@ -104,6 +104,7 @@ func TestAssistantDemandeSiLeTravailEstEnEquipe(t *testing.T) {
 	code, scripte := h.script(
 		"tous",   // reprendre tous les dépôts du travail
 		"equipe", // oui, c'est un travail d'équipe
+		"",       // les compositions trouvées conviennent
 		"oui",    // renommer, composer, partager
 	)
 	if code != app.ExitOK {

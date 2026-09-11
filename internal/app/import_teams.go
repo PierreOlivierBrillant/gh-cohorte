@@ -16,33 +16,21 @@ import (
 // d'arrivée — et s'en écarte là où il le doit : rien n'est rapproché d'une
 // liste, puisque le dernier niveau du nom désigne une équipe.
 
-// membres rend, pour chaque dépôt, les comptes qui y ont accès : dans un
-// travail d'équipe, c'est l'équipe elle-même. L'enseignant en est écarté — il a
-// accès à tout, et n'est donc l'indice de rien.
+// membres rend, pour chaque dépôt, qui l'a fait : l'équipe GitHub à qui il est
+// partagé, ses collaborateurs directs, ses auteurs de commits. C'est « identity »
+// qui décide de ce que chaque source vaut.
 func (i *importSession) membres(prefixe string, seulement []string,
-	repos []groups.RepoInfo) map[string][]string {
+	repos []groups.RepoInfo) map[string]identity.Crew {
 	noms := aLire(prefixe, seulement, repos)
 	if len(noms) == 0 {
 		return nil
 	}
 	resolveur := identity.New(i.session.Client, i.session.Cache, i.session.Options.Jobs)
-	spin := ui.NewSpinner(i.session.Console, "Accès aux dépôts…")
+	spin := ui.NewSpinner(i.session.Console, "Qui a fait quoi…")
 	spin.Start()
-	trouves := resolveur.Owners(i.org, noms, i.session.Viewer, nil)
+	trouves := resolveur.Crews(i.org, noms, i.session.Viewer, nil)
 	spin.Stop()
-
-	equipes := make(map[string][]string, len(trouves))
-	for nom, proprietaire := range trouves {
-		comptes := make([]string, 0, len(proprietaire.Access))
-		for _, compte := range proprietaire.Access {
-			if compte == "" || strings.EqualFold(compte, i.session.Viewer) {
-				continue
-			}
-			comptes = append(comptes, compte)
-		}
-		equipes[nom] = comptes
-	}
-	return equipes
+	return trouves
 }
 
 // aLire nomme les dépôts d'un préfixe dont les accès sont à lire.
@@ -75,16 +63,28 @@ func (i *importSession) enEquipe(arrivee classroom.Classroom, prefixe, nom strin
 	if err != nil {
 		return ExitFailure, err
 	}
-	plan, err := classroom.PlanTeamImport(arrivee, classroom.TeamImportRequest{
+	demande := classroom.TeamImportRequest{
 		Prefix: prefixe, Name: nom, Only: i.retenus,
 		Members:  i.membres(prefixe, i.retenus, repos),
 		Known:    i.connus(),
 		Existing: arrivee.Teams(infos),
-	}, repos)
+		Chosen:   map[string][]string{},
+	}
+	plan, err := classroom.PlanTeamImport(arrivee, demande, repos)
 	if err != nil {
 		return ExitValidation, err
 	}
 	i.montrerEquipes(plan)
+
+	// Une composition que GitHub n'a pas su donner se tranche ici, avant que
+	// quoi que ce soit ne soit écrit : c'est le moment où cela ne coûte rien.
+	if i.session.Interactive() && !i.session.Options.Yes {
+		corrige, err := i.composerAvantReprise(arrivee, demande, plan, repos)
+		if err != nil {
+			return ExitOK, err
+		}
+		plan = corrige
+	}
 
 	if i.session.Options.DryRun {
 		console.Blank()
@@ -106,6 +106,57 @@ func (i *importSession) enEquipe(arrivee classroom.Classroom, prefixe, nom strin
 	return i.appliquerEquipes(arrivee, plan)
 }
 
+// composerAvantReprise laisse corriger la composition d'une équipe tant que
+// rien n'est écrit. Une équipe que rien n'a peuplée est le cas qui l'exige :
+// ni accès, ni équipe GitHub, ni commit n'ont dit qui en était.
+func (i *importSession) composerAvantReprise(arrivee classroom.Classroom,
+	demande classroom.TeamImportRequest, plan classroom.TeamImport,
+	repos []groups.RepoInfo) (classroom.TeamImport, error) {
+	console := i.session.Console
+	for {
+		choix := make([]string, 0, 2*len(plan.Teams)+2)
+		for _, equipe := range plan.Teams {
+			choix = append(choix, equipe.Short,
+				equipe.Short+" — "+membresEnMots(equipe.Members))
+		}
+		choix = append(choix, "", "Poursuivre sans rien changer")
+		court, err := i.session.Prompt.Choose("Composer une équipe ?",
+			ui.Options(choix...), "")
+		if err != nil {
+			return plan, err
+		}
+		if court == "" {
+			return plan, nil
+		}
+
+		actuelle, _ := trouverEquipe(plan, court)
+		reponse, err := i.session.Prompt.Ask(ui.Question{
+			Title:      "Comptes GitHub de « " + court + " », séparés par des virgules",
+			Default:    strings.Join(actuelle.Members, ", "),
+			AllowEmpty: true,
+		})
+		if err != nil {
+			return plan, err
+		}
+		demande.Chosen[court] = splitList(reponse)
+		if plan, err = classroom.PlanTeamImport(arrivee, demande, repos); err != nil {
+			return plan, err
+		}
+		console.Blank()
+		i.montrerEquipes(plan)
+	}
+}
+
+// trouverEquipe retrouve une équipe du plan par son nom court.
+func trouverEquipe(plan classroom.TeamImport, court string) (classroom.ImportedTeam, bool) {
+	for _, equipe := range plan.Teams {
+		if strings.EqualFold(equipe.Short, court) {
+			return equipe, true
+		}
+	}
+	return classroom.ImportedTeam{}, false
+}
+
 // montrerEquipes récapitule la reprise avant toute écriture.
 func (i *importSession) montrerEquipes(plan classroom.TeamImport) {
 	console := i.session.Console
@@ -119,14 +170,15 @@ func (i *importSession) montrerEquipes(plan classroom.TeamImport) {
 		}
 		lignes = append(lignes, []string{
 			equipe.Short, equipe.Repo + " → " + equipe.Target,
-			membresEnMots(equipe.Members), etat,
+			membresAvecSources(equipe), etat,
 		})
 	}
 	console.Table([]string{"Équipe", "Dépôt", "Membres", "État"}, lignes, 50)
 	console.Printf("  %s personne(s) rejoindront « %s ».",
 		console.OK(itoa(len(plan.Students))), plan.Scope)
 	if len(plan.Silent) > 0 {
-		console.Warning("Aucun accès sur %s : leur équipe naîtra vide.",
+		console.Warning("Rien ne dit qui a fait %s — ni équipe GitHub, ni accès, "+
+			"ni commit. Sans réponse, leur équipe naîtra vide.",
 			strings.Join(plan.Silent, ", "))
 	}
 }
@@ -252,6 +304,24 @@ func (i *importSession) assurerEquipe(arrivee classroom.Classroom,
 		}
 	}
 	return trouvee.Slug, nil
+}
+
+// membresAvecSources dit la composition d'une équipe et d'où chacun vient : une
+// composition devinée doit pouvoir être démentie, et pour cela il faut voir sur
+// quoi elle repose.
+func membresAvecSources(equipe classroom.ImportedTeam) string {
+	if len(equipe.Members) == 0 {
+		return "personne : ni équipe, ni accès, ni commit"
+	}
+	comptes := make([]string, 0, len(equipe.Members))
+	for _, compte := range equipe.Members {
+		if source := equipe.Sources[compte]; source != "" {
+			comptes = append(comptes, "@"+compte+" ("+source+")")
+			continue
+		}
+		comptes = append(comptes, "@"+compte)
+	}
+	return strings.Join(comptes, ", ")
 }
 
 // membresEnMots dit la composition d'une équipe.

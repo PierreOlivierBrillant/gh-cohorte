@@ -39,6 +39,10 @@ type importInput struct {
 	// nomme alors une équipe, pas une personne, et il n'y a rien à rapprocher
 	// d'une liste.
 	Teams bool `json:"teams"`
+	// Crews impose la composition d'une équipe, par son nom court. Sa présence
+	// dit qu'on a tranché à l'écran : le serveur ne redevine plus rien pour
+	// cette équipe, y compris quand on a choisi de n'y mettre personne.
+	Crews map[string][]string `json:"crews"`
 	// Only nomme les dépôts retenus. Vide, le travail est repris entier.
 	Only []string `json:"only"`
 	// People remplace la liste quand un rapprochement a été corrigé à l'écran.
@@ -232,29 +236,16 @@ func (s *Server) aLire(prefix string, seulement []string,
 	return noms
 }
 
-// membres rend, pour chaque dépôt, les comptes qui y ont accès : dans un
-// travail d'équipe, c'est l'équipe elle-même.
-//
-// L'enseignant est écarté — il a accès à tout — et le second passage sur les
-// accès ne coûte rien : « owners » les a déjà mis en cache.
+// membres rend, pour chaque dépôt, qui l'a fait : l'équipe GitHub à qui il est
+// partagé, ses collaborateurs directs, ses auteurs de commits. C'est « identity »
+// qui décide de ce que chaque source vaut.
 func (s *Server) membres(org, prefix string, seulement []string,
-	repos []groups.RepoInfo) map[string][]string {
+	repos []groups.RepoInfo) map[string]identity.Crew {
 	noms := s.aLire(prefix, seulement, repos)
 	if len(noms) == 0 {
 		return nil
 	}
-	equipes := make(map[string][]string, len(noms))
-	for nom, proprietaire := range s.resolver(org).Owners(org, noms, s.deps.Viewer, nil) {
-		comptes := make([]string, 0, len(proprietaire.Access))
-		for _, compte := range proprietaire.Access {
-			if compte == "" || strings.EqualFold(compte, s.deps.Viewer) {
-				continue
-			}
-			comptes = append(comptes, compte)
-		}
-		equipes[nom] = comptes
-	}
-	return equipes
+	return s.resolver(org).Crews(org, noms, s.deps.Viewer, nil)
 }
 
 // entries rend la liste du groupe et dit s'il reste quelque chose à deviner.

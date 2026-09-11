@@ -51,6 +51,12 @@ func AccessKey(org, repo string) string {
 	return "access:" + strings.ToLower(org) + "/" + strings.ToLower(repo)
 }
 
+// CrewKey est la clé des personnes qu'un dépôt d'équipe rassemble : ses
+// équipes GitHub, ses collaborateurs, ses auteurs de commits.
+func CrewKey(org, repo string) string {
+	return "crew:" + strings.ToLower(org) + "/" + strings.ToLower(repo)
+}
+
 // Dir renvoie l'emplacement du cache, conforme au standard du système.
 func Dir() string {
 	if base := os.Getenv("XDG_CACHE_HOME"); base != "" {
