@@ -34,9 +34,12 @@ var distinctive = map[string]bool{"username": true, "name": true, "index": true}
 // qu'à chacun de ses membres, ce qui fait que changer sa composition suffit à
 // changer qui voit le dépôt.
 type PlannedRepo struct {
-	Person      roster.Person
-	Team        string // nom court de l'équipe ; vide pour un travail individuel
-	TeamSlug    string // adresse GitHub de l'équipe
+	Person   roster.Person
+	Team     string // nom court de l'équipe ; vide pour un travail individuel
+	TeamSlug string // adresse GitHub de l'équipe
+	// Accounts porte tous les comptes de la personne : elle n'a qu'un dépôt,
+	// mais elle y est invitée sous chacun d'eux.
+	Accounts    []string
 	Name        string
 	Description string
 }
@@ -223,25 +226,43 @@ func Assignment(expression *regexp.Regexp, repoName string) (string, bool) {
 	return parts[1], true
 }
 
+// Target est le destinataire d'un dépôt individuel : une personne, et tous les
+// comptes sous lesquels elle travaille. Elle n'a qu'un dépôt — c'est son nom
+// qui le nomme —, mais elle y est invitée sous chacun d'eux.
+type Target struct {
+	Person   roster.Person
+	Accounts []string
+}
+
 // Build construit le plan complet et refuse toute collision de noms de dépôts.
 func Build(people []roster.Person, settings config.Settings) ([]PlannedRepo, error) {
+	cibles := make([]Target, 0, len(people))
+	for _, person := range people {
+		cibles = append(cibles, Target{Person: person, Accounts: []string{person.Username}})
+	}
+	return BuildFor(cibles, settings)
+}
+
+// BuildFor construit le plan pour des personnes dont on connaît tous les
+// comptes.
+func BuildFor(targets []Target, settings config.Settings) ([]PlannedRepo, error) {
 	description, err := patterns(settings)
 	if err != nil {
 		return nil, err
 	}
 	assembleur := &assembler{settings: settings, description: description,
 		seen: map[string]string{}}
-	plan := make([]PlannedRepo, 0, len(people))
-	for position, person := range people {
+	plan := make([]PlannedRepo, 0, len(targets))
+	for position, cible := range targets {
 		index := position + 1
 		item, err := assembleur.add(
-			Render(settings.NamePattern, person, settings.Assignment, index),
-			Render(description, person, settings.Assignment, index),
-			person.FullName)
+			Render(settings.NamePattern, cible.Person, settings.Assignment, index),
+			Render(description, cible.Person, settings.Assignment, index),
+			cible.Person.FullName)
 		if err != nil {
 			return nil, err
 		}
-		item.Person = person
+		item.Person, item.Accounts = cible.Person, cible.Accounts
 		plan = append(plan, item)
 	}
 	return plan, nil

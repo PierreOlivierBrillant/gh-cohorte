@@ -44,6 +44,9 @@ type Repo struct {
 type Row struct {
 	FullName string
 	Username string
+	// Accounts porte tous les comptes de la personne : elle n'en a qu'un le
+	// plus souvent, et parfois deux — celui du collège et le sien.
+	Accounts []string
 	Repos    []Repo
 	// Enrollments dit les groupes dont la personne est. La liste d'un groupe
 	// n'en porte qu'un ; l'annuaire de l'organisation les rassemble tous.
@@ -91,8 +94,21 @@ func Build(cours classroom.Classroom, repos []groups.RepoInfo,
 
 	lignes := make([]Row, 0, len(cours.Students))
 	for _, student := range cours.Students {
-		ligne := compose(student.FullName, student.Username,
-			parEtudiant[strings.ToLower(student.Username)])
+		// Les dépôts d'une personne peuvent être arrivés sous l'un ou l'autre
+		// de ses comptes : ils sont les siens sous tous.
+		depots := make([]Repo, 0)
+		vus := map[string]bool{}
+		for _, compte := range student.Accounts() {
+			for _, depot := range parEtudiant[strings.ToLower(compte)] {
+				if vus[strings.ToLower(depot.Name)] {
+					continue
+				}
+				vus[strings.ToLower(depot.Name)] = true
+				depots = append(depots, depot)
+			}
+		}
+		ligne := compose(student.FullName, student.Username, depots)
+		ligne.Accounts = student.Accounts()
 		ligne.Enrollments = []Enrollment{enrollmentOf(cours, ligne.Repos)}
 		lignes = append(lignes, ligne)
 	}

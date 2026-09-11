@@ -146,7 +146,8 @@ Le dernier niveau nomme le **destinataire** du dépôt. Pour un travail
 individuel, c'est le **nom de l'étudiant**, pas son compte GitHub : un dépôt se
 lit sans connaître le pseudonyme de personne. En contrepartie, le nom complet
 est obligatoire et deux homonymes font échouer la préparation avant toute
-écriture.
+écriture — à moins qu'on ne déclare qu'il s'agit de la même personne sous deux
+comptes, ce qui ne se devine jamais.
 
 Pour un travail d'équipe, c'est le nom de l'**équipe** — `a26.5n6.01.projet.eq1`.
 Une équipe est une vraie équipe d'organisation GitHub, et son nom porte lui

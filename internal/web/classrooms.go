@@ -216,6 +216,9 @@ func (s *Server) handleForgetClassroom(writer http.ResponseWriter, request *http
 type studentRow struct {
 	FullName string `json:"full_name"`
 	Username string `json:"username"`
+	// Accounts porte tous les comptes de la personne ; le premier est celui
+	// qui la désigne.
+	Accounts []string `json:"accounts,omitempty"`
 	// Team nomme l'équipe de la personne dans ce groupe ; vide si elle n'en a
 	// aucune.
 	Team        string              `json:"team,omitempty"`
@@ -312,11 +315,15 @@ func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *ht
 			})
 		}
 		equipe := ""
-		if sienne, membre := teams.Of(equipes, ligne.Username); membre {
-			equipe = sienne.Short
+		for _, compte := range ligne.Accounts {
+			if sienne, membre := teams.Of(equipes, compte); membre {
+				equipe = sienne.Short
+				break
+			}
 		}
 		lignes = append(lignes, studentRow{
-			FullName: ligne.FullName, Username: ligne.Username, Team: equipe,
+			FullName: ligne.FullName, Username: ligne.Username,
+			Accounts: ligne.Accounts, Team: equipe,
 			Assignments: travaux, PushedAt: ligne.PushedAt,
 		})
 	}
@@ -478,6 +485,75 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 		}, nil
 	})
 	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
+// handleAttachAccount rattache un second compte GitHub à une personne déjà
+// inscrite. Une même personne travaille parfois sous deux comptes ; sans le
+// dire, ils passeraient pour deux étudiants du même nom — ce que la préparation
+// refuse, et à raison : deux homonymes réels ne peuvent pas partager un dépôt.
+//
+// Rien ne se déduit du nom, ici ou ailleurs : c'est une décision, et c'est
+// pourquoi elle se prend à la main.
+func (s *Server) handleAttachAccount(writer http.ResponseWriter, request *http.Request) {
+	cours, err := s.place(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body struct {
+		// Username désigne la personne, Account le compte à lui rattacher.
+		Username string `json:"username"`
+		Account  string `json:"account"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	compte, err := valid.Login(body.Account, "Compte GitHub")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	personne, inscrite := cours.Find(body.Username)
+	if !inscrite {
+		fail(writer, valid.Errorf("@%s n'est pas dans « %s ».",
+			strings.TrimSpace(body.Username), cours.Label()))
+		return
+	}
+	if personne.Owns(compte) {
+		fail(writer, valid.Errorf("@%s est déjà un compte de %s.",
+			compte, personne.FullName))
+		return
+	}
+	// Un compte qui n'existe pas sur GitHub ne sert à rien dans une liste.
+	if existe, err := s.deps.Client.UserExists(compte); err == nil && !existe {
+		fail(writer, valid.Errorf("Le compte « %s » n'existe pas sur GitHub.", compte))
+		return
+	}
+
+	augmente := personne
+	augmente.Also = append(append([]string(nil), personne.Also...), compte)
+	// Le compte pouvait être inscrit à part : le rattacher le retire de là,
+	// sans quoi la même personne y figurerait deux fois.
+	modifie, err := cours.Without(compte).Rename(personne.Username, augmente)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if err := s.apprendre(cours.Org, roster.Person{
+		FullName: personne.FullName, Username: compte,
+	}); err != nil {
+		fail(writer, err)
+		return
+	}
+	enregistre, err := s.classrooms.Save(modifie)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"classroom": s.fiche(enregistre), "student": augmente, "account": compte,
+	})
 }
 
 // handleRenameStudent corrige la fiche d'une personne — son nom complet, son
@@ -737,14 +813,15 @@ type assignmentRepo struct {
 	Student  string `json:"student"`
 	FullName string `json:"full_name"`
 	Username string `json:"username"`
-	// Team nomme l'équipe destinataire, et Members ses comptes : un dépôt
-	// d'équipe ne porte le nom de personne, il faut donc dire qui il concerne.
-	Team       string   `json:"team,omitempty"`
-	Members    []string `json:"members,omitempty"`
-	Private    bool     `json:"private"`
-	Visibility string   `json:"visibility"`
-	URL        string   `json:"url"`
-	PushedAt   string   `json:"pushed_at"`
+	// Team nomme l'équipe destinataire, et Members ses membres : un dépôt
+	// d'équipe ne porte le nom de personne, il faut donc dire qui il concerne —
+	// et le dire par leur nom, pas par leur seul compte.
+	Team       string          `json:"team,omitempty"`
+	Members    []roster.Person `json:"members,omitempty"`
+	Private    bool            `json:"private"`
+	Visibility string          `json:"visibility"`
+	URL        string          `json:"url"`
+	PushedAt   string          `json:"pushed_at"`
 }
 
 // assignmentOf résout le groupe et le travail désignés par l'adresse.
@@ -826,7 +903,7 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		}
 		if equipe, appartient := cours.TeamOf(repo.Name, equipes); appartient {
 			ligne.FullName, ligne.Team = equipe.Label(), equipe.Short
-			ligne.Members = equipe.Members
+			ligne.Members = cours.Members(equipe)
 		} else if student, inscrit := cours.StudentOf(repo.Name); inscrit {
 			ligne.FullName, ligne.Username = student.FullName, student.Username
 		}
@@ -923,7 +1000,16 @@ func (d distribution) Items() ([]plan.PlannedRepo, error) {
 	if d.ForTeams {
 		return plan.BuildTeams(classroom.TeamTargets(d.Teams), d.Settings)
 	}
-	return plan.Build(d.People, d.Settings)
+	// Une personne qui travaille sous deux comptes n'a qu'un dépôt : c'est son
+	// nom qui le nomme, et elle y est invitée sous chacun d'eux.
+	comptes := d.Cours.Accounts()
+	cibles := make([]plan.Target, 0, len(d.People))
+	for _, person := range d.People {
+		cibles = append(cibles, plan.Target{
+			Person: person, Accounts: comptes[strings.ToLower(person.Username)],
+		})
+	}
+	return plan.BuildFor(cibles, d.Settings)
 }
 
 // Skipped nomme, pour le bilan, ce qui avait déjà un dépôt.
@@ -982,18 +1068,30 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (distribut
 	}
 	servis := cours.Served(settings.Assignment, repos)
 
+	// La distribution va aux personnes, non aux comptes : deux comptes d'un
+	// même nom n'ont qu'un dépôt, et cocher l'un revient à cocher la personne.
 	partage := distribution{Cours: cours, Settings: settings}
-	for _, student := range cours.Students {
-		if restreint && !voulus[strings.ToLower(student.Username)] {
+	for _, identite := range cours.Identities() {
+		if restreint && !voulue(identite, voulus) {
 			continue
 		}
-		if servis[strings.ToLower(student.Username)] {
-			partage.SkippedPeople = append(partage.SkippedPeople, student)
+		if servis[strings.ToLower(identite.Username())] {
+			partage.SkippedPeople = append(partage.SkippedPeople, identite.Person())
 			continue
 		}
-		partage.People = append(partage.People, student)
+		partage.People = append(partage.People, identite.Person())
 	}
 	return partage, nil
+}
+
+// voulue dit qu'une personne a été retenue, sous l'un quelconque de ses comptes.
+func voulue(identite classroom.Identity, voulus map[string]bool) bool {
+	for _, compte := range identite.Accounts {
+		if voulus[strings.ToLower(compte)] {
+			return true
+		}
+	}
+	return false
 }
 
 // prepareTeams compose la distribution d'un travail d'équipe : un dépôt par

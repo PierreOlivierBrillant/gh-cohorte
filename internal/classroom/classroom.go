@@ -270,7 +270,11 @@ func (c Classroom) Enrich(names Names, repos []groups.RepoInfo) Classroom {
 				student.FullName = trouve.FullName
 			}
 		}
-		connus[strings.ToLower(student.Username)] = true
+		// Tous ses comptes comptent comme connus : un dépôt arrivé sous l'un
+		// d'eux ne doit pas la faire inscrire une seconde fois.
+		for _, compte := range student.Accounts() {
+			connus[strings.ToLower(compte)] = true
+		}
 		complets = append(complets, student)
 	}
 
@@ -389,8 +393,10 @@ func (k known) personne(fragment string) (roster.Person, bool) {
 func knownBy(people []roster.Person) known {
 	connus := make(known, 2*len(people))
 	for _, person := range people {
-		if strings.TrimSpace(person.Username) != "" {
-			connus[strings.ToLower(person.Username)] = person
+		// Tous ses comptes la désignent : un dépôt adopté sous l'un d'eux est
+		// le sien, et le renommer lui donnera son nom.
+		for _, compte := range person.Accounts() {
+			connus[strings.ToLower(compte)] = person
 		}
 	}
 	for _, person := range people {
@@ -425,7 +431,7 @@ func (c Classroom) Add(person roster.Person) (Classroom, error) {
 // Find retrouve un étudiant du groupe par son compte GitHub.
 func (c Classroom) Find(username string) (roster.Person, bool) {
 	for _, student := range c.Students {
-		if strings.EqualFold(student.Username, username) {
+		if student.Owns(username) {
 			return student, true
 		}
 	}
@@ -529,9 +535,14 @@ func sortAssignments(found []Assignment) {
 }
 
 // Served renvoie les comptes du groupe qui ont déjà un dépôt pour ce travail.
+//
+// Une personne qui travaille sous deux comptes n'a qu'un dépôt — c'est son nom
+// qui le nomme, pas son compte : le trouver la tient pour servie sous chacun
+// d'eux, sans quoi le second en réclamerait un autre du même nom.
 func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[string]bool {
 	servis := map[string]bool{}
 	connus := c.fragments()
+	comptes := c.Accounts()
 	for _, repo := range repos {
 		parts, reconnu := naming.Parse(repo.Name)
 		if !reconnu {
@@ -541,8 +552,13 @@ func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[stri
 		if !strings.EqualFold(id, assignmentID) {
 			continue
 		}
-		if student, inscrit := connus.personne(parts.Student); inscrit {
-			servis[strings.ToLower(student.Username)] = true
+		student, inscrit := connus.personne(parts.Student)
+		if !inscrit {
+			continue
+		}
+		servis[strings.ToLower(student.Username)] = true
+		for _, autre := range comptes[strings.ToLower(student.Username)] {
+			servis[strings.ToLower(autre)] = true
 		}
 	}
 	return servis
@@ -745,7 +761,7 @@ func (c Classroom) Rename(username string, person roster.Person) (Classroom, err
 	}
 	position := -1
 	for index, student := range c.Students {
-		if strings.EqualFold(student.Username, username) {
+		if student.Owns(username) {
 			position = index
 			break
 		}
@@ -753,9 +769,16 @@ func (c Classroom) Rename(username string, person roster.Person) (Classroom, err
 	if position < 0 {
 		return c, valid.Errorf("@%s n'est pas dans « %s ».", strings.TrimSpace(username), c.Label())
 	}
+	// Aucun de ses comptes ne peut être celui de quelqu'un d'autre : ce serait
+	// donner à deux personnes les mêmes dépôts.
 	for index, student := range c.Students {
-		if index != position && strings.EqualFold(student.Username, person.Username) {
-			return c, valid.Errorf("@%s est déjà dans « %s ».", person.Username, c.Label())
+		if index == position {
+			continue
+		}
+		for _, compte := range person.Accounts() {
+			if student.Owns(compte) {
+				return c, valid.Errorf("@%s est déjà dans « %s ».", compte, c.Label())
+			}
 		}
 	}
 	c.Students = append([]roster.Person(nil), c.Students...)

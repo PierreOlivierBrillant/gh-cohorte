@@ -57,6 +57,39 @@ var delimiters = []rune{',', ';', '\t'}
 type Person struct {
 	FullName string `json:"full_name"`
 	Username string `json:"username"`
+	// Also porte les autres comptes GitHub de la même personne : celui du
+	// collège et le sien, celui que GitHub Classroom lui a fait créer et celui
+	// qu'elle avait déjà.
+	//
+	// Rien ne se déduit du nom : deux étudiants peuvent s'appeler pareil, et
+	// les confondre leur donnerait un seul dépôt pour deux. C'est donc une
+	// décision, prise et écrite, jamais devinée.
+	Also []string `json:"also,omitempty"`
+}
+
+// Accounts rend tous les comptes de la personne, le sien d'abord.
+func (p Person) Accounts() []string {
+	comptes := make([]string, 0, 1+len(p.Also))
+	vus := map[string]bool{}
+	for _, compte := range append([]string{p.Username}, p.Also...) {
+		compte = strings.TrimSpace(compte)
+		if compte == "" || vus[strings.ToLower(compte)] {
+			continue
+		}
+		vus[strings.ToLower(compte)] = true
+		comptes = append(comptes, compte)
+	}
+	return comptes
+}
+
+// Owns dit si un compte est l'un des siens.
+func (p Person) Owns(username string) bool {
+	for _, compte := range p.Accounts() {
+		if strings.EqualFold(compte, username) {
+			return true
+		}
+	}
+	return false
 }
 
 // Key sert au dédoublonnage : le compte GitHub est insensible à la casse.
@@ -79,7 +112,26 @@ func (p Person) Validate() (Person, error) {
 			return p, err
 		}
 	}
-	return Person{FullName: fullName, Username: username}, nil
+	autres := make([]string, 0, len(p.Also))
+	vus := map[string]bool{strings.ToLower(username): true}
+	for _, brut := range p.Also {
+		if strings.TrimSpace(brut) == "" {
+			continue
+		}
+		compte, err := valid.Login(brut, "Autre compte GitHub")
+		if err != nil {
+			return p, err
+		}
+		if vus[strings.ToLower(compte)] {
+			continue
+		}
+		vus[strings.ToLower(compte)] = true
+		autres = append(autres, compte)
+	}
+	if len(autres) == 0 {
+		autres = nil
+	}
+	return Person{FullName: fullName, Username: username, Also: autres}, nil
 }
 
 // Issue décrit un problème détecté sur une ligne de la liste.

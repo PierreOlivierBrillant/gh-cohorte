@@ -1426,9 +1426,13 @@ function dessinerTravail() {
         ? el('span', {},
             el('strong', { texte: repo.full_name }),
             el('span', { classe: 'note',
+              // Les membres se lisent par leur nom : un dépôt d'équipe ne
+              // porte celui de personne, et une liste de comptes ne dit pas
+              // qui a fait le travail.
               texte: (repo.members || []).length === 0
                 ? ' — équipe vide'
-                : ' — ' + (repo.members || []).map((compte) => '@' + compte).join(', ') }))
+                : ' — ' + (repo.members || []).map((personne) =>
+                    personne.full_name || '@' + personne.username).join(', ') }))
         : el('span', repo.username
             ? { texte: repo.full_name || '@' + repo.username }
             : { classe: 'vide', texte: repo.student + ' (hors liste)' })),
@@ -2192,7 +2196,10 @@ async function chargerEtudiants(force) {
       el('td', ligne.full_name
         ? { texte: ligne.full_name }
         : { classe: 'vide', texte: 'nom inconnu' }),
-      el('td', {}, el('code', { texte: '@' + ligne.username })),
+      // Une personne travaille parfois sous deux comptes : les montrer tous
+      // les deux évite de la croire absente d'un dépôt qui est le sien.
+      el('td', {}, (ligne.accounts || [ligne.username]).map((compte, rang) =>
+        el('span', {}, rang > 0 ? ' ' : null, el('code', { texte: '@' + compte })))),
       el('td', ligne.team
         ? { texte: ligne.team }
         : { classe: 'vide', texte: 'aucune' }),
@@ -2854,11 +2861,19 @@ function dessinerEquipes() {
     const membres = el('span', { classe: 'jetons equipe-membres' },
       equipe.people.map((personne) => el('span', {
         classe: 'jeton', texte: personne.full_name || '@' + personne.username,
-        title: '@' + personne.username,
+        title: ['@' + personne.username]
+          .concat((personne.also || []).map((compte) => '@' + compte)).join(', '),
       })),
-      equipe.strangers.map((compte) => el('span', {
-        classe: 'jeton etranger', texte: '@' + compte,
-        title: "Ce compte n'est pas dans la liste du groupe.",
+      // Un compte hors liste porte quand même son nom quand le registre le
+      // connaît : ce qu'on sait nommer doit être nommé. Le bouton, lui, mène
+      // à l'inscrire — c'est la suite naturelle.
+      equipe.strangers.map((personne) => el('button', {
+        classe: 'jeton etranger', type: 'button',
+        texte: personne.full_name
+          ? `${personne.full_name} (@${personne.username})`
+          : '@' + personne.username,
+        title: "Ce compte n'est pas dans la liste du groupe : l'y inscrire.",
+        onclick: () => inscrireUnMembre(personne),
       })));
     if (equipe.people.length === 0 && equipe.strangers.length === 0) {
       vider(membres);
@@ -2882,9 +2897,14 @@ function dessinerEquipes() {
   $('equipes-orphelins-boite').hidden = etat.orphelins.length === 0;
   for (const personne of etat.orphelins) {
     orphelins.append(el('button', {
-      classe: 'jeton lien', type: 'button',
-      texte: (personne.full_name || '@' + personne.username),
-      title: 'Placer dans une équipe',
+      // Un nom qui manque se voit : c'est lui qui nommera ses dépôts, et le
+      // placer dans une équipe sans l'avoir est remettre le problème à plus tard.
+      classe: 'jeton lien' + (personne.full_name ? '' : ' etranger'),
+      type: 'button',
+      texte: personne.full_name || '@' + personne.username,
+      title: personne.full_name
+        ? 'Placer dans une équipe'
+        : 'Nom complet inconnu : le donner, et placer dans une équipe',
       onclick: () => placerDansUneEquipe(personne),
     }));
   }
@@ -2984,22 +3004,85 @@ async function placerDansUneEquipe(personne) {
   }
   const choix = el('select', { classe: 'champ' },
     etat.equipes.map((equipe) => el('option', { value: equipe.short, texte: equipe.short })));
+  // Le nom complet nomme ses dépôts : le placer dans une équipe sans l'avoir
+  // remettrait le problème au moment de distribuer, où il bloque tout.
+  const nom = el('input', {
+    classe: 'champ', type: 'text', value: personne.full_name || '',
+    placeholder: 'Prénom Nom',
+  });
   const corps = el('div', {},
-    el('p', { texte: `${personne.full_name || '@' + personne.username} rejoint :` }),
+    el('p', {}, el('code', { texte: '@' + personne.username }), ' rejoint :'),
     el('label', { classe: 'champ-bloc' },
       el('span', { classe: 'etiquette', texte: 'Équipe' }), choix),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nom complet' }), nom,
+      el('span', { classe: 'aide', texte: personne.full_name
+        ? "C'est lui qui nommera ses dépôts."
+        : "Inconnu pour l'instant : c'est lui qui nommera ses dépôts." })),
     el('p', { classe: 'note', texte:
       "L'accès aux dépôts de l'équipe suit : rien d'autre n'est à faire." }));
 
   if (!await demander('Placer dans une équipe', corps, 'Inscrire')) return;
+  const voulu = nom.value.trim();
+  if (voulu && voulu !== personne.full_name) {
+    const corrige = await tenter(() => api('POST',
+      `/api/classrooms/${encode(etat.groupe.scope)}/students/rename`,
+      { username: personne.username, full_name: voulu }), 'Nom complet');
+    if (!corrige) return;
+  }
   const bilan = await tenter(() => api('POST',
     `/api/classrooms/${encode(etat.groupe.scope)}/teams/members`,
     { team: choix.value, usernames: [personne.username] }), 'Équipe');
   if (!bilan) return;
-  message(`@${personne.username} rejoint « ${choix.value} ».`);
+  message(`${voulu || '@' + personne.username} rejoint « ${choix.value} ».`);
   etat.equipes = bilan.teams || [];
   etat.orphelins = bilan.unassigned || [];
+  if (voulu && voulu !== personne.full_name) await ouvrirGroupe(etat.groupe.scope, true);
   dessinerEquipes();
+}
+
+// inscrireUnMembre fait entrer dans le groupe un compte qu'une équipe porte
+// sans que personne ne l'ait inscrit — ce qu'une reprise laisse derrière elle.
+// Son nom complet est demandé au passage : c'est lui qui nommera ses dépôts.
+async function inscrireUnMembre(personne) {
+  const nom = el('input', {
+    classe: 'champ', type: 'text', value: personne.full_name || '',
+    placeholder: 'Prénom Nom',
+  });
+  // Le même nom porté par deux comptes, ce n'est pas toujours deux personnes :
+  // le dire ici évite de les traiter comme des homonymes, ce qui arrêterait
+  // toute distribution.
+  const rattache = el('select', { classe: 'champ' },
+    el('option', { value: '', texte: '— une personne de plus —' }),
+    (etat.groupe.students || []).map((autre) => el('option', {
+      value: autre.username,
+      texte: (autre.full_name || '@' + autre.username) + ' (@' + autre.username + ')',
+    })));
+  const corps = el('div', {},
+    el('p', {}, el('code', { texte: '@' + personne.username }),
+      " est dans une équipe sans être dans la liste du groupe."),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nom complet' }), nom),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Ou : autre compte de' }), rattache,
+      el('span', { classe: 'aide', texte:
+        "Une même personne travaille parfois sous deux comptes. Le dire ici lui "
+        + "laisse un seul dépôt par travail, où elle est invitée sous les deux." })));
+
+  if (!await demander("Inscrire ce compte", corps, 'Inscrire')) return;
+  const fiche = rattache.value
+    ? await tenter(() => api('POST',
+        `/api/classrooms/${encode(etat.groupe.scope)}/students/accounts`,
+        { username: rattache.value, account: personne.username }), 'Compte')
+    : await tenter(() => api('POST',
+        `/api/classrooms/${encode(etat.groupe.scope)}/students/add`,
+        { username: personne.username, full_name: nom.value.trim() }), 'Étudiant');
+  if (!fiche) return;
+  message(rattache.value
+    ? `@${personne.username} rattaché à la même personne.`
+    : `@${personne.username} inscrit dans « ${etat.groupe.label} ».`);
+  await ouvrirGroupe(etat.groupe.scope, true);
+  await chargerEquipes(true);
 }
 
 async function renommerEquipe(equipe) {

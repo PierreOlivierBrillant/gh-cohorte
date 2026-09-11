@@ -600,6 +600,12 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .tableau tbody tr:hover { background: var(--fond-doux); }
 .tableau .etroit { width: 1%; white-space: nowrap; }
 .tableau .vide { color: var(--texte-doux); font-style: italic; }
+/* Une valeur sans espace — un nom de dépôt, une suite de comptes — ne doit pas
+   élargir le tableau au point d'en pousser la dernière colonne hors de la
+   boîte, qui masque ce qui dépasse. Elle se coupe ; et si le tableau déborde
+   quand même, il défile chez lui plutôt que de se laisser rogner. */
+.tableau td { overflow-wrap: anywhere; }
+.tableau-large { overflow-x: auto; }
 /* Les actions d'une ligne restent côte à côte : la colonne s'élargit d'autant,
    plutôt que chaque ligne du tableau de doubler de hauteur. */
 .tableau td .actions { flex-wrap: nowrap; }

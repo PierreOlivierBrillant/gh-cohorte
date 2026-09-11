@@ -132,7 +132,7 @@ func TestDescribeSepareLesMembresConnusDesEtrangers(t *testing.T) {
 	if len(fiches[0].People) != 1 || fiches[0].People[0].Username != "emilie-cote" {
 		t.Fatalf("membres reconnus inattendus : %v", fiches[0].People)
 	}
-	if len(fiches[0].Strangers) != 1 || fiches[0].Strangers[0] != "intrus" {
+	if len(fiches[0].Strangers) != 1 || fiches[0].Strangers[0].Username != "intrus" {
 		t.Fatalf("l'intrus devrait être signalé : %v", fiches[0].Strangers)
 	}
 }

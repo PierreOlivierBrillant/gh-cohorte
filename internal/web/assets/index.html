@@ -533,6 +533,7 @@
         <button type="button" id="detail-cloner" class="bouton">Cloner</button>
         <button type="button" id="detail-pull" class="bouton">Mettre à jour des clones</button>
       </div>
+      <div class="tableau-large">
       <table class="tableau triable" id="detail-table">
         <thead>
           <tr>
@@ -550,6 +551,7 @@
         </thead>
         <tbody></tbody>
       </table>
+      </div>
       <div class="boite-vide" id="detail-vide" hidden></div>
     </div>
   </section>
@@ -747,6 +749,10 @@
         <button type="button" id="etudiants-deplacer" class="bouton">Déplacer la sélection…</button>
       </div>
 
+      <!-- Un tableau plus large que la boîte ne doit pas perdre sa dernière
+           colonne : la boîte masque ce qui dépasse, et c'est là que sont les
+           actions. Il défile chez lui plutôt que de se laisser rogner. -->
+      <div class="tableau-large">
       <table class="tableau triable" id="etudiants-table">
         <thead><tr>
           <th class="etroit"></th>
@@ -759,6 +765,7 @@
         </tr></thead>
         <tbody></tbody>
       </table>
+      </div>
       <div class="boite-vide" id="etudiants-vide" hidden></div>
     </div>
   </section>

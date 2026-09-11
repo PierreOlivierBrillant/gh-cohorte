@@ -288,16 +288,43 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 		result.Collaborator = TeamShared
 		return result
 	}
-	state, err := e.client.AddCollaborator(org, item.Name, item.Person.Username, e.settings.Permission)
-	if err != nil {
-		previous := result.Status
-		result.Status = Failed
-		result.Collaborator = "échec"
-		result.Error = fmt.Sprintf("dépôt %s mais invitation impossible : %v", previous, err)
-		return result
+	// Une personne qui travaille sous deux comptes n'a qu'un dépôt : elle y est
+	// invitée sous chacun d'eux, faute de quoi la moitié de son travail se
+	// ferait depuis un compte sans accès.
+	etats := make([]string, 0, 2)
+	for _, compte := range comptesDe(item) {
+		state, err := e.client.AddCollaborator(org, item.Name, compte, e.settings.Permission)
+		if err != nil {
+			previous := result.Status
+			result.Status = Failed
+			result.Collaborator = "échec"
+			result.Error = fmt.Sprintf("dépôt %s mais invitation impossible : %v", previous, err)
+			return result
+		}
+		etats = append(etats, state)
 	}
-	result.Collaborator = state
+	result.Collaborator = strings.Join(etats, ", ")
 	return result
+}
+
+// comptesDe rend les comptes à inviter sur le dépôt d'une personne. Un plan qui
+// n'en nomme aucun retombe sur celui de la personne : c'est ce que fait un
+// appelant qui ne connaît pas encore les autres.
+func comptesDe(item plan.PlannedRepo) []string {
+	propres := make([]string, 0, len(item.Accounts))
+	vus := map[string]bool{}
+	for _, compte := range item.Accounts {
+		compte = strings.TrimSpace(compte)
+		if compte == "" || vus[strings.ToLower(compte)] {
+			continue
+		}
+		vus[strings.ToLower(compte)] = true
+		propres = append(propres, compte)
+	}
+	if len(propres) == 0 && strings.TrimSpace(item.Person.Username) != "" {
+		propres = append(propres, item.Person.Username)
+	}
+	return propres
 }
 
 // previewStarter annonce en simulation ce qui arriverait aux fichiers de départ.

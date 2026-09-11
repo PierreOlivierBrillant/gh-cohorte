@@ -8,6 +8,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -84,10 +85,10 @@ func (d *desk) show() {
 	for _, fiche := range d.cours.Describe(d.list) {
 		membres := make([]string, 0, len(fiche.Members))
 		for _, personne := range fiche.People {
-			membres = append(membres, "@"+personne.Username)
+			membres = append(membres, nommer(personne))
 		}
 		for _, etranger := range fiche.Strangers {
-			membres = append(membres, "@"+etranger+" (hors liste)")
+			membres = append(membres, nommer(etranger)+" (hors liste)")
 		}
 		if len(membres) == 0 {
 			membres = append(membres, "—")
@@ -103,6 +104,15 @@ func (d *desk) show() {
 		}
 		console.Note("Sans équipe : %s", strings.Join(noms, ", "))
 	}
+}
+
+// nommer dit une personne par son nom quand on le connaît, et par son compte
+// sinon : c'est le nom qu'on cherche à l'écran, et le compte qui l'identifie.
+func nommer(personne roster.Person) string {
+	if nom := strings.TrimSpace(personne.FullName); nom != "" {
+		return nom + " (@" + personne.Username + ")"
+	}
+	return "@" + personne.Username
 }
 
 // only rend l'unique équipe visée, et refuse une demande ambiguë.

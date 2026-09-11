@@ -204,6 +204,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{scope}/students/names", s.handleResolveStudentNames)
 	mux.HandleFunc("POST /api/classrooms/{scope}/students/move", s.handleMoveStudent)
 	mux.HandleFunc("POST /api/classrooms/{scope}/students/rename", s.handleRenameStudent)
+	mux.HandleFunc("POST /api/classrooms/{scope}/students/accounts", s.handleAttachAccount)
 	// --- équipes du groupe
 	// Une équipe se désigne par son nom court — « eq1 » —, et son nom complet
 	// sur GitHub porte la place du groupe : « a26.5n6.01.eq1 ».
