@@ -83,6 +83,9 @@ type State struct {
 	DeletedTeams []string
 	// Contributors dit qui a écrit dans un dépôt : « org/depot » → comptes.
 	Contributors map[string][]string
+	// OutsideOrg nomme les comptes qui ne sont pas membres de l'organisation :
+	// les inscrire dans une équipe les invite plutôt que de les y mettre.
+	OutsideOrg map[string]bool
 
 	Collaborators map[string]map[string]string // dépôt → compte → droit
 	Invitations   map[string][]invitation
@@ -143,6 +146,7 @@ func NewState() *State {
 		},
 		TeamRepos:      map[string]map[string]string{},
 		Contributors:   map[string][]string{},
+		OutsideOrg:     map[string]bool{},
 		Collaborators:  map[string]map[string]string{},
 		Invitations:    map[string][]invitation{},
 		Blobs:          map[string][]byte{},

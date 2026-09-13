@@ -47,6 +47,11 @@ type Info struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Members     []string `json:"members"`
+	// Pending nomme ceux qui ont été invités sans avoir encore accepté.
+	// Inscrire dans une équipe quelqu'un qui n'est pas membre de
+	// l'organisation l'y invite plutôt que de l'y mettre : il en fait partie
+	// pour l'outil, et le taire ferait croire que rien ne s'est passé.
+	Pending []string `json:"pending,omitempty"`
 }
 
 // Team est une équipe d'un groupe : une place dans la nomenclature, un nom
@@ -64,6 +69,18 @@ type Team struct {
 	Group       string   `json:"group"`
 	Description string   `json:"description"`
 	Members     []string `json:"members"`
+	// Pending nomme ceux qui n'ont pas encore accepté leur invitation.
+	Pending []string `json:"pending,omitempty"`
+}
+
+// Waiting dit qu'un compte a été invité sans avoir encore accepté.
+func (t Team) Waiting(username string) bool {
+	for _, compte := range t.Pending {
+		if strings.EqualFold(compte, username) {
+			return true
+		}
+	}
+	return false
 }
 
 // Scope rend la place du groupe auquel l'équipe appartient.
@@ -94,6 +111,7 @@ func Read(info Info) (Team, bool) {
 		Slug: info.Slug, Name: strings.TrimSpace(info.Name), Short: parts.Team,
 		Session: parts.Session, Course: parts.Course, Group: parts.Group,
 		Description: info.Description, Members: info.Members,
+		Pending: info.Pending,
 	}, true
 }
 

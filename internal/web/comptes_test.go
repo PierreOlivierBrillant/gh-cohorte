@@ -297,3 +297,47 @@ func TestPlacerUnCompteDansUneEquipeOuLAutreEstDeja(t *testing.T) {
 		}
 	}
 }
+
+// Inscrire dans une équipe quelqu'un qui n'est pas membre de l'organisation ne
+// l'y met pas : cela l'invite. Il en fait partie pour l'outil, et le taire
+// ferait croire que rien ne s'est passé — c'est ce qui arrivait.
+func TestUnMembreInviteApparaitQuandMeme(t *testing.T) {
+	state := fakegh.NewState()
+	state.Users["hugolevacher"] = "Hugo Levacher"
+	// Hugo n'est pas encore membre de l'organisation : GitHub l'invitera.
+	state.OutsideOrg["hugolevacher"] = true
+	h := nouveau(t, state)
+	place := h.groupe("a26", "5n6", "01", "Hugo Levacher", "hugolevacher")
+	h.creerEquipe(place, "jerkkings")
+
+	var bilan listeEquipes
+	h.json(http.MethodPost, "/api/classrooms/"+place+"/teams/members",
+		map[string]any{"team": "jerkkings", "usernames": []string{"hugolevacher"}}, &bilan)
+
+	// GitHub ne l'a pas mis dans l'équipe : il l'y a invité.
+	if membres := h.State.TeamMembers("acme", fakegh.TeamSlug("a26.5n6.01.jerkkings")); len(membres) != 0 {
+		t.Fatalf("aucun membre actif attendu : %v", membres)
+	}
+	invites := h.State.TeamPending("acme", fakegh.TeamSlug("a26.5n6.01.jerkkings"))
+	if strings.Join(invites, ",") != "hugolevacher" {
+		t.Fatalf("il devrait être invité : %v", invites)
+	}
+
+	// L'écran, lui, doit le montrer : il est de l'équipe, en attente.
+	var liste listeEquipes
+	h.json(http.MethodGet, "/api/classrooms/"+place+"/teams?refresh=1", nil, &liste)
+	if len(liste.Teams) != 1 {
+		t.Fatalf("une équipe attendue : %+v", liste.Teams)
+	}
+	if len(liste.Teams[0].People) != 1 ||
+		liste.Teams[0].People[0].Username != "hugolevacher" {
+		t.Fatalf("Hugo devrait figurer dans l'équipe : %+v", liste.Teams[0])
+	}
+	if strings.Join(liste.Teams[0].Waiting, ",") != "hugolevacher" {
+		t.Fatalf("son attente devrait être dite : %+v", liste.Teams[0].Waiting)
+	}
+	// Et il ne doit plus être compté « sans équipe ».
+	if len(liste.Unassigned) != 0 {
+		t.Fatalf("il n'est plus sans équipe : %+v", liste.Unassigned)
+	}
+}

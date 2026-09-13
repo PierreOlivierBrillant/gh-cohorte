@@ -19,21 +19,51 @@ import (
 // contente de « read:org », mais en créer, en renommer, en supprimer ou en
 // changer la composition n'est possible qu'avec la première.
 
-// ListTeamMembers renvoie les comptes GitHub inscrits dans une équipe.
-func (c *Client) ListTeamMembers(org, slug string) ([]string, error) {
-	var all []string
-	path := "orgs/" + url.PathEscape(org) + "/teams/" + url.PathEscape(slug) + "/members"
-	err := c.paginate(path, nil, func(content []byte) (int, error) {
+// ListTeamMembers renvoie les comptes inscrits dans une équipe, et ceux qui y
+// ont été invités sans avoir encore accepté.
+//
+// Les seconds comptent autant que les premiers. Inscrire dans une équipe
+// quelqu'un qui n'est pas encore membre de l'organisation ne l'y met pas : cela
+// l'invite, et GitHub le laisse « en attente » jusqu'à ce qu'il accepte le
+// courriel. Il ne figure alors pas parmi les membres, et l'équipe paraît
+// n'avoir rien reçu — alors que tout s'est bien passé.
+func (c *Client) ListTeamMembers(org, slug string) (members, pending []string, err error) {
+	path := teamPath(org, slug) + "/members"
+	err = c.paginate(path, nil, func(content []byte) (int, error) {
 		var page []User
 		if err := json.Unmarshal(content, &page); err != nil {
 			return 0, err
 		}
 		for _, item := range page {
-			all = append(all, item.Login)
+			members = append(members, item.Login)
 		}
 		return len(page), nil
 	})
-	return all, err
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Une invitation illisible n'efface pas les membres qu'on a lus : elle
+	// laisse seulement l'équipe paraître plus petite qu'elle n'est.
+	deja := make(map[string]bool, len(members))
+	for _, login := range members {
+		deja[strings.ToLower(login)] = true
+	}
+	_ = c.paginate(teamPath(org, slug)+"/invitations", nil, func(content []byte) (int, error) {
+		var page []User
+		if err := json.Unmarshal(content, &page); err != nil {
+			return 0, err
+		}
+		for _, item := range page {
+			if item.Login == "" || deja[strings.ToLower(item.Login)] {
+				continue
+			}
+			deja[strings.ToLower(item.Login)] = true
+			pending = append(pending, item.Login)
+		}
+		return len(page), nil
+	})
+	return members, pending, nil
 }
 
 // CreateTeam crée une équipe dans l'organisation et renvoie ce qu'elle est
@@ -127,11 +157,12 @@ func (c *Client) LoadOrgTeams(org string, jobs int) ([]teams.Info, error) {
 		go func(position int) {
 			defer wait.Done()
 			defer func() { <-tickets }()
-			members, err := c.ListTeamMembers(org, found[position].Slug)
+			members, pending, err := c.ListTeamMembers(org, found[position].Slug)
 			if err != nil {
 				return
 			}
-			found[position].Members = members
+			found[position].Members = append(members, pending...)
+			found[position].Pending = pending
 		}(index)
 	}
 	wait.Wait()

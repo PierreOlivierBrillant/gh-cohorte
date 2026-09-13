@@ -150,11 +150,13 @@ func (r *Resolver) crewOf(org, repo string) Crew {
 	if equipes, err := r.client.ListRepoTeams(org, repo); err == nil {
 		for _, equipe := range equipes {
 			crew.Teams = append(crew.Teams, equipe.Slug)
-			membres, err := r.client.ListTeamMembers(org, equipe.Slug)
+			membres, invites, err := r.client.ListTeamMembers(org, equipe.Slug)
 			if err != nil {
 				continue
 			}
-			for _, login := range membres {
+			// Une invitation en attente compte autant qu'une adhésion : la
+			// personne a été mise dans l'équipe, elle n'a pas encore cliqué.
+			for _, login := range append(membres, invites...) {
 				ajouter(login, FromTeam, equipe.Slug)
 			}
 		}

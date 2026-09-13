@@ -21,6 +21,10 @@ type TeamState struct {
 	Description string
 	Privacy     string
 	Members     map[string]string // compte → rôle
+	// Pending porte ceux qu'on a inscrits sans qu'ils soient membres de
+	// l'organisation : GitHub les invite, et ils n'apparaissent pas parmi les
+	// membres tant qu'ils n'ont pas accepté.
+	Pending map[string]string
 }
 
 var teamSlugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -82,6 +86,23 @@ func (s *State) TeamNames(org string) []string {
 	return noms
 }
 
+// TeamPending renvoie ceux qui ont été invités dans une équipe sans avoir
+// encore accepté.
+func (s *State) TeamPending(org, slug string) []string {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	equipe, connue := s.Teams[org+"/"+slug]
+	if !connue {
+		return nil
+	}
+	logins := make([]string, 0, len(equipe.Pending))
+	for login := range equipe.Pending {
+		logins = append(logins, login)
+	}
+	sort.Strings(logins)
+	return logins
+}
+
 // TeamMembers renvoie les membres d'une équipe, triés.
 func (s *State) TeamMembers(org, slug string) []string {
 	s.mutex.Lock()
@@ -132,6 +153,7 @@ func (s *State) TeamRepoNames(org, slug string) []string {
 var (
 	teamRe        = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)$`)
 	teamMembersRe = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/members$`)
+	teamInvitesRe = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/invitations$`)
 	teamMemberRe  = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/memberships/([^/]+)$`)
 	teamReposRe   = regexp.MustCompile(`^/orgs/([^/]+)/teams/([^/]+)/repos$`)
 	repoTeamsRe   = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/teams$`)
@@ -150,6 +172,24 @@ func (s *Server) teamsGet(writer http.ResponseWriter, path string) bool {
 		}
 		logins := make([]string, 0, len(equipe.Members))
 		for login := range equipe.Members {
+			logins = append(logins, login)
+		}
+		sort.Strings(logins)
+		payload := make([]map[string]any, 0, len(logins))
+		for _, login := range logins {
+			payload = append(payload, map[string]any{"login": login})
+		}
+		s.send(writer, 200, payload)
+		return true
+	}
+	if match := teamInvitesRe.FindStringSubmatch(path); match != nil {
+		equipe, connue := state.Teams[match[1]+"/"+match[2]]
+		if !connue {
+			s.notFound(writer)
+			return true
+		}
+		logins := make([]string, 0, len(equipe.Pending))
+		for login := range equipe.Pending {
 			logins = append(logins, login)
 		}
 		sort.Strings(logins)
@@ -257,7 +297,7 @@ func (s *Server) teamsPost(writer http.ResponseWriter, path string, body map[str
 	privacy, _ := body["privacy"].(string)
 	equipe := &TeamState{
 		Org: org, Slug: slug, Name: nom, Description: description,
-		Privacy: privacy, Members: map[string]string{},
+		Privacy: privacy, Members: map[string]string{}, Pending: map[string]string{},
 	}
 	state.Teams[org+"/"+slug] = equipe
 	s.send(writer, 201, teamPayload(equipe))
@@ -281,6 +321,15 @@ func (s *Server) teamsPut(writer http.ResponseWriter, path string, body map[stri
 		role, _ := body["role"].(string)
 		if role == "" {
 			role = "member"
+		}
+		// GitHub n'ajoute à une équipe que les membres de l'organisation : les
+		// autres y sont invités, et restent « en attente » jusqu'à ce qu'ils
+		// acceptent. Le faux serveur reproduit ce piège, c'est la seule façon
+		// de l'éprouver.
+		if state.OutsideOrg[strings.ToLower(login)] {
+			equipe.Pending[strings.ToLower(login)] = role
+			s.send(writer, 200, map[string]any{"role": role, "state": "pending"})
+			return true
 		}
 		equipe.Members[strings.ToLower(login)] = role
 		s.send(writer, 200, map[string]any{"role": role, "state": "active"})
@@ -341,6 +390,7 @@ func (s *Server) teamsDelete(writer http.ResponseWriter, path string) bool {
 			return true
 		}
 		delete(equipe.Members, strings.ToLower(match[3]))
+		delete(equipe.Pending, strings.ToLower(match[3]))
 		writer.WriteHeader(204)
 		return true
 	}
