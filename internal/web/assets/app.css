@@ -251,21 +251,39 @@ main { padding: 1.5rem; max-width: 1100px; }
    faire. Les membres sont des jetons plutôt qu'une liste, parce qu'ils sont
    courts et qu'on les compare d'une équipe à l'autre. */
 .equipe-rangee {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: .5rem 1rem;
   padding: .75rem .9rem;
   border-bottom: 1px solid var(--bord);
 }
 
 .equipe-rangee:last-child { border-bottom: 0; }
-.equipe-rangee:hover { background: var(--fond-doux); }
-.equipe-titre { font-weight: 600; font-size: 1rem; min-width: 6rem; }
+.equipe-entete { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.equipe-titre { font-weight: 600; font-size: 1rem; }
 .equipe-nom { color: var(--texte-doux); font-size: .8125rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.equipe-membres { flex: 1 1 18rem; }
-.equipe-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+.equipe-actions { display: flex; gap: .3rem; flex-wrap: nowrap; }
+
+/* Un membre par ligne : le nom et le compte se lisent en regard l'un de
+   l'autre, et il reste la place de dire ce qui cloche et de l'y régler. */
+.equipe-membres { display: flex; flex-direction: column; gap: .15rem;
+  margin-top: .5rem; }
+.equipe-membre {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .2rem .3rem;
+  border-radius: 6px;
+  font-size: .875rem;
+}
+
+.equipe-membre:hover { background: var(--fond-doux); }
+.membre-nom { min-width: 11rem; }
+.membre-comptes {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .8125rem;
+  color: var(--texte-doux);
+  overflow-wrap: anywhere;
+}
+
 .jetons { display: flex; gap: .4rem; flex-wrap: wrap; }
 
 .jeton {
@@ -298,6 +316,9 @@ main { padding: 1.5rem; max-width: 1100px; }
 /* Un membre qu'on a mis là soi-même, par opposition à ceux que GitHub a
    désignés : la différence compte quand on relit une composition. */
 .jeton.choisi { color: var(--lien); border-color: var(--lien); }
+/* Invité sans avoir encore accepté : la personne est de l'équipe, elle ne le
+   sait pas encore. Le taire ferait croire que rien ne s'est passé. */
+.jeton.attente { color: var(--alerte); border-style: dashed; }
 .etiquettes { display: flex; gap: .4rem; flex-wrap: wrap; }
 
 /* ------------------------------------------------------------------- étapes */

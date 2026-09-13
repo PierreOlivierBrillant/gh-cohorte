@@ -89,6 +89,22 @@ const TRACES = {
     '.25.25 0 0 0 .249-.225l.66-6.6a.75.75 0 0 1 1.492.149l-.66 6.6A1.748 1.748 0 0 1 10.595' +
     ' 15h-5.19a1.75 1.75 0 0 1-1.741-1.575l-.66-6.6a.75.75 0 1 1 1.492-.15ZM6.5 1.75V3h3V1.7' +
     '5a.25.25 0 0 0-.25-.25h-2.5a.25.25 0 0 0-.25.25Z',
+  gens: 'M2 5.5a3.5 3.5 0 1 1 5.898 2.549 5.508 5.508 0 0 1 3.034 4.084.75.75 0 1 1-1.482.2' +
+    '35 4 4 0 0 0-7.9 0 .75.75 0 0 1-1.482-.236A5.507 5.507 0 0 1 3.102 8.05 3.493 3.493 0 0' +
+    ' 1 2 5.5ZM11 4a3.001 3.001 0 0 1 2.22 5.018 5.01 5.01 0 0 1 2.56 3.012.749.749 0 0 1-.8' +
+    '85.954.752.752 0 0 1-.549-.514 3.507 3.507 0 0 0-2.522-2.372.75.75 0 0 1-.574-.73v-.352' +
+    'a.75.75 0 0 1 .416-.672A1.5 1.5 0 0 0 11 5.5.75.75 0 0 1 11 4Zm-5.5-.5a2 2 0 1 0-.001 3' +
+    '.999A2 2 0 0 0 5.5 3.5Z',
+  fleche: 'M8.22 2.97a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.751.751 ' +
+    '0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l2.97-2.97H3.75a.75.75 0 0 1 0-1.5h7.44L8.22 4' +
+    '.03a.75.75 0 0 1 0-1.06Z',
+  cle: 'M10.5 0a5.499 5.499 0 1 1-1.288 10.848l-.932.932a.749.749 0 0 1-.53.22H7v.75a.749.74' +
+    '9 0 0 1-.22.53l-.5.5a.749.749 0 0 1-.53.22H5v.75a.749.749 0 0 1-.22.53l-.5.5a.749.749 0' +
+    ' 0 1-.53.22h-2A1.75 1.75 0 0 1 0 14.25v-2c0-.199.079-.389.22-.53l4.932-4.932A5.5 5.5 0 ' +
+    '0 1 10.5 0Zm-4 5.5c0 .458.06.902.173 1.324a.75.75 0 0 1-.193.72L1.5 12.562v1.688c0 .138' +
+    '.112.25.25.25h1.689l.311-.311V13.25a.75.75 0 0 1 .75-.75h1.19l.31-.311V11a.75.75 0 0 1 ' +
+    '.75-.75h1.19l.69-.691a.75.75 0 0 1 .718-.194c.422.112.866.172 1.324.172a4 4 0 1 0-4-4Zm' +
+    '5-1.5a1 1 0 1 1 2 0 1 1 0 0 1-2 0Z',
 };
 
 // icone dessine un pictogramme. Un bouton qui n'a plus de texte n'a plus de nom
@@ -1451,7 +1467,11 @@ function dessinerTravail() {
       el('td', repo.pushed_at ? { texte: repo.pushed_at } : { classe: 'vide', texte: 'jamais' }),
       el('td', { texte: acces ? resumerAcces(acces) : '—' }),
       el('td', { classe: 'etroit' }, el('span', { classe: 'actions' },
-        el('button', { type: 'button', classe: 'lien', texte: 'Accès', onclick: () => panneauAcces(repo) }),
+        el('button', {
+          type: 'button', classe: 'lien icone',
+          title: 'Accès', 'aria-label': `Accès de ${repo.name}`,
+          onclick: () => panneauAcces(repo),
+        }, icone('cle')),
         el('button', {
           type: 'button', classe: 'lien icone rouge',
           title: 'Supprimer…', 'aria-label': `Supprimer ${repo.name}`,
@@ -2228,10 +2248,9 @@ async function chargerEtudiants(force) {
           title: 'Renommer…', 'aria-label': `Renommer ${ligne.full_name || '@' + ligne.username}`,
           onclick: () => renommerEtudiant(ligne),
         }, icone('crayon')),
-        el('button', {
-          classe: 'bouton petit', type: 'button', texte: 'Déplacer…',
-          onclick: () => deplacerEtudiants([ligne]),
-        })))));
+        boutonIcone('fleche', 'Déplacer…',
+          `Déplacer ${ligne.full_name || '@' + ligne.username} vers un autre groupe`,
+          () => deplacerEtudiants([ligne]))))));
   }
 
   const filtre = donnees.shown !== donnees.total;
@@ -2866,48 +2885,49 @@ function dessinerEquipes() {
     "reprend une équipe déjà présente dans l'organisation.";
 
   for (const equipe of etat.equipes) {
-    const membres = el('span', { classe: 'jetons equipe-membres' },
-      equipe.people.map((personne) => el('span', { classe: 'jeton' },
-        ...nomEtComptes(personne))),
+    const attente = new Set(equipe.waiting || []);
+    const membres = el('div', { classe: 'equipe-membres' },
+      equipe.people.map((personne) => ligneDeMembre(personne, {
+        invite: attente.has(personne.username),
+      })),
       // Un compte hors liste porte quand même son nom quand le registre le
-      // connaît : ce qu'on sait nommer doit être nommé. Le bouton, lui, mène
-      // à l'inscrire — c'est la suite naturelle.
-      equipe.strangers.map((personne) => el('button', {
-        classe: 'jeton etranger', type: 'button',
-        title: "Ce compte n'est pas dans la liste du groupe : l'y inscrire.",
-        onclick: () => inscrireUnMembre(personne),
-      }, ...nomEtComptes(personne))));
+      // connaît : ce qu'on sait nommer doit être nommé.
+      equipe.strangers.map((personne) => ligneDeMembre(personne, {
+        invite: attente.has(personne.username),
+        horsListe: true,
+        action: { texte: 'Inscrire…', faire: () => inscrireUnMembre(personne) },
+      })));
     if (equipe.people.length === 0 && equipe.strangers.length === 0) {
       vider(membres);
-      membres.append(el('span', { classe: 'vide', texte: 'équipe vide' }));
+      membres.append(el('p', { classe: 'note vide',
+        texte: "Aucun membre. « Composer » dit qui en fait partie." }));
     }
     conteneur.append(el('div', { classe: 'equipe-rangee' },
-      el('span', { classe: 'equipe-titre', texte: equipe.short }),
-      el('code', { classe: 'equipe-nom', texte: equipe.name }),
-      membres,
-      el('span', { classe: 'equipe-actions' },
-        el('button', { classe: 'bouton petit', type: 'button', texte: 'Composer…',
-          onclick: () => composerEquipe(equipe) }),
-        el('button', { classe: 'bouton petit', type: 'button', texte: 'Renommer…',
-          onclick: () => renommerEquipe(equipe) }),
-        el('button', { classe: 'bouton petit', type: 'button', texte: 'Supprimer…',
-          onclick: () => supprimerEquipe(equipe) }))));
+      el('div', { classe: 'equipe-entete' },
+        el('span', { classe: 'equipe-titre', texte: equipe.short }),
+        el('code', { classe: 'equipe-nom', texte: equipe.name }),
+        el('span', { classe: 'espace' }),
+        el('span', { classe: 'equipe-actions' },
+          boutonIcone('gens', 'Composer', `Composer ${equipe.short}`,
+            () => composerEquipe(equipe)),
+          boutonIcone('crayon', 'Renommer', `Renommer ${equipe.short}`,
+            () => renommerEquipe(equipe)),
+          boutonIcone('corbeille', 'Supprimer', `Supprimer ${equipe.short}`,
+            () => supprimerEquipe(equipe), 'rouge'))),
+      membres));
   }
 
   const orphelins = $('equipes-orphelins');
   vider(orphelins);
   $('equipes-orphelins-boite').hidden = etat.orphelins.length === 0;
   for (const personne of etat.orphelins) {
-    orphelins.append(el('button', {
-      // Un nom qui manque se voit : c'est lui qui nommera ses dépôts, et le
-      // placer dans une équipe sans l'avoir est remettre le problème à plus tard.
-      classe: 'jeton lien' + (personne.full_name ? '' : ' etranger'),
-      type: 'button',
-      texte: personne.full_name || '@' + personne.username,
-      title: personne.full_name
-        ? 'Placer dans une équipe'
-        : 'Nom complet inconnu : le donner, et placer dans une équipe',
-      onclick: () => placerDansUneEquipe(personne),
+    // Un nom qui manque se voit, et ce qu'il y a à faire est écrit : le placer
+    // dans une équipe sans l'avoir remet le problème à la distribution.
+    orphelins.append(ligneDeMembre(personne, {
+      action: {
+        texte: personne.full_name ? 'Placer…' : 'Nommer et placer…',
+        faire: () => placerDansUneEquipe(personne),
+      },
     }));
   }
 }
@@ -2915,6 +2935,82 @@ function dessinerEquipes() {
 $('equipes-recharger').addEventListener('click', () => chargerEquipes(true));
 $('equipes-nouvelle').addEventListener('click', () => nouvelleEquipe());
 $('equipes-adopter').addEventListener('click', () => adopterEquipe());
+
+// ligneDeMembre écrit un membre d'équipe : son nom, ses comptes, et ce qui
+// cloche s'il y a lieu.
+//
+// Une ligne par personne plutôt qu'une pastille dans un paragraphe : le nom et
+// le compte s'y lisent en regard l'un de l'autre — c'est précisément ce qu'on
+// vient vérifier —, et il reste la place de dire qu'une invitation n'a pas été
+// acceptée ou qu'un nom manque, avec à côté le bouton qui le règle.
+function ligneDeMembre(personne, etats = {}) {
+  const comptes = [personne.username].concat(personne.also || []);
+  const ligne = el('div', { classe: 'equipe-membre' },
+    personne.full_name
+      ? el('span', { classe: 'membre-nom', texte: personne.full_name })
+      : el('span', { classe: 'membre-nom vide', texte: 'nom complet inconnu' }),
+    el('span', { classe: 'membre-comptes',
+      texte: comptes.map((compte) => '@' + compte).join(' ') }));
+  if (etats.invite) {
+    ligne.append(el('span', { classe: 'jeton attente', texte: 'invité',
+      title: "Invitation envoyée : la personne n'a pas encore accepté." }));
+  }
+  if (etats.horsListe) {
+    ligne.append(el('span', { classe: 'jeton etranger', texte: 'hors liste',
+      title: "Ce compte n'est dans la liste d'aucun groupe." }));
+  }
+  ligne.append(el('span', { classe: 'espace' }));
+  // Ce qu'il y a à faire est écrit, pas deviné : rien n'indiquait qu'on pouvait
+  // cliquer sur un membre pour le nommer.
+  if (etats.action) {
+    ligne.append(el('button', {
+      classe: 'bouton petit', type: 'button', texte: etats.action.texte,
+      onclick: etats.action.faire,
+    }));
+  } else if (!personne.full_name) {
+    ligne.append(el('button', {
+      classe: 'bouton petit', type: 'button', texte: 'Nommer…',
+      title: "C'est le nom complet qui nomme ses dépôts.",
+      onclick: () => nommerUnMembre(personne),
+    }));
+  }
+  return ligne;
+}
+
+// boutonIcone rend une commande à son pictogramme. Un bouton sans texte n'a
+// plus de nom : title et aria-label le lui rendent.
+function boutonIcone(trace, titre, description, faire, ton = '') {
+  return el('button', {
+    classe: ('bouton petit icone ' + ton).trim(), type: 'button',
+    title: titre, 'aria-label': description, onclick: faire,
+  }, icone(trace));
+}
+
+// nommerUnMembre donne son nom complet à quelqu'un qui n'en a pas. C'est lui
+// qui nommera ses dépôts : sans lui, aucun travail ne peut lui être distribué.
+async function nommerUnMembre(personne) {
+  const nom = el('input', { classe: 'champ', type: 'text', placeholder: 'Prénom Nom' });
+  const corps = el('div', {},
+    el('p', {}, el('code', { texte: '@' + personne.username }),
+      " n'a pas de nom complet."),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nom complet' }), nom,
+      el('span', { classe: 'aide', texte:
+        "C'est lui qui nommera ses dépôts, et il monte au registre de "
+        + "l'organisation pour valoir partout." })));
+
+  if (!await demander('Nommer cette personne', corps, 'Enregistrer')) return;
+  const voulu = nom.value.trim();
+  if (!voulu) return;
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/students/rename`,
+    { username: personne.username, full_name: voulu }), 'Nom complet');
+  if (!fiche) return;
+  message(`@${personne.username} s'appelle « ${voulu} ».`);
+  await ouvrirGroupe(etat.groupe.scope, true);
+  afficherVue('equipes');
+  await chargerEquipes(true);
+}
 
 // nomEtComptes montre le nom d'une personne et le ou les comptes GitHub sous
 // lesquels elle travaille. Les deux se lisent ensemble partout — la liste des
