@@ -832,12 +832,16 @@ type assignmentRepo struct {
 	// Team nomme l'équipe destinataire, et Members ses membres : un dépôt
 	// d'équipe ne porte le nom de personne, il faut donc dire qui il concerne —
 	// et le dire par leur nom, pas par leur seul compte.
-	Team       string          `json:"team,omitempty"`
-	Members    []roster.Person `json:"members,omitempty"`
-	Private    bool            `json:"private"`
-	Visibility string          `json:"visibility"`
-	URL        string          `json:"url"`
-	PushedAt   string          `json:"pushed_at"`
+	Team    string          `json:"team,omitempty"`
+	Members []roster.Person `json:"members,omitempty"`
+	// Waiting nomme ceux qui ont été invités dans l'équipe sans avoir encore
+	// accepté : ils comptent parmi ses membres, et l'écran doit le dire ici
+	// comme dans l'onglet des équipes.
+	Waiting    []string `json:"waiting,omitempty"`
+	Private    bool     `json:"private"`
+	Visibility string   `json:"visibility"`
+	URL        string   `json:"url"`
+	PushedAt   string   `json:"pushed_at"`
 }
 
 // assignmentOf résout le groupe et le travail désignés par l'adresse.
@@ -920,6 +924,7 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		if equipe, appartient := cours.TeamOf(repo.Name, equipes); appartient {
 			ligne.FullName, ligne.Team = equipe.Label(), equipe.Short
 			ligne.Members = cours.Members(equipe)
+			ligne.Waiting = equipe.Pending
 		} else if student, inscrit := cours.StudentOf(repo.Name); inscrit {
 			ligne.FullName, ligne.Username = student.FullName, student.Username
 		}

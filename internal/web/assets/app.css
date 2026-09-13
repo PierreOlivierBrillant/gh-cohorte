@@ -280,9 +280,13 @@ main { padding: 1.5rem; max-width: 1100px; }
 .membre-comptes {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .8125rem;
-  color: var(--texte-doux);
   overflow-wrap: anywhere;
 }
+
+/* Le compte mène au profil. Il garde la couleur discrète du texte secondaire
+   tant qu'on ne le vise pas : c'est une sortie, pas la commande de la ligne. */
+.lien-compte { color: var(--texte-doux); }
+.lien-compte:hover { color: var(--lien); text-decoration: underline; }
 
 .jetons { display: flex; gap: .4rem; flex-wrap: wrap; }
 
@@ -308,8 +312,6 @@ main { padding: 1.5rem; max-width: 1100px; }
   font-size: .6875rem;
   color: var(--texte-doux);
 }
-.membres-du-depot { display: inline-flex; gap: .3rem; flex-wrap: wrap;
-  margin-left: .4rem; vertical-align: middle; }
 /* Un membre que la liste du groupe ne connaît pas : il a l'accès sans être
    inscrit nulle part, et cela doit se voir. */
 .jeton.etranger { color: var(--erreur); border-style: dashed; }

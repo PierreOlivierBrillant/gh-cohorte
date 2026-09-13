@@ -265,6 +265,9 @@ const encode = encodeURIComponent;
 const etat = {
   contexte: null,
   reglages: {},
+  // vue retient l'écran affiché : une action lancée depuis un travail ne doit
+  // pas ramener dans les équipes, et inversement.
+  vue: '',
   // Ce que le jeton permet, et la fonction qui dit quelles portées sont cochées
   // dans les réglages généraux.
   jeton: null,
@@ -663,6 +666,7 @@ function afficherVue(nom, sansHistorique) {
   for (const vue of document.querySelectorAll('.vue')) {
     vue.hidden = vue.id !== 'vue-' + nom;
   }
+  etat.vue = nom;
   dessinerEntete(nom, onglet);
   if (!sansHistorique) naviguer(cheminDeLaVue(nom));
   window.scrollTo(0, 0);
@@ -1447,16 +1451,18 @@ function dessinerTravail() {
       // dépôt d'équipe, lui, nomme l'équipe et ses membres : il n'appartient à
       // personne en particulier, et c'est normal.
       el('td', {}, repo.team
-        ? el('span', {},
+        ? el('div', {},
             el('strong', { texte: repo.full_name }),
             // Les membres se lisent par leur nom et par leur compte : un dépôt
             // d'équipe ne porte celui de personne, et c'est leur association
             // qu'on vient vérifier ici.
             (repo.members || []).length === 0
               ? el('span', { classe: 'note', texte: ' — équipe vide' })
-              : el('span', { classe: 'jetons membres-du-depot' },
-                  (repo.members || []).map((personne) =>
-                    el('span', { classe: 'jeton' }, ...nomEtComptes(personne)))))
+              : el('div', { classe: 'equipe-membres' },
+                  (repo.members || []).map((personne) => ligneDeMembre(personne, {
+                    invite: (repo.waiting || []).some((compte) =>
+                      compte.toLowerCase() === personne.username.toLowerCase()),
+                  }))))
         : el('span', repo.username
             ? { texte: repo.full_name || '@' + repo.username }
             : { classe: 'vide', texte: repo.student + ' (hors liste)' })),
@@ -2950,8 +2956,9 @@ function ligneDeMembre(personne, etats = {}) {
     personne.full_name
       ? el('span', { classe: 'membre-nom', texte: personne.full_name })
       : el('span', { classe: 'membre-nom vide', texte: 'nom complet inconnu' }),
-    el('span', { classe: 'membre-comptes',
-      texte: comptes.map((compte) => '@' + compte).join(' ') }));
+    el('span', { classe: 'membre-comptes' },
+      comptes.map((compte, rang) =>
+        el('span', {}, rang > 0 ? ' ' : null, lienDeProfil(compte)))));
   if (etats.invite) {
     ligne.append(el('span', { classe: 'jeton attente', texte: 'invité',
       title: "Invitation envoyée : la personne n'a pas encore accepté." }));
@@ -2976,6 +2983,19 @@ function ligneDeMembre(personne, etats = {}) {
     }));
   }
   return ligne;
+}
+
+// lienDeProfil rend un compte GitHub cliquable. C'est la personne qu'on lit
+// derrière le compte, et la vérifier veut dire ouvrir sa page : l'hôte vient du
+// contexte, parce qu'il n'est pas toujours github.com.
+function lienDeProfil(compte) {
+  const hote = (etat.contexte && etat.contexte.host) || 'github.com';
+  return el('a', {
+    classe: 'compte lien-compte', texte: '@' + compte,
+    href: `https://${hote}/${encodeURIComponent(compte)}`,
+    target: '_blank', rel: 'noreferrer noopener',
+    title: `Ouvrir @${compte} sur ${hote}`,
+  });
 }
 
 // boutonIcone rend une commande à son pictogramme. Un bouton sans texte n'a
@@ -3008,22 +3028,24 @@ async function nommerUnMembre(personne) {
     { username: personne.username, full_name: voulu }), 'Nom complet');
   if (!fiche) return;
   message(`@${personne.username} s'appelle « ${voulu} ».`);
-  await ouvrirGroupe(etat.groupe.scope, true);
-  afficherVue('equipes');
-  await chargerEquipes(true);
+  await revoirApresChangement();
 }
 
-// nomEtComptes montre le nom d'une personne et le ou les comptes GitHub sous
-// lesquels elle travaille. Les deux se lisent ensemble partout — la liste des
-// étudiants le fait déjà —, parce que c'est précisément leur association qu'on
-// vient vérifier : le nom nomme les dépôts, le compte y donne accès.
-function nomEtComptes(personne) {
-  const comptes = [personne.username].concat(personne.also || []);
-  const morceaux = [];
-  if (personne.full_name) morceaux.push(personne.full_name + ' ');
-  morceaux.push(el('span', { classe: 'compte',
-    texte: comptes.map((compte) => '@' + compte).join(' ') }));
-  return morceaux;
+// revoirApresChangement relit la fiche du groupe et remet sous les yeux ce
+// qu'on regardait. Nommer quelqu'un se fait aussi bien depuis un travail que
+// depuis les équipes : ramener chaque fois dans Équipes ferait perdre sa place.
+async function revoirApresChangement() {
+  const vue = etat.vue;
+  const travail = etat.travail;
+  if (!await ouvrirGroupe(etat.groupe.scope, true, true)) return;
+  if (vue === 'travail' && travail) {
+    const encore = (etat.groupe.assignments || []).find((item) => item.id === travail.id);
+    if (encore) {
+      await ouvrirTravail(encore, true);
+      return;
+    }
+  }
+  afficherVue(vue === 'travail' ? 'travaux' : vue, true);
 }
 
 // listeDeComptes rend la liste des membres d'une équipe, telle qu'on la saisit.

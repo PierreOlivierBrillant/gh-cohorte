@@ -227,6 +227,46 @@ func TestSupprimerUneEquipeLaisseSesDepots(t *testing.T) {
 	}
 }
 
+// Le dépôt d'une équipe dit qui la compose, nom et compte, et signale celui
+// qui a été invité sans avoir encore accepté : c'est la même lecture que dans
+// l'onglet des équipes, et c'est là qu'on vient la vérifier.
+func TestLeDepotDUneEquipeNommeSesMembresEtCeuxQuiAttendent(t *testing.T) {
+	state := fakegh.NewState()
+	state.Users["hugolevacher"] = "Hugo Levacher"
+	state.OutsideOrg["hugolevacher"] = true
+	h := nouveau(t, state)
+	place := h.groupe("a26", "5n6", "01",
+		"Émilie Côté", "emilie-cote", "Hugo Levacher", "hugolevacher")
+	h.creerEquipe(place, "eq1", "emilie-cote", "hugolevacher")
+	h.State.AddRepo("acme", "a26.5n6.01.projet.eq1", true)
+
+	var detail struct {
+		Repos []struct {
+			Team    string   `json:"team"`
+			Waiting []string `json:"waiting"`
+			Members []struct {
+				FullName string `json:"full_name"`
+				Username string `json:"username"`
+			} `json:"members"`
+		} `json:"repos"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+place+"/assignments/projet", nil, &detail)
+	if len(detail.Repos) != 1 || detail.Repos[0].Team != "eq1" {
+		t.Fatalf("un dépôt d'équipe attendu : %+v", detail.Repos)
+	}
+	noms := make([]string, 0, 2)
+	for _, membre := range detail.Repos[0].Members {
+		noms = append(noms, membre.FullName+" (@"+membre.Username+")")
+	}
+	sort.Strings(noms)
+	if strings.Join(noms, ", ") != "Hugo Levacher (@hugolevacher), Émilie Côté (@emilie-cote)" {
+		t.Fatalf("les membres devraient être nommés : %v", noms)
+	}
+	if strings.Join(detail.Repos[0].Waiting, ",") != "hugolevacher" {
+		t.Fatalf("l'invitation en attente devrait être dite : %v", detail.Repos[0].Waiting)
+	}
+}
+
 // Supprimer les dépôts avec l'équipe se demande, et se confirme : ceux des
 // autres équipes restent, et un nom mal retapé ne détruit rien.
 func TestSupprimerUneEquipeAvecSesDepots(t *testing.T) {
