@@ -227,9 +227,9 @@ func (c Classroom) Settings(assignmentName string) config.Settings {
 // peut pas être nommé.
 func (c Classroom) MissingNames() []roster.Person {
 	var incomplets []roster.Person
-	for _, student := range c.Students {
-		if _, err := naming.Student(student.FullName); err != nil {
-			incomplets = append(incomplets, student)
+	for _, identite := range c.Identities() {
+		if _, err := naming.Student(identite.FullName); err != nil {
+			incomplets = append(incomplets, identite.Person())
 		}
 	}
 	return incomplets
@@ -265,9 +265,15 @@ func (c Classroom) Enrich(names Names, repos []groups.RepoInfo) Classroom {
 	complets := make([]roster.Person, 0, len(c.Students))
 	connus := map[string]bool{}
 	for _, student := range c.Students {
-		if strings.TrimSpace(student.FullName) == "" {
-			if trouve, ok := names.Lookup(student.Username); ok {
+		if trouve, ok := names.Lookup(student.Username); ok {
+			if strings.TrimSpace(student.FullName) == "" {
 				student.FullName = trouve.FullName
+			}
+			// Le matricule vient du registre comme le nom : c'est lui qui
+			// réunit les comptes d'une personne, et il doit valoir d'un poste
+			// à l'autre.
+			if strings.TrimSpace(student.StudentID) == "" {
+				student.StudentID = trouve.StudentID
 			}
 		}
 		// Tous ses comptes comptent comme connus : un dépôt arrivé sous l'un
@@ -392,11 +398,11 @@ func (k known) personne(fragment string) (roster.Person, bool) {
 // désignent quelqu'un : c'est lui que la nomenclature écrit.
 func knownBy(people []roster.Person) known {
 	connus := make(known, 2*len(people))
-	for _, person := range people {
+	for _, identite := range identitiesOf(people) {
 		// Tous ses comptes la désignent : un dépôt adopté sous l'un d'eux est
 		// le sien, et le renommer lui donnera son nom.
-		for _, compte := range person.Accounts() {
-			connus[strings.ToLower(compte)] = person
+		for _, compte := range identite.Accounts {
+			connus[strings.ToLower(compte)] = identite.Person()
 		}
 	}
 	for _, person := range people {
@@ -429,10 +435,13 @@ func (c Classroom) Add(person roster.Person) (Classroom, error) {
 }
 
 // Find retrouve un étudiant du groupe par son compte GitHub.
+// Le matricule réunit les lignes d'une même personne : c'est elle qui est
+// rendue, avec tous ses comptes, et non la ligne qui portait celui qu'on
+// cherchait.
 func (c Classroom) Find(username string) (roster.Person, bool) {
-	for _, student := range c.Students {
-		if student.Owns(username) {
-			return student, true
+	for _, identite := range c.Identities() {
+		if identite.Has(username) {
+			return identite.Person(), true
 		}
 	}
 	return roster.Person{}, false
@@ -647,6 +656,11 @@ func dedupe(people []roster.Person) []roster.Person {
 		if position, connu := vus[person.Key()]; connu {
 			if uniques[position].FullName == "" && person.FullName != "" {
 				uniques[position].FullName = person.FullName
+			}
+			// Le matricule non plus ne se perd pas : c'est lui qui réunira
+			// cette ligne avec les autres comptes de la même personne.
+			if uniques[position].StudentID == "" && person.StudentID != "" {
+				uniques[position].StudentID = person.StudentID
 			}
 			continue
 		}

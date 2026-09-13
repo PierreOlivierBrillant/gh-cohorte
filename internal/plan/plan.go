@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -234,6 +235,43 @@ type Target struct {
 	Accounts []string
 }
 
+// sameName refuse deux personnes que la nomenclature nommerait pareil. Le
+// dernier niveau d'un nom de dépôt est le nom de l'étudiant : deux personnes
+// qui le partagent ne peuvent pas avoir chacune le sien.
+//
+// Le message dit lequel des deux cas on a sous les yeux, car ils ne se règlent
+// pas de la même façon : deux homonymes véritables demandent qu'on distingue
+// leurs noms, une même personne sous deux comptes demande qu'on le déclare.
+func sameName(targets []Target) error {
+	vues := map[string]Target{}
+	for _, cible := range targets {
+		fragment, err := naming.Student(cible.Person.FullName)
+		if err != nil {
+			continue
+		}
+		precedente, deja := vues[strings.ToLower(fragment)]
+		if !deja {
+			vues[strings.ToLower(fragment)] = cible
+			continue
+		}
+		comptes := strings.Join(append(append([]string(nil),
+			precedente.Accounts...), cible.Accounts...), ", @")
+		if precedente.Person.StudentID != "" && cible.Person.StudentID != "" {
+			return valid.Errorf(
+				"Deux étudiants s'appellent « %s » (matricules %s et %s) : leurs dépôts "+
+					"porteraient le même nom. Distinguez-les dans la liste — un second "+
+					"prénom, une initiale — avant de distribuer.",
+				cible.Person.FullName, precedente.Person.StudentID, cible.Person.StudentID)
+		}
+		return valid.Errorf(
+			"Deux personnes s'appellent « %s » (@%s) : leurs dépôts porteraient le même "+
+				"nom. Si c'est la même sous deux comptes, rattachez-les l'un à l'autre ; "+
+				"sinon, distinguez leurs noms dans la liste.",
+			cible.Person.FullName, comptes)
+	}
+	return nil
+}
+
 // Build construit le plan complet et refuse toute collision de noms de dépôts.
 func Build(people []roster.Person, settings config.Settings) ([]PlannedRepo, error) {
 	cibles := make([]Target, 0, len(people))
@@ -248,6 +286,9 @@ func Build(people []roster.Person, settings config.Settings) ([]PlannedRepo, err
 func BuildFor(targets []Target, settings config.Settings) ([]PlannedRepo, error) {
 	description, err := patterns(settings)
 	if err != nil {
+		return nil, err
+	}
+	if err := sameName(targets); err != nil {
 		return nil, err
 	}
 	assembleur := &assembler{settings: settings, description: description,

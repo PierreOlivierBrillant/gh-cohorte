@@ -273,6 +273,7 @@ func PlanTeamImport(arrivee Classroom, demande TeamImportRequest,
 		retenir(vus, trouve.Entry.FullName)
 		people = append(people, roster.Person{
 			FullName: trouve.Entry.FullName, Username: trouve.Login,
+			StudentID: trouve.Entry.StudentID,
 		})
 	}
 	for _, entree := range demande.Entries {

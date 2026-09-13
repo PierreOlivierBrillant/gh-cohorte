@@ -344,13 +344,15 @@ func (s *Server) members(cours classroom.Classroom, usernames []string) ([]strin
 		if err != nil {
 			return nil, err
 		}
-		personne, inscrit := cours.Find(username)
-		if !inscrit {
+		if _, inscrit := cours.Find(username); !inscrit {
 			return nil, valid.Errorf(
 				"@%s n'est pas dans « %s » : inscrivez-le au groupe avant de lui donner une équipe.",
 				username, cours.Label())
 		}
-		propres = append(propres, personne.Username)
+		// Le compte demandé, non celui qui désigne la personne : c'est sous
+		// celui-là qu'elle entre dans l'équipe, et lui substituer son compte
+		// principal la refuserait dès que ce dernier y est déjà.
+		propres = append(propres, username)
 	}
 	return propres, nil
 }

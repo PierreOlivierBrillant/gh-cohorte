@@ -491,6 +491,14 @@ function aplati(texte) {
   return (texte || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 }
 
+// gens rend les personnes d'un groupe, une par personne et non une par compte :
+// le matricule réunit les lignes d'un même étudiant, et les compter deux fois
+// ferait deux inscrits d'un seul.
+function gens(groupe) {
+  if (!groupe) return [];
+  return groupe.people || groupe.students || [];
+}
+
 // sigle rend un code de cours tel qu'on l'écrit : « 4w6 » se lit « 4W6 ». Les
 // dépôts, eux, gardent la casse d'origine — GitHub ne la distingue pas.
 function sigle(code) {
@@ -797,7 +805,7 @@ function etapeCours(court, cours) {
 }
 
 function sousTitreDuGroupe(groupe) {
-  let compte = `${(groupe.students || []).length} étudiant(s)`;
+  let compte = `${gens(groupe).length} étudiant(s)`;
   if (groupe.teams > 0) compte += ` · ${groupe.teams} équipe(s)`;
   if (!groupe.session) return `Organisation ${groupe.org} · ${compte}`;
   return `${groupe.session_name || groupe.session} · ${sigle(groupe.course)}` +
@@ -945,7 +953,7 @@ function dessinerCours(conteneur, session) {
   const triees = [...parCours.values()].sort((a, b) => a.code.localeCompare(b.code));
   for (const cours of triees) {
     const etudiants = cours.groupes.reduce(
-      (total, groupe) => total + (groupe.students || []).length, 0);
+      (total, groupe) => total + gens(groupe).length, 0);
     conteneur.append(ligneParcours(sigle(cours.code),
       `${groupesEnMots(cours.groupes.length)} · ${etudiants} étudiant(s)`, [],
       () => {
@@ -962,7 +970,7 @@ function dessinerGroupesDuCours(conteneur, session, cours) {
   for (const groupe of retenus) {
     const sesTravaux = groupe.assignments || [];
     const compte = groupe.known
-      ? `${(groupe.students || []).length} étudiant(s)`
+      ? `${gens(groupe).length} étudiant(s)`
       : 'aucune liste retenue';
     conteneur.append(ligneParcours(groupe.label,
       `${compte} · ${travaux(sesTravaux.length)}`,
@@ -1222,7 +1230,7 @@ function dessinerTravaux() {
         texte: '« Nouveau travail » crée un dépôt par étudiant du groupe.' })));
     return;
   }
-  const total = (groupe.students || []).length;
+  const total = gens(groupe).length;
   for (const travail of sesTravaux) {
     const equipe = travail.kind === 'équipe';
     const detail = equipe
@@ -1377,7 +1385,7 @@ const barreTravail = barreDeFiltre({
 
 function dessinerTravail() {
   const depots = etat.travail.depots;
-  const total = (etat.groupe.students || []).length;
+  const total = gens(etat.groupe).length;
   const equipe = etat.travail.kind === 'équipe';
   // Le serveur a déjà rattaché chaque dépôt à son destinataire : la page n'a
   // plus à deviner qui se cache derrière un nom.
@@ -1425,14 +1433,14 @@ function dessinerTravail() {
       el('td', {}, repo.team
         ? el('span', {},
             el('strong', { texte: repo.full_name }),
-            el('span', { classe: 'note',
-              // Les membres se lisent par leur nom : un dépôt d'équipe ne
-              // porte celui de personne, et une liste de comptes ne dit pas
-              // qui a fait le travail.
-              texte: (repo.members || []).length === 0
-                ? ' — équipe vide'
-                : ' — ' + (repo.members || []).map((personne) =>
-                    personne.full_name || '@' + personne.username).join(', ') }))
+            // Les membres se lisent par leur nom et par leur compte : un dépôt
+            // d'équipe ne porte celui de personne, et c'est leur association
+            // qu'on vient vérifier ici.
+            (repo.members || []).length === 0
+              ? el('span', { classe: 'note', texte: ' — équipe vide' })
+              : el('span', { classe: 'jetons membres-du-depot' },
+                  (repo.members || []).map((personne) =>
+                    el('span', { classe: 'jeton' }, ...nomEtComptes(personne)))))
         : el('span', repo.username
             ? { texte: repo.full_name || '@' + repo.username }
             : { classe: 'vide', texte: repo.student + ' (hors liste)' })),
@@ -1899,7 +1907,7 @@ function destinatairesPossibles() {
         : (equipe.members || []).map((compte) => '@' + compte).join(', '),
     }));
   }
-  return (etat.groupe.students || []).map((personne) => ({
+  return gens(etat.groupe).map((personne) => ({
     cle: personne.username,
     titre: personne.full_name || '',
     detail: '@' + personne.username,
@@ -2846,7 +2854,7 @@ async function chargerEquipes(force) {
 function dessinerEquipes() {
   const conteneur = $('equipes-liste');
   vider(conteneur);
-  const total = (etat.groupe.students || []).length;
+  const total = gens(etat.groupe).length;
   const places = total - etat.orphelins.length;
   $('equipes-resume').textContent = etat.equipes.length === 0
     ? `Aucune équipe · ${total} étudiant(s) dans le groupe`
@@ -2859,22 +2867,16 @@ function dessinerEquipes() {
 
   for (const equipe of etat.equipes) {
     const membres = el('span', { classe: 'jetons equipe-membres' },
-      equipe.people.map((personne) => el('span', {
-        classe: 'jeton', texte: personne.full_name || '@' + personne.username,
-        title: ['@' + personne.username]
-          .concat((personne.also || []).map((compte) => '@' + compte)).join(', '),
-      })),
+      equipe.people.map((personne) => el('span', { classe: 'jeton' },
+        ...nomEtComptes(personne))),
       // Un compte hors liste porte quand même son nom quand le registre le
       // connaît : ce qu'on sait nommer doit être nommé. Le bouton, lui, mène
       // à l'inscrire — c'est la suite naturelle.
       equipe.strangers.map((personne) => el('button', {
         classe: 'jeton etranger', type: 'button',
-        texte: personne.full_name
-          ? `${personne.full_name} (@${personne.username})`
-          : '@' + personne.username,
         title: "Ce compte n'est pas dans la liste du groupe : l'y inscrire.",
         onclick: () => inscrireUnMembre(personne),
-      })));
+      }, ...nomEtComptes(personne))));
     if (equipe.people.length === 0 && equipe.strangers.length === 0) {
       vider(membres);
       membres.append(el('span', { classe: 'vide', texte: 'équipe vide' }));
@@ -2914,6 +2916,19 @@ $('equipes-recharger').addEventListener('click', () => chargerEquipes(true));
 $('equipes-nouvelle').addEventListener('click', () => nouvelleEquipe());
 $('equipes-adopter').addEventListener('click', () => adopterEquipe());
 
+// nomEtComptes montre le nom d'une personne et le ou les comptes GitHub sous
+// lesquels elle travaille. Les deux se lisent ensemble partout — la liste des
+// étudiants le fait déjà —, parce que c'est précisément leur association qu'on
+// vient vérifier : le nom nomme les dépôts, le compte y donne accès.
+function nomEtComptes(personne) {
+  const comptes = [personne.username].concat(personne.also || []);
+  const morceaux = [];
+  if (personne.full_name) morceaux.push(personne.full_name + ' ');
+  morceaux.push(el('span', { classe: 'compte',
+    texte: comptes.map((compte) => '@' + compte).join(' ') }));
+  return morceaux;
+}
+
 // listeDeComptes rend la liste des membres d'une équipe, telle qu'on la saisit.
 function listeDeComptes(equipe) {
   return (equipe.members || []).join(', ');
@@ -2924,7 +2939,7 @@ function listeDeComptes(equipe) {
 // faut le savoir.
 function choixDesEtudiants(coches, sauf) {
   const liste = el('div', { classe: 'liste-cases' });
-  for (const personne of etat.groupe.students || []) {
+  for (const personne of gens(etat.groupe)) {
     const ailleurs = etat.equipes.find((equipe) =>
       equipe.short !== sauf &&
       (equipe.members || []).some((compte) => compte.toLowerCase() === personne.username.toLowerCase()));
@@ -2938,7 +2953,7 @@ function choixDesEtudiants(coches, sauf) {
         el('span', { classe: 'compte', texte: '@' + personne.username }),
         ailleurs ? el('span', { classe: 'note', texte: ` — actuellement dans ${ailleurs.short}` }) : null)));
   }
-  if ((etat.groupe.students || []).length === 0) {
+  if (gens(etat.groupe).length === 0) {
     liste.append(el('p', { classe: 'note',
       texte: "Ce groupe n'a aucun étudiant : importez sa liste avant de composer des équipes." }));
   }
@@ -3054,7 +3069,7 @@ async function inscrireUnMembre(personne) {
   // toute distribution.
   const rattache = el('select', { classe: 'champ' },
     el('option', { value: '', texte: '— une personne de plus —' }),
-    (etat.groupe.students || []).map((autre) => el('option', {
+    gens(etat.groupe).map((autre) => el('option', {
       value: autre.username,
       texte: (autre.full_name || '@' + autre.username) + ' (@' + autre.username + ')',
     })));
@@ -4686,7 +4701,7 @@ async function choixDeGroupe() {
 
   function ligneDeGroupe(groupe) {
     const compte = groupe.known
-      ? `${(groupe.students || []).length} étudiant(s)`
+      ? `${gens(groupe).length} étudiant(s)`
       : 'aucune liste retenue';
     return el('button', { classe: 'choix-place', type: 'button',
       'data-scope': groupe.scope, onclick: () => retenir(groupe.scope) },

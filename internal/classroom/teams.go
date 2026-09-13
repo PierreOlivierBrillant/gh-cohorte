@@ -166,9 +166,9 @@ func autresDansLEquipe(personne roster.Person, equipe teams.Team,
 // ceux qu'un travail d'équipe laisserait de côté.
 func (c Classroom) Unassigned(equipes []teams.Team) []roster.Person {
 	restants := make([]roster.Person, 0)
-	for _, student := range c.Students {
+	for _, identite := range c.Identities() {
 		dedans := false
-		for _, compte := range student.Accounts() {
+		for _, compte := range identite.Accounts {
 			if _, membre := teams.Of(equipes, compte); membre {
 				dedans = true
 				break
@@ -177,7 +177,7 @@ func (c Classroom) Unassigned(equipes []teams.Team) []roster.Person {
 		if dedans {
 			continue
 		}
-		restants = append(restants, student)
+		restants = append(restants, identite.Person())
 	}
 	return restants
 }

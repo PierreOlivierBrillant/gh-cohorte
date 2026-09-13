@@ -53,6 +53,11 @@ const Version = 1
 type Student struct {
 	Username string `json:"username"`
 	FullName string `json:"full_name"`
+	// StudentID est le matricule du collège. C'est lui qui identifie vraiment
+	// quelqu'un : deux comptes qui le portent sont la même personne, et deux
+	// personnes du même nom ne le partagent pas. Le registre le retient pour
+	// que ce soit vrai d'un poste à l'autre.
+	StudentID string `json:"student_id,omitempty"`
 	// Slugs énumère tout ce qui a désigné cette personne au dernier niveau d'un
 	// nom de dépôt. La liste s'allonge, ne se raccourcit pas : corriger
 	// l'orthographe d'un nom ne doit pas rendre orphelins les dépôts déjà
@@ -70,14 +75,19 @@ func (s Student) Key() string { return strings.ToLower(strings.TrimSpace(s.Usern
 
 // Person rend la personne telle que le reste de l'outil la manipule.
 func (s Student) Person() roster.Person {
-	return roster.Person{FullName: s.FullName, Username: s.Username}
+	return roster.Person{
+		FullName: s.FullName, Username: s.Username, StudentID: s.StudentID,
+	}
 }
 
 // From compose la fiche d'une personne. Le slug que son nom complet produit y
 // est joint d'emblée : c'est celui que porteront ses dépôts, et le retenir
 // maintenant évite d'avoir à le deviner plus tard.
 func From(person roster.Person) Student {
-	fiche := Student{Username: person.Username, FullName: person.FullName}
+	fiche := Student{
+		Username: person.Username, FullName: person.FullName,
+		StudentID: person.StudentID,
+	}
 	if slug, err := naming.Student(person.FullName); err == nil {
 		fiche.Slugs = []string{slug}
 	}
@@ -100,6 +110,7 @@ func (s Student) validate() (Student, error) {
 	} else {
 		s.FullName = ""
 	}
+	s.StudentID = strings.TrimSpace(s.StudentID)
 	s.Slugs = cleanSlugs(s.Slugs)
 	return s, nil
 }
@@ -321,6 +332,12 @@ func merge(connu, appris Student) Student {
 	if strings.TrimSpace(appris.FullName) != "" {
 		connu.FullName = appris.FullName
 	}
+	// Le matricule non plus ne s'efface pas : c'est la seule chose qui
+	// identifie vraiment quelqu'un, et un rapprochement qui l'ignore ne doit
+	// pas faire oublier celui qu'une liste avait donné.
+	if strings.TrimSpace(appris.StudentID) != "" {
+		connu.StudentID = appris.StudentID
+	}
 	// Le compte garde son orthographe d'origine ; GitHub ne distingue pas la
 	// casse, et en changer ferait un faux changement à chaque écriture.
 	connu.Slugs = cleanSlugs(append(append([]string(nil), connu.Slugs...), appris.Slugs...))
@@ -334,7 +351,7 @@ func merge(connu, appris Student) Student {
 // commit qui ne change rien salit l'historique sans rien apprendre.
 func same(left, right Student) bool {
 	return left.Username == right.Username && left.FullName == right.FullName &&
-		left.AddedAt == right.AddedAt &&
+		left.StudentID == right.StudentID && left.AddedAt == right.AddedAt &&
 		strings.Join(left.Slugs, "\x00") == strings.Join(right.Slugs, "\x00")
 }
 

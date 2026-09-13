@@ -57,6 +57,11 @@ var delimiters = []rune{',', ';', '\t'}
 type Person struct {
 	FullName string `json:"full_name"`
 	Username string `json:"username"`
+	// StudentID est le matricule, tel que la liste du collège le donne. C'est
+	// la seule chose qui identifie vraiment quelqu'un : deux étudiants peuvent
+	// s'appeler pareil, et un même étudiant peut travailler sous deux comptes.
+	// Le nom ne tranche ni l'un ni l'autre ; le matricule tranche les deux.
+	StudentID string `json:"student_id,omitempty"`
 	// Also porte les autres comptes GitHub de la même personne : celui du
 	// collège et le sien, celui que GitHub Classroom lui a fait créer et celui
 	// qu'elle avait déjà.
@@ -131,7 +136,10 @@ func (p Person) Validate() (Person, error) {
 	if len(autres) == 0 {
 		autres = nil
 	}
-	return Person{FullName: fullName, Username: username, Also: autres}, nil
+	return Person{
+		FullName: fullName, Username: username,
+		StudentID: strings.TrimSpace(p.StudentID), Also: autres,
+	}, nil
 }
 
 // Issue décrit un problème détecté sur une ligne de la liste.
@@ -158,7 +166,9 @@ type Entry struct {
 
 // Person rend la personne que l'entrée décrit.
 func (e Entry) Person() Person {
-	return Person{FullName: e.FullName, Username: e.Username}
+	return Person{
+		FullName: e.FullName, Username: e.Username, StudentID: e.StudentID,
+	}
 }
 
 // Roster est le résultat d'un chargement : les lignes lues et celles rejetées.

@@ -21,10 +21,12 @@ import (
 // le refus des homonymes empêche. Réunir deux comptes est donc une décision,
 // prise et écrite, jamais devinée.
 
-// Identity est une personne du groupe : un nom, et les comptes GitHub sous
-// lesquels elle travaille.
+// Identity est une personne du groupe : un nom, un matricule, et les comptes
+// GitHub sous lesquels elle travaille.
 type Identity struct {
 	FullName string `json:"full_name"`
+	// StudentID est le matricule, quand la liste du collège l'a donné.
+	StudentID string `json:"student_id,omitempty"`
 	// Accounts porte tous ses comptes ; le premier est celui qui la désigne
 	// partout où un seul est attendu.
 	Accounts []string `json:"accounts"`
@@ -44,7 +46,10 @@ func (i Identity) Person() roster.Person {
 	if len(autres) > 0 {
 		autres = autres[1:]
 	}
-	return roster.Person{FullName: i.FullName, Username: i.Username(), Also: autres}
+	return roster.Person{
+		FullName: i.FullName, Username: i.Username(),
+		StudentID: i.StudentID, Also: autres,
+	}
 }
 
 // Has dit si un compte est l'un des siens.
@@ -58,12 +63,47 @@ func (i Identity) Has(username string) bool {
 }
 
 // Identities rend les personnes du groupe, chacune avec tous ses comptes.
-func (c Classroom) Identities() []Identity {
-	identites := make([]Identity, 0, len(c.Students))
-	for _, student := range c.Students {
-		identites = append(identites, Identity{
-			FullName: student.FullName, Accounts: student.Accounts(),
-		})
+//
+// Le matricule réunit ce qui doit l'être : deux lignes qui le portent sont la
+// même personne, quelles que soient leurs orthographes et leurs comptes. C'est
+// la seule chose qui le puisse — le nom ne distingue pas deux homonymes, et
+// deux comptes d'une même personne n'ont rien qui les rapproche.
+//
+// Sans matricule, chaque ligne reste une personne, et seule une déclaration
+// explicite les réunit. Rien n'est jamais déduit du nom.
+func (c Classroom) Identities() []Identity { return identitiesOf(c.Students) }
+
+// identitiesOf réunit des personnes par leur matricule.
+func identitiesOf(people []roster.Person) []Identity {
+	rangs := map[string]int{}
+	identites := make([]Identity, 0, len(people))
+	for _, student := range people {
+		matricule := strings.TrimSpace(student.StudentID)
+		if matricule == "" {
+			identites = append(identites, Identity{
+				FullName: student.FullName, Accounts: student.Accounts(),
+			})
+			continue
+		}
+		rang, deja := rangs[strings.ToLower(matricule)]
+		if !deja {
+			rangs[strings.ToLower(matricule)] = len(identites)
+			identites = append(identites, Identity{
+				FullName: student.FullName, StudentID: matricule,
+				Accounts: student.Accounts(),
+			})
+			continue
+		}
+		// Un nom vide n'efface pas celui qu'on connaît : une ligne sans nom
+		// n'apprend rien de plus que ses comptes.
+		if strings.TrimSpace(identites[rang].FullName) == "" {
+			identites[rang].FullName = student.FullName
+		}
+		for _, compte := range student.Accounts() {
+			if !identites[rang].Has(compte) {
+				identites[rang].Accounts = append(identites[rang].Accounts, compte)
+			}
+		}
 	}
 	return identites
 }

@@ -92,13 +92,16 @@ func Build(cours classroom.Classroom, repos []groups.RepoInfo,
 		}
 	}
 
-	lignes := make([]Row, 0, len(cours.Students))
-	for _, student := range cours.Students {
+	// Une ligne par personne, non par compte : c'est le matricule qui les
+	// réunit, et les montrer deux fois ferait deux étudiants d'un seul.
+	identites := cours.Identities()
+	lignes := make([]Row, 0, len(identites))
+	for _, identite := range identites {
 		// Les dépôts d'une personne peuvent être arrivés sous l'un ou l'autre
 		// de ses comptes : ils sont les siens sous tous.
 		depots := make([]Repo, 0)
 		vus := map[string]bool{}
-		for _, compte := range student.Accounts() {
+		for _, compte := range identite.Accounts {
 			for _, depot := range parEtudiant[strings.ToLower(compte)] {
 				if vus[strings.ToLower(depot.Name)] {
 					continue
@@ -107,8 +110,8 @@ func Build(cours classroom.Classroom, repos []groups.RepoInfo,
 				depots = append(depots, depot)
 			}
 		}
-		ligne := compose(student.FullName, student.Username, depots)
-		ligne.Accounts = student.Accounts()
+		ligne := compose(identite.FullName, identite.Username(), depots)
+		ligne.Accounts = identite.Accounts
 		ligne.Enrollments = []Enrollment{enrollmentOf(cours, ligne.Repos)}
 		lignes = append(lignes, ligne)
 	}

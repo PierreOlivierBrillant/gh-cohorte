@@ -30,6 +30,10 @@ type classroomPayload struct {
 	Label       string                 `json:"label"`
 	SessionName string                 `json:"session_name,omitempty"`
 	Assignments []classroom.Assignment `json:"assignments"`
+	// People est la liste du groupe telle qu'on la lit : une personne par
+	// ligne, avec tous ses comptes. « Students » en garde la forme écrite, une
+	// ligne par compte — c'est le matricule qui les réunit.
+	People []roster.Person `json:"people"`
 	// Teams compte les équipes du groupe ; elles vivent sur GitHub, pas ici.
 	Teams  int    `json:"teams"`
 	Source string `json:"source,omitempty"`
@@ -47,8 +51,20 @@ func (s *Server) fiche(cours classroom.Classroom) classroomPayload {
 		Label:       cours.Label(),
 		SessionName: cours.SessionName(),
 		Assignments: []classroom.Assignment{},
+		People:      gensDe(cours),
 		Known:       connu,
 	}
+}
+
+// gensDe rend les personnes d'un groupe, une par personne et non une par
+// compte : le matricule réunit les lignes d'un même étudiant.
+func gensDe(cours classroom.Classroom) []roster.Person {
+	identites := cours.Identities()
+	gens := make([]roster.Person, 0, len(identites))
+	for _, identite := range identites {
+		gens = append(gens, identite.Person())
+	}
+	return gens
 }
 
 // handleClassrooms liste les groupes de l'organisation : ceux que les dépôts
