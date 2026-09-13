@@ -19,8 +19,12 @@ type ficheEquipe struct {
 	Name      string   `json:"name"`
 	Short     string   `json:"short"`
 	Members   []string `json:"members"`
-	Strangers []string `json:"strangers"`
-	People    []struct {
+	Waiting   []string `json:"waiting"`
+	Strangers []struct {
+		FullName string `json:"full_name"`
+		Username string `json:"username"`
+	} `json:"strangers"`
+	People []struct {
 		FullName string `json:"full_name"`
 		Username string `json:"username"`
 	} `json:"people"`
@@ -220,6 +224,57 @@ func TestSupprimerUneEquipeLaisseSesDepots(t *testing.T) {
 	}
 	if len(h.equipes(place).Teams) != 1 {
 		t.Fatal("l'équipe devrait avoir disparu")
+	}
+}
+
+// Supprimer les dépôts avec l'équipe se demande, et se confirme : ceux des
+// autres équipes restent, et un nom mal retapé ne détruit rien.
+func TestSupprimerUneEquipeAvecSesDepots(t *testing.T) {
+	h, place := groupeAvecEquipes(t)
+	h.State.AddRepo("acme", "a26.5n6.01.projet.eq1", true)
+	h.State.AddRepo("acme", "a26.5n6.01.tp1.eq1", true)
+	h.State.AddRepo("acme", "a26.5n6.01.projet.eq2", true)
+
+	reponse, _ := h.requete(http.MethodDelete, "/api/classrooms/"+place+"/teams/eq1",
+		map[string]any{"repos": true, "confirm": "eq2"})
+	if reponse.StatusCode < 300 {
+		t.Fatal("un nom mal retapé doit être refusé")
+	}
+	if noms := h.depots(); len(noms) != 3 {
+		t.Fatalf("un refus ne supprime rien : %v", noms)
+	}
+
+	var bilan map[string]any
+	h.json(http.MethodDelete, "/api/classrooms/"+place+"/teams/eq1",
+		map[string]any{"repos": true, "confirm": "eq1"}, &bilan)
+	if noms := h.depots(); len(noms) != 1 || noms[0] != "a26.5n6.01.projet.eq2" {
+		t.Fatalf("seuls les dépôts d'eq1 devaient partir : %v", noms)
+	}
+	if !strings.Contains(bilan["message"].(string), "ses 2 dépôts") {
+		t.Fatalf("le message devrait dire combien : %v", bilan["message"])
+	}
+	if len(h.equipes(place).Teams) != 1 {
+		t.Fatal("l'équipe devrait avoir disparu")
+	}
+}
+
+// La liste des équipes dit combien de dépôts chacune a rendus : c'est ce que la
+// case à cocher de la suppression emporterait, et on ne le coche pas à
+// l'aveugle.
+func TestLaListeDesEquipesCompteLeursDepots(t *testing.T) {
+	h, place := groupeAvecEquipes(t)
+	h.State.AddRepo("acme", "a26.5n6.01.projet.eq1", true)
+	h.State.AddRepo("acme", "a26.5n6.01.tp1.eq1", true)
+
+	var liste struct {
+		Repos map[string]int `json:"repos"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/"+place+"/teams", nil, &liste)
+	if liste.Repos["eq1"] != 2 {
+		t.Fatalf("eq1 a rendu deux dépôts : %v", liste.Repos)
+	}
+	if _, compte := liste.Repos["eq2"]; compte {
+		t.Fatalf("eq2 n'a rien rendu : %v", liste.Repos)
 	}
 }
 

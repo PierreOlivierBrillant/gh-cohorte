@@ -30,6 +30,20 @@ func (c Classroom) TeamName(short string) string {
 	return naming.TeamName(c.Session, c.Course, c.Group, strings.TrimSpace(short))
 }
 
+// TeamRepos nomme les dépôts que l'équipe a rendus, tous travaux confondus.
+// Ce sont ceux dont le dernier niveau la nomme, et eux seuls : un dépôt qu'elle
+// voit sans le nommer est celui de quelqu'un d'autre, et il lui survit.
+func (c Classroom) TeamRepos(equipe teams.Team, repos []groups.RepoInfo) []string {
+	seule := []teams.Team{equipe}
+	sien := make([]string, 0, 2)
+	for _, depot := range repos {
+		if _, aElle := c.TeamOf(depot.Name, seule); aElle {
+			sien = append(sien, depot.Name)
+		}
+	}
+	return sien
+}
+
 // TeamOf retrouve l'équipe à laquelle un dépôt du groupe appartient.
 func (c Classroom) TeamOf(repoName string, equipes []teams.Team) (teams.Team, bool) {
 	parts, reconnu := naming.Parse(repoName)
@@ -80,6 +94,9 @@ type TeamRoster struct {
 	teams.Team
 	// People nomme les membres que la liste du groupe connaît.
 	People []roster.Person `json:"people"`
+	// Waiting nomme ceux, parmi tous, qui n'ont pas encore accepté leur
+	// invitation. Ils sont bien de l'équipe : ils ne l'ont pas encore su.
+	Waiting []string `json:"waiting,omitempty"`
 	// Strangers rassemble les comptes de l'équipe qui ne sont pas du groupe.
 	// Ils portent le nom que le registre de l'organisation leur donne, quand
 	// il en connaît un : un compte qu'on sait nommer doit être nommé, même
@@ -123,6 +140,11 @@ func (c Classroom) Describe(equipes []teams.Team) []TeamRoster {
 		}
 		SortPeople(fiche.People)
 		SortPeople(fiche.Strangers)
+		for _, membre := range equipe.Members {
+			if equipe.Waiting(membre) {
+				fiche.Waiting = append(fiche.Waiting, membre)
+			}
+		}
 		fiches = append(fiches, fiche)
 	}
 	return fiches

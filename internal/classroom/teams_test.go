@@ -103,6 +103,24 @@ func TestTeamOfRattacheUnDepotASonEquipe(t *testing.T) {
 	}
 }
 
+// Les dépôts d'une équipe sont ceux que son nom termine, tous travaux
+// confondus. Un dépôt d'un autre groupe, ou d'une autre équipe, n'est pas le
+// sien — même si les deux équipes portent le même nom court.
+func TestTeamReposNeRetientQueLesDepotsDeLEquipe(t *testing.T) {
+	cours, inventaire, equipes := avecEquipes()
+	inventaire = append(inventaire,
+		groups.RepoInfo{Name: "a26.5n6.01.tp2.eq1"},
+		groups.RepoInfo{Name: "a26.5n6.02.projet.eq1"},
+	)
+	sien := cours.TeamRepos(equipes[0], inventaire)
+	if len(sien) != 2 || sien[0] != "a26.5n6.01.projet.eq1" || sien[1] != "a26.5n6.01.tp2.eq1" {
+		t.Fatalf("dépôts de eq1 = %v", sien)
+	}
+	if reste := cours.TeamRepos(equipes[1], inventaire); len(reste) != 1 {
+		t.Fatalf("dépôts de eq2 = %v", reste)
+	}
+}
+
 func TestUnaffectesNommeCeuxQueAucuneEquipeNAccueille(t *testing.T) {
 	cours, _, equipes := avecEquipes()
 	if restants := cours.Unassigned(equipes); len(restants) != 0 {

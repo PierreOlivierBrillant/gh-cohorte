@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
@@ -224,34 +225,105 @@ func (d *desk) adopt(slug, short string) error {
 	return d.reload()
 }
 
-// drop supprime une équipe. Ses dépôts restent : seul l'accès disparaît.
-func (d *desk) drop(short string) error {
+// drop supprime une équipe, et ses dépôts si on le demande. Ils ne la suivent
+// pas d'eux-mêmes : ce sont des dépôts comme les autres, et le travail qu'ils
+// portent survit à l'équipe qui l'a fait.
+func (d *desk) drop(short string, avecDepots bool) error {
+	console := d.session.Console
 	equipe, trouvee := teams.Find(d.list, short)
 	if !trouvee {
 		return valid.Errorf("Aucune équipe « %s » dans ce groupe.", short)
 	}
+
+	var depots []string
+	if avecDepots {
+		repos, err := d.session.orgRepos(d.cours.Org, false)
+		if err != nil {
+			return err
+		}
+		depots = d.cours.TeamRepos(equipe, repos)
+		if len(depots) == 0 {
+			console.Note("« %s » n'a rendu aucun dépôt : il n'y a que l'équipe à supprimer.",
+				equipe.Short)
+		} else if !d.session.ensureScope("delete_repo", "la suppression serait refusée") {
+			console.Warning("Annulé : rien n'a été supprimé.")
+			return nil
+		}
+	}
+
 	if !d.session.Options.Yes {
-		confirme, err := d.session.Prompt.Confirm(
-			"Supprimer « "+equipe.Name+" » ? Ses dépôts resteront sur GitHub.", false)
+		confirme, err := d.confirmeLaSuppression(equipe, depots)
 		if err != nil {
 			return err
 		}
 		if !confirme {
-			d.session.Console.Warning("Annulé : l'équipe est intacte.")
+			console.Warning("Annulé : l'équipe est intacte.")
 			return nil
 		}
 	}
+
+	// Les dépôts d'abord : l'équipe supprimée, plus rien ne dirait lesquels
+	// étaient les siens.
+	for _, depot := range depots {
+		var err error
+		ui.Await(console, "Suppression de "+depot+"…", func() {
+			err = d.session.Client.DeleteRepo(d.cours.Org, depot)
+		})
+		if scope := ghapi.MissingScope(err); scope != "" && d.session.offerScope(scope) {
+			ui.Await(console, "Suppression de "+depot+"…", func() {
+				err = d.session.Client.DeleteRepo(d.cours.Org, depot)
+			})
+		}
+		if err != nil {
+			console.Failure("« %s » : suppression impossible — %v", depot, err)
+			return nil
+		}
+		console.Printf("  %s %s supprimé", console.OK("✓"), depot)
+	}
+
 	var err error
-	ui.Await(d.session.Console, "Suppression de « "+equipe.Name+" »…", func() {
+	ui.Await(console, "Suppression de « "+equipe.Name+" »…", func() {
 		err = d.session.Client.DeleteTeam(d.cours.Org, equipe.Slug)
 	})
 	if err != nil {
 		return err
 	}
-	d.session.Console.Success(
-		"« %s » supprimée. Ses dépôts restent ; seul l'accès qu'elle donnait a disparu.",
-		equipe.Name)
+	if len(depots) > 0 {
+		console.Success("« %s » supprimée, avec %s dépôt(s).", equipe.Name, itoa(len(depots)))
+	} else {
+		console.Success(
+			"« %s » supprimée. Ses dépôts restent ; seul l'accès qu'elle donnait a disparu.",
+			equipe.Name)
+	}
+	// L'inventaire en cache nomme encore des dépôts qui n'existent plus.
+	if len(depots) > 0 {
+		d.session.Cache.Forget(cache.ReposKey(d.cours.Org))
+	}
 	return d.reload()
+}
+
+// confirmeLaSuppression demande son accord. Une équipe seule se recrée, et une
+// question suffit ; des dépôts ne reviennent pas, et le nom doit être retapé.
+func (d *desk) confirmeLaSuppression(equipe teams.Team, depots []string) (bool, error) {
+	if len(depots) == 0 {
+		return d.session.Prompt.Confirm(
+			"Supprimer « "+equipe.Name+" » ? Ses dépôts resteront sur GitHub.", false)
+	}
+	console := d.session.Console
+	console.Print("  " + console.Err("⚠ Suppression définitive de "+itoa(len(depots))+
+		" dépôt(s) de "+d.cours.Org))
+	for _, depot := range depots {
+		console.Note("   %s", depot)
+	}
+	console.Note("   Le contenu, les tickets et l'historique seront perdus.")
+	typed, err := d.session.Prompt.Ask(ui.Question{
+		Title:      "Retapez « " + equipe.Short + " » pour confirmer (vide pour annuler)",
+		AllowEmpty: true,
+	})
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(typed) == equipe.Short, nil
 }
 
 // apply exécute un plan de composition et rend compte étape par étape.
@@ -388,7 +460,7 @@ func (s *Session) manageTeams(place string) (int, error) {
 		if err != nil {
 			return ExitOK, err
 		}
-		if err := bureau.drop(short); err != nil {
+		if err := bureau.drop(short, options.TeamDeleteRepos); err != nil {
 			return ExitOK, err
 		}
 	case options.TeamRename != "":
@@ -533,7 +605,12 @@ func (s *Session) dispatchTeam(bureau *desk, action string) error {
 		if err != nil {
 			return err
 		}
-		return bureau.drop(nom)
+		avecDepots, err := s.Prompt.Confirm(
+			"Supprimer aussi les dépôts que cette équipe a rendus ?", false)
+		if err != nil {
+			return err
+		}
+		return bureau.drop(nom, avecDepots)
 	}
 	return nil
 }

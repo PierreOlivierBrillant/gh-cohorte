@@ -46,9 +46,22 @@ func (s *Server) handleTeams(writer http.ResponseWriter, request *http.Request) 
 		fail(writer, err)
 		return
 	}
+	// Le nombre de dépôts rendus accompagne chaque équipe : c'est ce qu'une
+	// suppression emporterait, et on ne le coche pas à l'aveugle.
+	tous, _, err := s.repos(cours.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	rendus := make(map[string]int, len(equipes))
+	for _, equipe := range equipes {
+		if compte := len(cours.TeamRepos(equipe, tous)); compte > 0 {
+			rendus[equipe.Short] = compte
+		}
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"teams": cours.Describe(equipes), "unassigned": cours.Unassigned(equipes),
-		"scope": cours.Scope(),
+		"repos": rendus, "scope": cours.Scope(),
 	})
 }
 
@@ -170,21 +183,75 @@ func (s *Server) handleDeleteTeam(writer http.ResponseWriter, request *http.Requ
 		fail(writer, err)
 		return
 	}
+	var body struct {
+		// Repos demande de supprimer aussi les dépôts que l'équipe a rendus.
+		// Ils ne disparaissent pas avec elle : ce sont des dépôts comme les
+		// autres, et le travail qu'ils portent survit à l'équipe qui l'a fait.
+		Repos bool `json:"repos"`
+		// Confirm redit le nom de l'équipe. La suppression d'un dépôt l'exige
+		// déjà ; en supprimer plusieurs d'un coup ne peut pas l'exiger moins.
+		Confirm string `json:"confirm"`
+	}
+	// Un corps absent vaut « l'équipe seule » : supprimer une équipe n'a
+	// jamais rien demandé d'autre que son nom dans l'adresse.
+	_ = decode(request, &body)
 	equipe, trouvee := teams.Find(equipes, request.PathValue("team"))
 	if !trouvee {
 		fail(writer, valid.Errorf("Aucune équipe « %s » dans ce groupe.",
 			strings.TrimSpace(request.PathValue("team"))))
 		return
 	}
+
+	var depots []string
+	if body.Repos {
+		if strings.TrimSpace(body.Confirm) != equipe.Short {
+			fail(writer, valid.Errorf(
+				"Confirmation incorrecte : retapez « %s » exactement.", equipe.Short))
+			return
+		}
+		if present, known := s.deps.Client.HasScope("delete_repo"); known && !present {
+			failScope(writer, "delete_repo",
+				"Le jeton n'a pas la portée « delete_repo » : la suppression serait refusée.")
+			return
+		}
+		tous, _, err := s.repos(cours.Org, false)
+		if err != nil {
+			fail(writer, err)
+			return
+		}
+		depots = cours.TeamRepos(equipe, tous)
+	}
+
+	// Les dépôts d'abord : l'équipe supprimée, plus rien ne dirait lesquels
+	// étaient les siens.
+	supprimes := 0
+	for _, depot := range depots {
+		if err := s.deps.Client.DeleteRepo(cours.Org, depot); err != nil {
+			fail(writer, err)
+			return
+		}
+		s.deleted(cours.Org, depot)
+		supprimes++
+	}
 	if err := s.deps.Client.DeleteTeam(cours.Org, equipe.Slug); err != nil {
 		fail(writer, err)
 		return
 	}
 	s.forgetTeams(cours.Org)
+
+	message := "« " + equipe.Label() + " » supprimée. Ses dépôts restent sur GitHub ; " +
+		"seul l'accès qu'elle donnait a disparu."
+	switch {
+	case body.Repos && supprimes == 0:
+		message = "« " + equipe.Label() + " » supprimée. Elle n'avait aucun dépôt."
+	case body.Repos && supprimes == 1:
+		message = "« " + equipe.Label() + " » supprimée, avec son dépôt."
+	case body.Repos:
+		message = "« " + equipe.Label() + " » supprimée, avec ses " +
+			itoa(supprimes) + " dépôts."
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"team": equipe.Short,
-		"message": "« " + equipe.Label() + " » supprimée. Ses dépôts restent sur GitHub ; " +
-			"seul l'accès qu'elle donnait a disparu.",
+		"team": equipe.Short, "repos": supprimes, "message": message,
 	})
 }
 

@@ -106,6 +106,45 @@ func TestTerminalRenommeEtSupprimeUneEquipe(t *testing.T) {
 	}
 }
 
+// Les dépôts ne suivent l'équipe que si on le demande : « --team-delete » seul
+// les laisse, « --team-delete-repos » les emporte.
+func TestTerminalSupprimeUneEquipeAvecSesDepots(t *testing.T) {
+	h := nouveau(t, nil)
+	h.composer("a26.5n6.01", "eq1", "emilie-cote")
+	h.composer("a26.5n6.01", "eq2", "aminata-d")
+	h.State.AddRepo("acme", "a26.5n6.01.projet.eq1", true)
+	h.State.AddRepo("acme", "a26.5n6.01.tp1.eq1", true)
+	h.State.AddRepo("acme", "a26.5n6.01.projet.eq2", true)
+
+	h.Options.ManageRequested, h.Options.Manage = true, "a26.5n6.01"
+	h.Options.Team = []string{"eq1"}
+	h.Options.TeamDelete, h.Options.TeamDeleteRepos = true, true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("suppression : code %d\n%s", code, h.texte())
+	}
+
+	restants := h.State.RepoNames("acme")
+	for _, nom := range restants {
+		if strings.HasSuffix(nom, ".eq1") {
+			t.Fatalf("les dépôts d'eq1 devaient partir : %v", restants)
+		}
+	}
+	if !contientLe(restants, "a26.5n6.01.projet.eq2") {
+		t.Fatalf("le dépôt d'eq2 devait rester : %v", restants)
+	}
+	h.contient("2 dépôt(s)")
+}
+
+func contientLe(noms []string, cherche string) bool {
+	for _, nom := range noms {
+		if nom == cherche {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTerminalAdopteUneEquipeExistante(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddTeam("acme", "Les anciens", "emilie-cote", "jlpicard")

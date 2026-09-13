@@ -2867,6 +2867,7 @@ async function chargerEquipes(force) {
   }
   etat.equipes = donnees.teams || [];
   etat.orphelins = donnees.unassigned || [];
+  etat.depotsDEquipe = donnees.repos || {};
   dessinerEquipes();
 }
 
@@ -3219,19 +3220,62 @@ async function renommerEquipe(equipe) {
 }
 
 async function supprimerEquipe(equipe) {
+  const depots = (etat.depotsDEquipe || {})[equipe.short] || 0;
+  const avecDepots = el('input', { type: 'checkbox' });
+  const saisie = el('input', { type: 'text', classe: 'champ', placeholder: equipe.short });
+  // La confirmation ne vaut que pour les dépôts : une équipe supprimée se
+  // recrée, un dépôt effacé ne revient pas.
+  const confirmation = el('div', { classe: 'champ-bloc' },
+    el('span', { classe: 'etiquette', texte: `Retapez « ${equipe.short} » pour confirmer` }),
+    saisie);
+  confirmation.hidden = true;
+  avecDepots.addEventListener('change', () => {
+    confirmation.hidden = !avecDepots.checked;
+    if (avecDepots.checked) saisie.focus();
+  });
+
   const corps = el('div', {},
     el('p', { texte: `Supprimer « ${equipe.name} » ?` }),
     el('p', { classe: 'note', texte:
-      "Ses dépôts restent sur GitHub : c'est l'accès qu'elle donnait qui disparaît. " +
-      "Ses membres restent dans le groupe." }));
+      "Ses membres restent dans le groupe : c'est l'accès que l'équipe donnait " +
+      'qui disparaît.' }),
+    depots === 0
+      ? el('p', { classe: 'aide', texte: "Elle n'a encore rendu aucun dépôt." })
+      : el('div', {},
+          el('label', { classe: 'case' }, avecDepots,
+            el('span', {},
+              el('strong', { texte: depots === 1
+                ? 'Supprimer aussi son dépôt sur GitHub'
+                : `Supprimer aussi ses ${depots} dépôts sur GitHub` }),
+              el('span', { classe: 'aide', texte:
+                "Suppression définitive : le contenu, les tickets et l'historique " +
+                'seront perdus.' }))),
+          confirmation));
 
   if (!await demander('Supprimer une équipe', corps, 'Supprimer')) return;
   const bilan = await tenter(() => api('DELETE',
-    `/api/classrooms/${encode(etat.groupe.scope)}/teams/${encode(equipe.short)}`),
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams/${encode(equipe.short)}`,
+    { repos: avecDepots.checked, confirm: saisie.value.trim() }),
     'Suppression');
   if (!bilan) return;
   message(bilan.message);
-  await chargerEquipes(true);
+  await rafraichirGroupeEtEquipes();
+}
+
+// rafraichirGroupeEtEquipes relit la fiche du groupe sans quitter l'onglet :
+// une équipe supprimée avec ses dépôts change à la fois le nombre d'équipes et
+// la liste des travaux, que l'entête et l'onglet Travaux montrent encore.
+async function rafraichirGroupeEtEquipes() {
+  const groupe = etat.groupe && await tenter(() => api('GET',
+    `/api/classrooms/${encode(etat.groupe.scope)}?refresh=1`), 'Groupe');
+  if (!groupe) {
+    await chargerEquipes(true);
+    return;
+  }
+  etat.groupe = groupe;
+  dessinerTravaux();
+  // Réafficher la vue courante redessine l'entête et recharge les équipes.
+  afficherVue('equipes', true);
 }
 
 // adopterEquipe fait entrer dans le groupe une équipe déjà présente dans

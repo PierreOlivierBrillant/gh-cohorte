@@ -79,7 +79,10 @@ type Options struct {
 	TeamRename    string
 	TeamAdopt     string
 	TeamDelete    bool
-	TeamShare     bool
+	// TeamDeleteRepos emporte aussi les dépôts que l'équipe a rendus. Ils ne
+	// la suivent pas d'eux-mêmes : le travail survit à l'équipe qui l'a fait.
+	TeamDeleteRepos bool
+	TeamShare       bool
 	// MoveTo déplace le travail ouvert vers une place de la nomenclature
 	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra. Sans
 	// MoveTo, RenameTo renomme le travail là où il est déjà.
@@ -180,6 +183,7 @@ Drapeaux :
   --team-remove COMPTES    retirer des comptes de l'équipe
   --team-rename NOM        renommer l'équipe visée
   --team-delete            supprimer l'équipe visée
+  --team-delete-repos      supprimer aussi ses dépôts (avec --team-delete)
   --team-adopt EQUIPE      adopter une équipe de l'organisation sous le nom de --team
   --team-share             (re)partager les dépôts du travail avec leurs équipes
   --move-to PLACE          déplacer le travail géré vers « session.cours.groupe »
@@ -276,6 +280,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.StringVar(&options.TeamRename, "team-rename", "", "nouveau nom de l'équipe")
 	set.StringVar(&options.TeamAdopt, "team-adopt", "", "équipe existante à adopter")
 	set.BoolVar(&options.TeamDelete, "team-delete", false, "supprimer l'équipe visée")
+	set.BoolVar(&options.TeamDeleteRepos, "team-delete-repos", false,
+		"supprimer aussi les dépôts de l'équipe")
 	set.BoolVar(&options.TeamShare, "team-share", false, "repartager les dépôts avec les équipes")
 	set.StringVar(&options.MoveTo, "move-to", "", "place d'arrivée du travail géré")
 	set.StringVar(&options.RenameTo, "rename-to", "", "nom que le travail prend")
@@ -367,6 +373,12 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	if options.TeamShare && strings.TrimSpace(options.Assignment) == "" {
 		return nil, valid.Errorf(
 			"--team-share : indiquez le travail à repartager avec « --assignment a26.5n6.01.tp1 ».")
+	}
+	// « --team-delete-repos » seul détruirait sans qu'on ait demandé la
+	// suppression : il accompagne « --team-delete », il ne la remplace pas.
+	if options.TeamDeleteRepos && !options.TeamDelete {
+		return nil, valid.Errorf(
+			"--team-delete-repos accompagne « --team-delete » : ajoutez-le pour supprimer l'équipe.")
 	}
 	if options.Jobs < 1 {
 		options.Jobs = 1
