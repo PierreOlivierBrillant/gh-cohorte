@@ -296,11 +296,18 @@ const etat = {
   annuaire: {
     lignes: [],
     filtre: {
-      texte: '', session: '', cours: '', activite: '', apres: '', avant: '',
-      tri: 'nom', desc: false,
+      texte: '', role: '', session: '', cours: '', activite: '', apres: '',
+      avant: '', tri: 'nom', desc: false,
     },
     deplies: new Set(),
   },
+  // La fiche d'un utilisateur : ce que le serveur en a rendu, et le compte
+  // demandé. Le compte demandé n'est pas toujours celui qui désigne la
+  // personne — on peut arriver par son second compte.
+  fiche: { compte: '', donnees: null },
+  // Le cloisonnement du groupe ouvert : son équipe enseignante, et qui peut
+  // en être.
+  cloisonnement: null,
   deplaces: new Set(),
   // Les travaux cochés dans la liste d'un groupe, pour les déplacer ensemble.
   travauxChoisis: new Set(),
@@ -548,7 +555,8 @@ function cheminDeLaVue(nom) {
   const groupe = etat.groupe ? encode(etat.groupe.scope) : '';
   switch (nom) {
     case 'organisation': return '/organisation';
-    case 'annuaire': return '/etudiants';
+    case 'annuaire': return '/utilisateurs';
+    case 'fiche': return `/u/${encode(etat.fiche.compte)}`;
     case 'nouveau-groupe': return '/nouveau-groupe';
     case 'import': return '/reprise';
     case 'reglages': return '/reglages';
@@ -581,8 +589,10 @@ function lireAdresse() {
         vue: vueDuGroupe(morceaux[2]), groupe: morceaux[1] || '',
         travail: morceaux[3] || '',
       };
-    case 'etudiants':
+    case 'utilisateurs':
       return { vue: 'annuaire' };
+    case 'u':
+      return { vue: 'fiche', compte: morceaux[1] || '' };
     case 'reprise':
       return { vue: 'import' };
     case 'nouveau-groupe': case 'reglages': case 'organisation':
@@ -610,6 +620,13 @@ async function allerA(route) {
   if (route.vue === 'parcours') {
     etat.parcours = { session: route.session || '', cours: route.cours || '' };
     afficherVue('parcours', true);
+    return;
+  }
+  if (route.vue === 'fiche') {
+    // La fiche se désigne par un compte : c'est lui, et non un état retenu,
+    // qui dit qui l'on regarde. Coller son adresse doit suffire.
+    etat.fiche = { compte: route.compte || '', donnees: null };
+    afficherVue('fiche', true);
     return;
   }
   if (!ongletDeLaVue[route.vue]) {
@@ -675,9 +692,10 @@ function afficherVue(nom, sansHistorique) {
   if (nom === 'parcours') chargerGroupes();
   if (nom === 'reglages') rafraichirEmplacements();
   if (nom === 'annuaire') chargerAnnuaire();
+  if (nom === 'fiche') chargerFiche();
   if (nom === 'etudiants') chargerEtudiants();
   if (nom === 'equipes') chargerEquipes();
-  if (nom === 'groupe-reglages') ecrireReglagesGroupe();
+  if (nom === 'groupe-reglages') { ecrireReglagesGroupe(); chargerCloisonnement(); }
 }
 
 // ------------------------------------------------------------ en-tête de page
@@ -742,7 +760,8 @@ function ficheDeLEntete(nom) {
       { texte: 'Recharger', action: () => chargerGroupes(true) },
       // La hiérarchie mène aux étudiants d'un groupe ; l'annuaire les prend
       // dans l'autre sens, et n'appartient donc à aucun niveau du parcours.
-      { texte: 'Étudiants', action: () => afficherVue('annuaire') },
+      // Il porte les deux rôles : un enseignant n'est dans aucun groupe.
+      { texte: 'Utilisateurs', action: () => afficherVue('annuaire') },
       { texte: 'Reprendre des dépôts', action: () => ouvrirImport() },
       { texte: 'Nouveau groupe', classe: 'vert', action: () => ouvrirNouveauGroupe() },
     ];
@@ -768,9 +787,23 @@ function ficheDeLEntete(nom) {
 
   if (nom === 'annuaire') {
     return {
-      fil: [racine, { texte: 'Étudiants' }], titre: 'Étudiants',
+      fil: [racine, { texte: 'Utilisateurs' }], titre: 'Utilisateurs',
       sousTitre: `Organisation ${etat.organisation} · une personne, les cours qu'elle a suivis`,
       actions: [{ texte: 'Recharger', action: () => chargerAnnuaire(true) }],
+    };
+  }
+  if (nom === 'fiche') {
+    const personne = etat.fiche.donnees ? etat.fiche.donnees.user : null;
+    const titre = (personne && personne.full_name) || '@' + etat.fiche.compte;
+    return {
+      fil: [racine,
+        { texte: 'Utilisateurs', action: () => afficherVue('annuaire') },
+        { texte: titre }],
+      titre,
+      sousTitre: personne
+        ? `${personne.role} · ${etat.organisation}`
+        : `Organisation ${etat.organisation}`,
+      actions: [{ texte: 'Recharger', action: () => chargerFiche() }],
     };
   }
   if (nom === 'import') {
@@ -1463,9 +1496,9 @@ function dessinerTravail() {
                     invite: (repo.waiting || []).some((compte) =>
                       compte.toLowerCase() === personne.username.toLowerCase()),
                   }))))
-        : el('span', repo.username
-            ? { texte: repo.full_name || '@' + repo.username }
-            : { classe: 'vide', texte: repo.student + ' (hors liste)' })),
+        : (repo.username
+            ? lienVersLaFiche(repo)
+            : el('span', { classe: 'vide', texte: repo.student + ' (hors liste)' }))),
       el('td', {}, el('a', {
         href: repo.url, target: '_blank', rel: 'noreferrer noopener', texte: repo.name,
       })),
@@ -2227,13 +2260,11 @@ async function chargerEtudiants(force) {
           majSelectionEtudiants();
         },
       })),
-      el('td', ligne.full_name
-        ? { texte: ligne.full_name }
-        : { classe: 'vide', texte: 'nom inconnu' }),
+      el('td', {}, lienVersLaFiche(ligne)),
       // Une personne travaille parfois sous deux comptes : les montrer tous
       // les deux évite de la croire absente d'un dépôt qui est le sien.
       el('td', {}, (ligne.accounts || [ligne.username]).map((compte, rang) =>
-        el('span', {}, rang > 0 ? ' ' : null, el('code', { texte: '@' + compte })))),
+        el('span', {}, rang > 0 ? ' ' : null, lienDeProfil(compte)))),
       el('td', ligne.team
         ? { texte: ligne.team }
         : { classe: 'vide', texte: 'aucune' }),
@@ -2678,6 +2709,7 @@ function adresseAnnuaire(force) {
   const filtre = etat.annuaire.filtre;
   const parametres = new URLSearchParams();
   if (filtre.texte) parametres.set('q', filtre.texte);
+  if (filtre.role) parametres.set('role', filtre.role);
   if (filtre.session) parametres.set('session', filtre.session);
   if (filtre.cours) parametres.set('course', filtre.cours);
   if (filtre.activite) parametres.set('activity', filtre.activite);
@@ -2687,7 +2719,7 @@ function adresseAnnuaire(force) {
   if (filtre.desc) parametres.set('desc', '1');
   if (force) parametres.set('refresh', '1');
   const suite = parametres.toString();
-  return `/api/students${suite ? '?' + suite : ''}`;
+  return `/api/users${suite ? '?' + suite : ''}`;
 }
 
 async function chargerAnnuaire(force) {
@@ -2696,7 +2728,7 @@ async function chargerAnnuaire(force) {
     'Chargement des étudiants…');
   const donnees = await tenter(() => api('GET', adresseAnnuaire(force)), 'Étudiants');
   if (!attente.fini(donnees, "L'annuaire n'a pas pu être chargé.")) return;
-  etat.annuaire.lignes = donnees.students || [];
+  etat.annuaire.lignes = donnees.users || [];
   etat.annuaire.deplies = new Set();
 
   // Les sessions de l'annuaire servent aussi à nommer : « a26 » s'y lit
@@ -2725,15 +2757,21 @@ function dessinerAnnuaire() {
 
 function ligneAnnuaire(ligne) {
   return el('tr', {},
-    el('td', ligne.full_name
-      ? { texte: ligne.full_name }
-      : { classe: 'vide', texte: 'nom inconnu' }),
-    el('td', {}, el('code', { texte: '@' + ligne.username })),
+    // Le rôle se lit à côté du nom : c'est de la personne qu'il parle, pas
+    // d'une de ses colonnes. Un étudiant ne porte rien — ils sont la règle, et
+    // marquer la règle noierait l'exception.
+    el('td', {}, el('span', { classe: 'nom-et-role' },
+      lienVersLaFiche(ligne),
+      ligne.is_teacher
+        ? el('span', { classe: 'jeton enseignant', texte: 'enseignant' })
+        : null)),
+    el('td', {}, lienDeProfil(ligne.username)),
     el('td', {}, ligne.enrollments.length === 0
       ? el('span', { classe: 'vide', texte: 'aucun cours' })
       : el('span', { classe: 'etiquettes' },
           ligne.enrollments.map((inscription) => el('button', {
-            classe: 'cours-suivi', type: 'button',
+            classe: 'cours-suivi' + (inscription.role === 'enseignant' ? ' enseigne' : ''),
+            type: 'button',
             texte: jetonDuCours(inscription), title: titreDuCours(inscription),
             onclick: () => ouvrirGroupe(inscription.scope),
           })))),
@@ -2760,9 +2798,10 @@ function jetonDuCours(inscription) {
 }
 
 function titreDuCours(inscription) {
-  if (!inscription.session) return inscription.scope;
+  const role = inscription.role === 'enseignant' ? ' — donné' : '';
+  if (!inscription.session) return inscription.scope + role;
   return `${inscription.session_name || inscription.session} · ${sigle(inscription.course)}` +
-    ` · groupe ${inscription.group}`;
+    ` · groupe ${inscription.group}${role}`;
 }
 
 // depotsAnnuaire déplie les dépôts d'une personne, rangés sous le groupe d'où
@@ -2774,20 +2813,18 @@ function depotsAnnuaire(ligne) {
     .filter((inscription) => inscription.assignments.length > 0)
     .map((inscription) => el('div', { classe: 'depots-du-cours' },
       el('span', { classe: 'etiquette', texte: titreDuCours(inscription) }),
-      el('span', { classe: 'etiquettes' }, inscription.assignments.map((travail) =>
-        el('a', {
-          classe: 'jeton lien', href: travail.url,
-          target: '_blank', rel: 'noreferrer noopener',
-          texte: travail.name, title: travail.repo,
-        })))));
+      el('span', { classe: 'frise-travaux' },
+        inscription.assignments.map(puceDeTravail))));
   return el('tr', { classe: 'ligne-depliee' },
     el('td', {}), el('td', { colspan: '4' }, el('div', { classe: 'depots' }, blocs)));
 }
 
 function resumerAnnuaire(donnees) {
   const parts = [donnees.shown !== donnees.total
-    ? `${donnees.shown} étudiant(s) sur ${donnees.total}`
-    : `${donnees.total} étudiant(s)`];
+    ? `${donnees.shown} utilisateur(s) sur ${donnees.total}`
+    : `${donnees.total} utilisateur(s)`];
+  const profs = etat.annuaire.lignes.filter((ligne) => ligne.is_teacher).length;
+  if (profs) parts.push(`${profs} enseignant(s)`);
   parts.push(`${(donnees.sessions || []).length} session(s)`);
   parts.push(`${(donnees.courses || []).length} cours`);
   // Les dépôts que personne ne réclame ne sont pas des étudiants de plus :
@@ -2796,8 +2833,8 @@ function resumerAnnuaire(donnees) {
   if (donnees.unmatched) parts.push(`${donnees.unmatched} dépôt(s) sans étudiant connu`);
   $('annuaire-resume').textContent = parts.join(' · ');
   $('annuaire-vide').textContent = donnees.total === 0
-    ? "Aucun étudiant connu dans cette organisation. Déclarez un groupe et importez sa liste."
-    : 'Aucun étudiant ne répond à ces critères.';
+    ? "Aucun utilisateur connu dans cette organisation. Déclarez un groupe et importez sa liste."
+    : 'Personne ne répond à ces critères.';
 }
 
 function remplirSessionsDuFiltre(liste) {
@@ -2836,6 +2873,7 @@ const barreAnnuaire = barreDeFiltre({
   menu: 'annuaire-filtre-menu',
   vider: 'annuaire-vider',
   champs: [
+    ['annuaire-role', 'role'],
     ['annuaire-session', 'session'], ['annuaire-cours', 'cours'],
     ['annuaire-activite', 'activite'],
     ['annuaire-apres', 'apres'], ['annuaire-avant', 'avant'],
@@ -2843,12 +2881,379 @@ const barreAnnuaire = barreDeFiltre({
   criteres: () => etat.annuaire.filtre,
   effacer: () => {
     etat.annuaire.filtre = {
-      texte: '', session: '', cours: '', activite: '', apres: '', avant: '',
-      tri: 'nom', desc: false,
+      texte: '', role: '', session: '', cours: '', activite: '', apres: '',
+      avant: '', tri: 'nom', desc: false,
     };
   },
   recharger: () => chargerAnnuaire(),
 });
+
+// ------------------------------------------- fiche d'un utilisateur
+
+// La seule vue centrée sur une personne. L'annuaire répond à « qui a suivi
+// quoi » pour tout le monde à la fois ; la fiche prend quelqu'un et déroule son
+// passage, de la session la plus récente à la plus ancienne.
+//
+// Elle mêle les cours suivis et les cours donnés : chercher ce qu'un collègue a
+// enseigné et retrouver ce qu'un étudiant a suivi sont la même question posée à
+// deux personnes différentes.
+
+// ouvrirFiche mène à la fiche de quelqu'un. C'est le geste que tous les noms
+// de l'application déclenchent.
+function ouvrirFiche(compte) {
+  if (!compte) return;
+  etat.fiche = { compte, donnees: null };
+  afficherVue('fiche');
+}
+
+// lienVersLaFiche rend un nom cliquable. Sans nom connu, c'est le compte qui
+// mène à la fiche : il désigne quand même quelqu'un.
+function lienVersLaFiche(personne, options = {}) {
+  const compte = personne.username || '';
+  const nom = personne.full_name || '';
+  if (!compte) return el('span', { classe: 'vide', texte: nom || 'nom inconnu' });
+  return el('button', {
+    classe: ('lien ' + (options.classe || '')).trim(), type: 'button',
+    texte: nom || compte,
+    title: `Voir la fiche de ${nom || '@' + compte}`,
+    onclick: (evenement) => { evenement.stopPropagation(); ouvrirFiche(compte); },
+  });
+}
+
+async function chargerFiche() {
+  const compte = etat.fiche.compte;
+  if (!etat.organisation || !compte) return;
+  $('fiche-nom').textContent = '@' + compte;
+  const donnees = await tenter(
+    () => api('GET', `/api/users/${encode(compte)}`), 'Fiche');
+  if (!donnees) {
+    $('fiche-resume').textContent = "La fiche n'a pas pu être chargée.";
+    return;
+  }
+  // Une autre fiche a pu être demandée pendant la requête.
+  if (etat.fiche.compte !== compte) return;
+  etat.fiche.donnees = donnees;
+  dessinerFiche();
+}
+
+function dessinerFiche() {
+  const donnees = etat.fiche.donnees;
+  if (!donnees) return;
+  const personne = donnees.user;
+
+  // L'en-tête a été dessiné avant que le nom ne soit connu : il disait le
+  // compte. Maintenant qu'on a la personne, il dit qui elle est.
+  dessinerEntete('fiche', ongletDeLaVue['fiche']);
+
+  $('fiche-nom').textContent = personne.full_name || '@' + personne.username;
+  const role = $('fiche-role');
+  role.hidden = false;
+  role.textContent = personne.role;
+  role.classList.toggle('enseignant', personne.is_teacher);
+
+  dessinerComptesDeLaFiche(personne, donnees.host);
+  const matricule = $('fiche-matricule');
+  matricule.hidden = !personne.student_id;
+  matricule.textContent = personne.student_id ? 'Matricule ' + personne.student_id : '';
+
+  // Nommer quelqu'un n'est offert qu'à qui n'a pas de nom : corriger un nom
+  // déjà donné touche aux dépôts qui le portent, et cela se fait là où on les
+  // voit — dans la liste du groupe.
+  const sansNom = $('fiche-sans-nom');
+  sansNom.hidden = !!personne.full_name;
+  if (!sansNom.hidden) $('fiche-nommer').onclick = () => nommerUnUtilisateur(personne);
+
+  $('fiche-resume').textContent = resumerFiche(personne);
+  dessinerAvisDeLaFiche(donnees, personne);
+  dessinerCooptation(donnees, personne);
+  dessinerFrise(personne);
+}
+
+// resumerFiche dit en une ligne ce que la chronologie détaille.
+function resumerFiche(personne) {
+  const parts = [];
+  if (personne.courses) parts.push(`${personne.courses} cours suivi(s)`);
+  if (personne.taught) parts.push(`${personne.taught} cours donné(s)`);
+  if (personne.repos) parts.push(`${personne.repos} dépôt(s)`);
+  parts.push(personne.pushed_at ? 'dernier envoi ' + personne.pushed_at : 'aucun envoi');
+  return parts.join(' · ');
+}
+
+// dessinerComptesDeLaFiche montre tous les comptes de la personne. Chacun mène
+// à son profil GitHub : c'est la seule chose qu'on veuille faire d'un compte.
+function dessinerComptesDeLaFiche(personne, hote) {
+  const zone = $('fiche-comptes');
+  vider(zone);
+  const domaine = hote || (etat.contexte && etat.contexte.host) || 'github.com';
+  for (const compte of personne.accounts) {
+    const principal = compte.toLowerCase() === (personne.username || '').toLowerCase();
+    zone.append(el('a', {
+      classe: 'fiche-compte' + (principal ? ' principal' : ''),
+      href: `https://${domaine}/${encodeURIComponent(compte)}`,
+      target: '_blank', rel: 'noreferrer noopener',
+      texte: '@' + compte,
+      title: `Ouvrir @${compte} sur ${domaine}`,
+    }));
+  }
+}
+
+// dessinerAvisDeLaFiche signale ce qu'il faut savoir avant de lire le reste :
+// un compte que le registre ignore, un registre illisible.
+function dessinerAvisDeLaFiche(donnees, personne) {
+  const zone = $('fiche-avis');
+  vider(zone);
+  if (donnees.notice) {
+    zone.append(el('div', { classe: 'avis alerte', texte: donnees.notice }));
+  }
+  if (!personne.known) {
+    zone.append(el('div', { classe: 'avis', texte:
+      `Le registre de « ${donnees.org} » ne connaît pas @${personne.username}. ` +
+      "Le compte existe sur GitHub, il n'a simplement rien fait ici — ou son nom " +
+      "complet n'a jamais été donné." }));
+  }
+}
+
+// dessinerCooptation offre de reconnaître quelqu'un comme enseignant, ou de
+// lui retirer ce rôle.
+//
+// Elle n'est offerte qu'à un enseignant. Ce n'est pas elle qui protège le
+// registre — un étudiant n'a jamais eu le droit d'y écrire, et GitHub le lui
+// refuserait bien avant nous : elle évite seulement de proposer un geste qui
+// échouerait.
+function dessinerCooptation(donnees, personne) {
+  const pied = $('fiche-pied');
+  const bouton = $('fiche-role-bouton');
+  const aide = $('fiche-role-aide');
+  // Tant que l'organisation n'a aucun enseignant, quelqu'un doit pouvoir
+  // commencer : cacher le bouton ne laisserait aucun chemin pour le faire.
+  const premier = donnees.teachers === 0;
+  pied.hidden = !donnees.viewer_teaches && !premier;
+  if (pied.hidden) return;
+
+  bouton.textContent = personne.is_teacher
+    ? "Retirer le rôle d'enseignant" : 'Reconnaître comme enseignant';
+  bouton.classList.toggle('rouge', personne.is_teacher);
+  if (premier && !personne.is_teacher) {
+    aide.textContent = "Aucun enseignant n'est encore reconnu dans « " +
+      donnees.org + " » : le premier se déclare, les suivants sont cooptés.";
+  } else {
+    aide.textContent = personne.is_teacher
+      ? "Il pourra être inscrit à l'équipe enseignante d'un groupe."
+      : "Le rôle ne donne aucun accès : il autorise à en donner, groupe par groupe.";
+  }
+  bouton.onclick = () => coopter(personne, !personne.is_teacher);
+}
+
+async function coopter(personne, enseignant) {
+  const question = enseignant
+    ? `Reconnaître ${personne.full_name || '@' + personne.username} comme enseignant ?`
+    : `Retirer son rôle d'enseignant à ${personne.full_name || '@' + personne.username} ?`;
+  const detail = enseignant
+    ? "Cela ne lui ouvre aucun dépôt. Il pourra en revanche être inscrit à " +
+      "l'équipe enseignante d'un groupe, et c'est cette inscription qui donne l'accès."
+    : "Il restera dans les équipes enseignantes où il est déjà inscrit : " +
+      "retirez-l'en groupe par groupe pour lui fermer les dépôts.";
+  const confirme = await demander(question,
+    el('p', { classe: 'note', texte: detail }),
+    enseignant ? 'Reconnaître' : 'Retirer');
+  if (!confirme) return;
+
+  const reponse = await tenter(() => api(
+    'POST', `/api/users/${encode(personne.username)}/role`,
+    { is_teacher: enseignant }), 'Rôle');
+  if (!reponse) return;
+  message(`@${reponse.username} est désormais ${reponse.role}.`);
+  chargerFiche();
+}
+
+// nommerUnUtilisateur donne son nom complet à quelqu'un qui n'en a pas.
+//
+// Le nom monte au registre de l'organisation, pas dans un groupe : c'est une
+// propriété de la personne, et le lui donner depuis sa fiche vaut partout —
+// y compris pour quelqu'un qu'aucun groupe déclaré ici ne connaît.
+async function nommerUnUtilisateur(personne) {
+  const champ = el('input', {
+    classe: 'champ', type: 'text', placeholder: 'Prénom Nom' });
+  const corps = el('div', {},
+    el('p', {}, el('code', { texte: '@' + personne.username }),
+      " n'a pas de nom complet."),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nom complet' }), champ,
+      el('span', { classe: 'aide', texte:
+        "Il monte au registre de l'organisation et vaut pour tous ses groupes. "
+        + "Aucun dépôt n'est renommé : ceux qui existent restent les siens." })));
+
+  if (!await demander('Nommer cette personne', corps, 'Enregistrer',
+    () => champ.focus())) return;
+  const voulu = champ.value.trim();
+  if (!voulu) return;
+
+  const reponse = await tenter(() => api(
+    'PUT', `/api/users/${encode(personne.username)}/name`,
+    { full_name: voulu }), 'Nom complet');
+  if (!reponse) return;
+  message(`@${reponse.username} s'appelle « ${reponse.full_name} ».`);
+  chargerFiche();
+}
+
+// dessinerFrise déroule la chronologie. Chaque étape porte sa session en toutes
+// lettres, son cours, son groupe, et ce qu'il en reste : les dépôts rendus, ou
+// le silence.
+function dessinerFrise(personne) {
+  const frise = $('fiche-frise');
+  vider(frise);
+  const rien = personne.timeline.length === 0;
+  frise.hidden = rien;
+  $('fiche-vide').hidden = !rien;
+  $('fiche-vide').textContent = rien
+    ? "Aucun cours suivi ni donné dans cette organisation."
+    : '';
+  for (const etape of personne.timeline) {
+    frise.append(etapeDeLaFrise(etape));
+  }
+}
+
+function etapeDeLaFrise(etape) {
+  const enseigne = etape.role === 'enseignant';
+  const ligne = el('li', { classe: 'frise-etape' + (enseigne ? ' enseigne' : '') },
+    el('div', { classe: 'frise-tete' },
+      el('span', { classe: 'frise-session', texte: etape.session_name || etape.session || etape.label }),
+      el('button', {
+        classe: 'frise-lien', type: 'button',
+        texte: sigle(etape.course) + (etape.group ? ' · groupe ' + etape.group : ''),
+        title: 'Ouvrir ' + etape.scope,
+        onclick: () => ouvrirGroupe(etape.scope),
+      }),
+      el('span', { classe: 'jeton' + (enseigne ? ' enseignant' : ''), texte: etape.role })));
+
+  ligne.append(el('p', { classe: 'frise-detail', texte: detailDeLEtape(etape) }));
+  if (etape.assignments.length > 0) {
+    ligne.append(el('div', { classe: 'frise-travaux' },
+      etape.assignments.map(puceDeTravail)));
+  }
+  return ligne;
+}
+
+// puceDeTravail rend un dépôt rendu, cerné. Plusieurs travaux d'un même cours
+// se suivent : sans bordure, « tp1 tp2 tp3 » se lit comme un seul mot, et rien
+// ne dit où l'un finit et où l'autre commence. Sa date y figure pour la même
+// raison — c'est aussi ce qu'on vient comparer entre deux travaux.
+function puceDeTravail(travail) {
+  return el('a', {
+    classe: 'jeton lien travail-puce', href: travail.url,
+    target: '_blank', rel: 'noreferrer noopener',
+    title: travail.repo + (travail.pushed_at
+      ? ' — dernier envoi ' + travail.pushed_at : ' — aucun envoi'),
+  },
+    el('span', { classe: 'travail-nom',
+      texte: travail.name + (travail.team ? ' · ' + travail.team : '') }),
+    el('span', { classe: 'travail-date',
+      texte: travail.pushed_at || 'aucun envoi' }));
+}
+
+// detailDeLEtape dit ce que l'étape a laissé. « Muet » n'est pas « aucun
+// dépôt » : le dépôt existe, il n'a simplement jamais rien reçu.
+function detailDeLEtape(etape) {
+  if (etape.role === 'enseignant') return 'A donné ce cours.';
+  if (etape.assignments.length === 0) return 'Aucun dépôt dans ce groupe.';
+  const combien = travaux(etape.assignments.length);
+  if (etape.silent) return `${combien}, aucun envoi.`;
+  return `${combien}, dernier envoi le ${etape.pushed_at}.`;
+}
+
+// --------------------------------------------- équipe enseignante du groupe
+
+// Cloisonner un groupe, c'est donner ses dépôts à une équipe et n'y mettre que
+// ceux qui l'enseignent. Le registre dit qui enseigne ; l'équipe dit où — et
+// c'est elle, jamais le registre, qui ouvre l'accès.
+
+async function chargerCloisonnement() {
+  if (!etat.groupe) return;
+  const donnees = await tenter(() => api(
+    'GET', `/api/classrooms/${encode(etat.groupe.scope)}/teachers`), 'Équipe enseignante');
+  if (!donnees || !etat.groupe || donnees.scope !== etat.groupe.scope) return;
+  etat.cloisonnement = donnees;
+  dessinerCloisonnement();
+}
+
+function dessinerCloisonnement() {
+  const donnees = etat.cloisonnement;
+  if (!donnees) return;
+  const etat_ = donnees.state;
+
+  $('cloison-nom').textContent = etat_.name;
+  const jeton = $('cloison-etat');
+  const cloisonne = etat_.exists && etat_.teachers.length > 0;
+  jeton.textContent = cloisonne
+    ? `${etat_.teachers.length} enseignant(s) · ${etat_.repos} dépôt(s)`
+    : 'non cloisonné';
+  jeton.classList.toggle('oui', cloisonne);
+
+  const choix = $('cloison-choix');
+  vider(choix);
+  const aucun = donnees.candidates.length === 0;
+  $('cloison-vide').hidden = !aucun;
+  $('cloison-appliquer').disabled = aucun;
+  for (const candidat of donnees.candidates) {
+    choix.append(el('label', { classe: 'case' },
+      el('input', {
+        type: 'checkbox', value: candidat.username, checked: candidat.member,
+      }),
+      el('span', {},
+        el('span', { texte: candidat.full_name || candidat.username }), ' ',
+        lienDeProfil(candidat.username))));
+  }
+
+  const zone = $('cloison-avis');
+  vider(zone);
+  if (donnees.notice) zone.append(el('div', { classe: 'avis', texte: donnees.notice }));
+  if (donnees.exposure) {
+    zone.append(el('div', { classe: 'avis alerte', texte: donnees.exposure }));
+  }
+}
+
+$('cloison-appliquer').addEventListener('click', async () => {
+  if (!etat.groupe) return;
+  const enseignants = comptesCoches($('cloison-choix'));
+  const apercu = await tenter(() => api(
+    'POST', `/api/classrooms/${encode(etat.groupe.scope)}/teachers/preview`,
+    { teachers: enseignants }), 'Cloisonnement');
+  if (!apercu) return;
+
+  const plan = apercu.plan;
+  if (plan.steps.length === 0) {
+    message("L'équipe enseignante de ce groupe est déjà celle-là.", 'note');
+    return;
+  }
+  const confirme = await demander('Appliquer cette composition ?',
+    el('div', {},
+      el('p', { classe: 'note', texte: resumerPlanDeCloisonnement(plan) }),
+      el('p', { classe: 'aide', texte: plan.notice })),
+    'Appliquer');
+  if (!confirme) return;
+
+  const fiche = await tenter(() => api(
+    'POST', `/api/classrooms/${encode(etat.groupe.scope)}/teachers`,
+    { teachers: enseignants }), 'Cloisonnement');
+  if (!fiche) return;
+  await suivre(fiche);
+  chargerCloisonnement();
+});
+
+// resumerPlanDeCloisonnement dit ce que les écritures vont faire, par nature :
+// une liste de quatre-vingts lignes ne se lit pas avant de confirmer.
+function resumerPlanDeCloisonnement(plan) {
+  const comptes = {};
+  for (const etape of plan.steps) {
+    comptes[etape.kind] = (comptes[etape.kind] || 0) + 1;
+  }
+  const parts = [];
+  if (comptes['création']) parts.push("création de l'équipe");
+  if (comptes['inscription']) parts.push(`${comptes['inscription']} inscription(s)`);
+  if (comptes['retrait']) parts.push(`${comptes['retrait']} retrait(s)`);
+  if (comptes['accès']) parts.push(`${comptes['accès']} dépôt(s) accordés en « ${plan.permission} »`);
+  return parts.join(', ') + '.';
+}
 
 // ------------------------------------------------------------------ équipes
 
@@ -2956,8 +3361,8 @@ $('equipes-adopter').addEventListener('click', () => adopterEquipe());
 function ligneDeMembre(personne, etats = {}) {
   const comptes = [personne.username].concat(personne.also || []);
   const ligne = el('div', { classe: 'equipe-membre' },
-    personne.full_name
-      ? el('span', { classe: 'membre-nom', texte: personne.full_name })
+    personne.username
+      ? lienVersLaFiche(personne, { classe: 'membre-nom' })
       : el('span', { classe: 'membre-nom vide', texte: 'nom complet inconnu' }),
     el('span', { classe: 'membre-comptes' },
       comptes.map((compte, rang) =>

@@ -678,10 +678,16 @@ func (s *Session) execute(items []plan.PlannedRepo) (int, error) {
 		}
 	}
 
+	// Un groupe cloisonné doit le rester : chaque dépôt créé va d'emblée à son
+	// équipe enseignante, faute de quoi la distribution suivante décloisonnerait
+	// le groupe sans que personne ne s'en aperçoive.
+	equipe, droit := s.teacherGrant(s.Settings.Org, s.Settings.Assignment)
 	executor := runner.New(s.Client, s.Settings, s.Starter).WithClock(s.Sleep, s.Now)
 	report, err := executor.Run(items, runner.Options{
-		DryRun:       s.Options.DryRun,
-		ForceStarter: s.Options.ForceStarter,
+		DryRun:            s.Options.DryRun,
+		ForceStarter:      s.Options.ForceStarter,
+		TeacherTeam:       equipe,
+		TeacherPermission: droit,
 		OnProgress: func(index, total int, result runner.Result) {
 			s.printProgress(index, total, result, width)
 		},

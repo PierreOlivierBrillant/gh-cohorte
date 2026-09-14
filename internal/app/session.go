@@ -6,13 +6,16 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -225,6 +228,15 @@ func (s *Session) run() (int, error) {
 	if mode == "etudiants" {
 		return newDirectorySession(s).run()
 	}
+	if mode == "fiche" {
+		return s.showProfile(s.Options.User)
+	}
+	// L'équipe enseignante d'un groupe n'est pas une de ses équipes : on ne
+	// lui distribue rien, elle reçoit l'accès aux dépôts. Elle a donc son
+	// propre chemin.
+	if mode == "cloisonner" {
+		return s.teachingMode(s.Options.Manage)
+	}
 	// Les équipes appartiennent à un groupe, pas à un préfixe : quand les
 	// drapeaux en parlent, « --manage » ne désigne plus un lot de dépôts mais
 	// la place du groupe — « a26.5n6.01 ».
@@ -256,8 +268,16 @@ func (s *Session) chooseMode() (string, error) {
 		s.Options.RegistryTeam != "" {
 		return "registre", nil
 	}
+	// La fiche d'un compte prime sur l'annuaire : « --students --user X » veut
+	// dire « cet utilisateur-là », et non « la liste, plus lui ».
+	if strings.TrimSpace(s.Options.User) != "" {
+		return "fiche", nil
+	}
 	if s.Options.StudentsRequested {
 		return "etudiants", nil
+	}
+	if s.Options.TeachersOn {
+		return "cloisonner", nil
 	}
 	if s.Options.ManageRequested {
 		return "gerer", nil
@@ -504,4 +524,27 @@ func placeholderHint() string {
 		fields = append(fields, "{"+name+"}")
 	}
 	return strings.Join(fields, ", ")
+}
+
+// teacherGrant rend l'équipe enseignante du groupe d'un travail, sous la forme
+// que le runner attend : le slug, et le droit à lui donner.
+//
+// Un groupe non cloisonné n'en a pas, et rien n'est alors accordé. Une lecture
+// qui échoue ne fait pas échouer la distribution : mieux vaut un dépôt créé
+// sans l'accès de l'équipe — que « --cloisonner » redonnera — qu'aucun dépôt.
+func (s *Session) teacherGrant(org, assignmentID string) (string, string) {
+	scope, _, ok := naming.SplitAssignment(assignmentID)
+	if !ok {
+		return "", ""
+	}
+	niveaux := strings.Split(scope, naming.Separator)
+	infos, err := s.Client.LoadOrgTeams(org, s.Options.Jobs)
+	if err != nil {
+		return "", ""
+	}
+	equipe, existe := teams.TeacherTeam(niveaux[0], niveaux[1], niveaux[2], infos)
+	if !existe {
+		return "", ""
+	}
+	return equipe.Slug, classroom.TeacherPermission
 }

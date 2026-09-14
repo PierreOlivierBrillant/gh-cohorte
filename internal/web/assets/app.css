@@ -304,7 +304,20 @@ main { padding: 1.5rem; max-width: 1100px; }
 
 .jeton.oui { color: var(--succes); background: var(--succes-fond); border-color: transparent; }
 .jeton.non { color: var(--erreur); background: var(--erreur-fond); border-color: transparent; }
-.jeton.lien { color: var(--lien); }
+/* Un jeton cliquable reste un jeton. « .lien » vient plus bas dans cette
+   feuille et remet à plat bordure, fond, marges et fonte : à égalité de
+   spécificité, c'est lui qui gagnait, et une rangée de jetons retombait en
+   texte nu. « tp1 tp2 tp3 » se lisait alors comme un seul mot — rien ne disait
+   où l'un finissait. Ces deux classes-ci reprennent la main. */
+.jeton.lien {
+  color: var(--lien);
+  padding: 0 .6rem;
+  font-size: .75rem;
+  background: var(--fond-creux);
+  border: 1px solid var(--bord);
+}
+
+.jeton.lien:hover { border-color: var(--lien); }
 /* Le compte d'une personne, à côté de son nom : c'est leur association qu'on
    lit, et le compte se reconnaît à sa fonte. */
 .jeton .compte {
@@ -668,6 +681,23 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 
 .cours-suivi:hover { border-color: var(--lien); }
 
+/* Un cours donné plutôt que suivi. La même colonne porte les deux : sans
+   marque, « 5N6 » ne dirait pas si la personne y était devant ou dans la
+   salle. */
+.cours-suivi.enseigne {
+  border-color: var(--lien);
+  border-style: dashed;
+}
+
+/* Le nom d'une personne et ce qu'elle est. L'étiquette suit le nom plutôt que
+   d'occuper une colonne : c'est de la personne qu'elle parle. */
+.nom-et-role {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .45rem;
+  flex-wrap: wrap;
+}
+
 /* ------------------------------------------------------------------- avis */
 
 .avis {
@@ -1002,3 +1032,144 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   .roue { animation: none; border-top-color: var(--bord-net); }
   .occupe { transition: none; }
 }
+
+/* ------------------------------------------------- fiche d'un utilisateur */
+
+/* Les comptes d'une personne, en tête de sa fiche. Elle n'en a qu'un le plus
+   souvent, et parfois deux — celui du collège et le sien. Tous mènent à son
+   profil GitHub : c'est la seule chose qu'on veuille faire d'un compte. */
+.fiche-comptes {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.fiche-compte {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .2rem .6rem;
+  border: 1px solid var(--bord);
+  border-radius: 999px;
+  background: var(--fond-doux);
+  color: var(--texte-doux);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .8125rem;
+  text-decoration: none;
+}
+
+.fiche-compte:hover { color: var(--lien); border-color: var(--lien); }
+/* Le compte qui désigne la personne partout ailleurs se distingue des autres :
+   c'est lui qui nomme ses dépôts et qui la retrouve. */
+.fiche-compte.principal { border-color: var(--bord-net); color: var(--texte); }
+
+/* Le rôle se lit d'un coup d'œil, et se distingue par la couleur plutôt que
+   par le seul mot : c'est la première chose qu'on vient vérifier sur la fiche
+   d'un collègue. */
+.jeton.enseignant {
+  color: var(--lien);
+  background: var(--fond-creux);
+  border-color: var(--lien);
+}
+
+/* ----------------------------------------------------------------- frise */
+
+/* La chronologie descend du plus récent au plus ancien. Un filet vertical relie
+   les étapes, chacune marquée d'une pastille : c'est la forme qui dit « et
+   avant cela », là où une table dirait seulement « et aussi ». */
+.frise {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1.25rem;
+  position: relative;
+}
+
+/* Le filet s'arrête à la dernière pastille plutôt que de courir jusqu'en bas :
+   il relie des étapes, il ne pend pas dans le vide. */
+.frise::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: .6rem;
+  bottom: .6rem;
+  width: 2px;
+  background: var(--bord-net);
+}
+
+/* Une seule étape n'a rien à relier : le filet pendrait dans le vide. */
+.frise:has(> :only-child)::before { display: none; }
+
+.frise-etape { position: relative; padding: 0 0 1.4rem; }
+.frise-etape:last-child { padding-bottom: 0; }
+
+.frise-etape::before {
+  content: "";
+  position: absolute;
+  left: -1.25rem;
+  top: .45rem;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fond);
+  border: 2px solid var(--bord-net);
+}
+
+/* Un cours donné se distingue d'un cours suivi à la pastille : la même
+   chronologie porte les deux rôles, et il faut pouvoir les séparer de loin. */
+.frise-etape.enseigne::before { border-color: var(--lien); background: var(--lien); }
+
+.frise-tete {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.frise-session { font-weight: 600; }
+.frise-cours { color: var(--texte-doux); }
+
+.frise-lien {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--lien);
+  cursor: pointer;
+}
+
+.frise-lien:hover { text-decoration: underline; }
+
+.frise-detail {
+  margin: .3rem 0 0;
+  color: var(--texte-doux);
+  font-size: .8125rem;
+}
+
+.frise-travaux {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  margin-top: .45rem;
+}
+
+/* Le dépôt d'un travail, avec sa date. Deux travaux d'un même cours se
+   comparent d'abord par là : sans elle, il faudrait survoler chacun. */
+.travail-puce {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .4rem;
+  text-decoration: none;
+}
+
+.travail-puce:hover { text-decoration: none; }
+.travail-puce .travail-nom { font-weight: 600; }
+
+.travail-date {
+  color: var(--texte-doux);
+  font-size: .6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Une pile de cases à cocher qui respire, pour composer une équipe. */
+.pile-cases { display: flex; flex-direction: column; gap: .3rem; }

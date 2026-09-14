@@ -1,6 +1,7 @@
-// Package registry tient le registre des étudiants d'une organisation : le nom
-// complet en face de chaque compte GitHub, rangé dans l'organisation elle-même
-// plutôt que sur le poste de chacun.
+// Package registry tient le registre des utilisateurs d'une organisation : le
+// nom complet en face de chaque compte GitHub, et le rôle tenu — étudiant ou
+// enseignant —, rangé dans l'organisation elle-même plutôt que sur le poste de
+// chacun.
 //
 // Une organisation nomme ses dépôts « session.cours.groupe.travail.étudiant »,
 // et le dernier niveau est le nom slugifié, pas le compte. Rien dans les dépôts
@@ -11,9 +12,17 @@
 // de diverger.
 //
 // Le registre est un fichier unique dans un dépôt de service de
-// l'organisation. Une lecture complète coûte une requête ; deux mille étudiants
-// sur cinq ans pèsent quelques centaines de kilo-octets. Le découper resterait
-// possible : rien de ce qui suit ne dépend du nombre de fichiers.
+// l'organisation. Une lecture complète coûte une requête ; deux mille
+// utilisateurs sur cinq ans pèsent quelques centaines de kilo-octets. Le
+// découper resterait possible : rien de ce qui suit ne dépend du nombre de
+// fichiers.
+//
+// Le rôle qu'il porte nomme, il n'autorise pas. Savoir qu'un compte enseigne
+// sert à le proposer, à le montrer, à chercher les cours qu'il a donnés ; ce
+// qui décide réellement de ce que quelqu'un peut lire, ce sont les droits
+// GitHub — appartenance à l'organisation, équipes, collaborateurs. Un étudiant
+// ne peut pas se déclarer enseignant, non parce que ce fichier le lui refuse,
+// mais parce qu'il n'a jamais eu le droit d'y écrire.
 package registry
 
 import (
@@ -36,8 +45,10 @@ const (
 	RepoName = ".cohorte"
 	// Branch est la seule branche écrite.
 	Branch = "main"
-	// StudentsFile porte le registre lui-même.
-	StudentsFile = "etudiants.json"
+	// UsersFile porte le registre lui-même. Il garde son nom d'origine bien
+	// qu'il porte désormais aussi les enseignants : le renommer obligerait
+	// chaque organisation déjà amorcée à une migration, pour un mot.
+	UsersFile = "etudiants.json"
 	// ReadmeFile explique le dépôt à qui l'ouvre sur github.com. C'est bien
 	// « README.md » : GitHub n'affiche que celui-là sur la page du dépôt, et
 	// c'est aussi le fichier que la création avec « auto_init » y dépose — le
@@ -47,16 +58,32 @@ const (
 
 // Version est celle du schéma écrit. Elle est relue, jamais devinée : un
 // fichier venu d'une version ultérieure de l'outil doit pouvoir se signaler.
-const Version = 1
+//
+// La version 2 ajoute le rôle et range les fiches sous « users ». Une version 1
+// se relit telle quelle — sans rôle, tout le monde est étudiant —, et se
+// réécrit en version 2 à la première écriture.
+const Version = 2
 
-// Student est une personne connue de l'organisation.
-type Student struct {
+// User est une personne connue de l'organisation : un étudiant, ou quelqu'un
+// qui enseigne.
+type User struct {
 	Username string `json:"username"`
 	FullName string `json:"full_name"`
+	// IsTeacher dit que cette personne enseigne. Il est écrit pour tout le
+	// monde, « false » compris : un champ absent se lirait « on ne sait pas »,
+	// alors qu'on sait — le registre est la liste de ce qu'on sait.
+	//
+	// Ce n'est pas un droit, c'est une déclaration. Personne n'accède à quoi
+	// que ce soit parce que ce champ vaut « true » ; c'est l'inverse — seul
+	// quelqu'un qui a déjà le droit d'écrire ici peut le mettre à « true ».
+	IsTeacher bool `json:"is_teacher"`
 	// StudentID est le matricule du collège. C'est lui qui identifie vraiment
 	// quelqu'un : deux comptes qui le portent sont la même personne, et deux
 	// personnes du même nom ne le partagent pas. Le registre le retient pour
 	// que ce soit vrai d'un poste à l'autre.
+	//
+	// Un enseignant n'en a pas : il n'est pas inscrit au collège. Son compte
+	// GitHub suffit à le désigner.
 	StudentID string `json:"student_id,omitempty"`
 	// Slugs énumère tout ce qui a désigné cette personne au dernier niveau d'un
 	// nom de dépôt. La liste s'allonge, ne se raccourcit pas : corriger
@@ -71,20 +98,36 @@ type Student struct {
 }
 
 // Key sert au rangement : le compte GitHub est insensible à la casse.
-func (s Student) Key() string { return strings.ToLower(strings.TrimSpace(s.Username)) }
+func (u User) Key() string { return strings.ToLower(strings.TrimSpace(u.Username)) }
 
 // Person rend la personne telle que le reste de l'outil la manipule.
-func (s Student) Person() roster.Person {
+func (u User) Person() roster.Person {
 	return roster.Person{
-		FullName: s.FullName, Username: s.Username, StudentID: s.StudentID,
+		FullName: u.FullName, Username: u.Username, StudentID: u.StudentID,
 	}
 }
+
+// Role nomme ce que la personne est, tel que les trois interfaces l'écrivent.
+// Le mot est décidé ici pour qu'il soit le même partout.
+func (u User) Role() string {
+	if u.IsTeacher {
+		return RoleTeacher
+	}
+	return RoleStudent
+}
+
+// Les deux rôles. « Utilisateur » n'en est pas un : c'est le mot qui les
+// rassemble, et il ne s'écrit jamais en face de quelqu'un.
+const (
+	RoleStudent = "étudiant"
+	RoleTeacher = "enseignant"
+)
 
 // From compose la fiche d'une personne. Le slug que son nom complet produit y
 // est joint d'emblée : c'est celui que porteront ses dépôts, et le retenir
 // maintenant évite d'avoir à le deviner plus tard.
-func From(person roster.Person) Student {
-	fiche := Student{
+func From(person roster.Person) User {
+	fiche := User{
 		Username: person.Username, FullName: person.FullName,
 		StudentID: person.StudentID,
 	}
@@ -97,22 +140,22 @@ func From(person roster.Person) Student {
 // validate met une fiche en forme et refuse ce qui ne peut désigner personne.
 // Le nom complet, lui, peut manquer : un compte adopté depuis des dépôts
 // hérités n'a pas encore le sien.
-func (s Student) validate() (Student, error) {
-	username, err := valid.Login(s.Username, "Compte GitHub")
+func (u User) validate() (User, error) {
+	username, err := valid.Login(u.Username, "Compte GitHub")
 	if err != nil {
-		return s, err
+		return u, err
 	}
-	s.Username = username
-	if nom := strings.TrimSpace(s.FullName); nom != "" {
-		if s.FullName, err = valid.FullName(nom); err != nil {
-			return s, err
+	u.Username = username
+	if nom := strings.TrimSpace(u.FullName); nom != "" {
+		if u.FullName, err = valid.FullName(nom); err != nil {
+			return u, err
 		}
 	} else {
-		s.FullName = ""
+		u.FullName = ""
 	}
-	s.StudentID = strings.TrimSpace(s.StudentID)
-	s.Slugs = cleanSlugs(s.Slugs)
-	return s, nil
+	u.StudentID = strings.TrimSpace(u.StudentID)
+	u.Slugs = cleanSlugs(u.Slugs)
+	return u, nil
 }
 
 // cleanSlugs met les slugs en forme, les dédoublonne et les range. L'ordre est
@@ -141,21 +184,21 @@ func cleanSlugs(slugs []string) []string {
 // produit un nouveau, si bien qu'une écriture refusée peut être rejouée sans
 // craindre d'avoir déjà entamé celui qu'on avait en main.
 type Set struct {
-	students []Student // rangés par compte, casse ignorée
-	byLogin  map[string]int
-	bySlug   map[string]int
+	users   []User // rangés par compte, casse ignorée
+	byLogin map[string]int
+	bySlug  map[string]int
 }
 
 // newSet range les fiches et dresse ses index.
-func newSet(students []Student) *Set {
-	rangees := append([]Student(nil), students...)
+func newSet(users []User) *Set {
+	rangees := append([]User(nil), users...)
 	sort.SliceStable(rangees, func(i, j int) bool {
 		return rangees[i].Key() < rangees[j].Key()
 	})
 	set := &Set{
-		students: rangees,
-		byLogin:  make(map[string]int, len(rangees)),
-		bySlug:   make(map[string]int, 2*len(rangees)),
+		users:   rangees,
+		byLogin: make(map[string]int, len(rangees)),
+		bySlug:  make(map[string]int, 2*len(rangees)),
 	}
 	for position, fiche := range rangees {
 		set.byLogin[fiche.Key()] = position
@@ -174,19 +217,47 @@ func newSet(students []Student) *Set {
 func Empty() *Set { return newSet(nil) }
 
 // Len compte les personnes connues.
-func (s *Set) Len() int { return len(s.students) }
+func (s *Set) Len() int { return len(s.users) }
 
 // All rend les fiches, rangées par compte. La copie évite qu'un appelant
 // modifie le registre dans son dos.
-func (s *Set) All() []Student { return append([]Student(nil), s.students...) }
+func (s *Set) All() []User { return append([]User(nil), s.users...) }
 
 // Find retrouve une personne par son compte GitHub.
-func (s *Set) Find(username string) (Student, bool) {
+func (s *Set) Find(username string) (User, bool) {
 	position, connu := s.byLogin[strings.ToLower(strings.TrimSpace(username))]
 	if !connu {
-		return Student{}, false
+		return User{}, false
 	}
-	return s.students[position], true
+	return s.users[position], true
+}
+
+// Teachers rend ceux qui enseignent, rangés par compte. C'est ce qui permet de
+// chercher les cours qu'un collègue a déjà donnés, et de proposer un nom quand
+// il faut désigner l'enseignant d'un groupe.
+func (s *Set) Teachers() []User {
+	enseignants := make([]User, 0)
+	for _, fiche := range s.users {
+		if fiche.IsTeacher {
+			enseignants = append(enseignants, fiche)
+		}
+	}
+	return enseignants
+}
+
+// Knows dit si le registre connaît un compte. Un compte qu'il ignore a pu
+// laisser des dépôts sans que personne ne l'ait jamais nommé.
+func (s *Set) Knows(username string) bool {
+	_, connu := s.Find(username)
+	return connu
+}
+
+// Teaches dit si un compte est déclaré enseignant. Un compte inconnu ne
+// l'est pas : le registre est la liste de ce qu'on sait, et ce qu'il ignore
+// n'enseigne pas.
+func (s *Set) Teaches(username string) bool {
+	fiche, connu := s.Find(username)
+	return connu && fiche.IsTeacher
 }
 
 // Name rend le nom complet d'un compte, ou une chaîne vide s'il est inconnu.
@@ -204,20 +275,20 @@ func (s *Set) Name(username string) string {
 // fait pas quelqu'un d'autre : « emilie-cote-1 » est « emilie-cote ». Elle
 // n'est retirée qu'en dernier recours, car un vrai slug peut se terminer
 // pareil.
-func (s *Set) Resolve(slug string) (Student, bool) {
+func (s *Set) Resolve(slug string) (User, bool) {
 	fragment := strings.ToLower(strings.TrimSpace(slug))
 	if position, connu := s.bySlug[fragment]; connu {
-		return s.students[position], true
+		return s.users[position], true
 	}
 	base, marque := roster.WithoutDuplicateMarker(fragment)
 	if !marque {
-		return Student{}, false
+		return User{}, false
 	}
 	position, connu := s.bySlug[strings.ToLower(base)]
 	if !connu {
-		return Student{}, false
+		return User{}, false
 	}
-	return s.students[position], true
+	return s.users[position], true
 }
 
 // Lookup répond à la question que « classroom » pose au registre : qui se
@@ -246,17 +317,31 @@ func (s *Set) Lookup(fragment string) (roster.Person, bool) {
 // conservé entier, et rien n'est jamais fusionné.
 type Change struct {
 	// Learn fait connaître des personnes, ou complète ce qu'on sait d'elles.
-	Learn []Student
+	Learn []User
 	// Forget retire des personnes, par compte. C'est rare et lourd de
 	// conséquences : un compte oublié laisse ses dépôts sans nom.
 	Forget []string
+	// Roles change le rôle de comptes déjà connus.
+	//
+	// Il est à part de « Learn » exprès. Apprendre quelqu'un ne dit rien de
+	// son rôle : une liste de classe importée ne sait pas qui enseigne, et si
+	// elle pouvait l'écrire, réimporter la liste d'un groupe ferait
+	// redescendre étudiant l'enseignant qui s'y trouve. Le rôle ne change donc
+	// que lorsqu'on l'a demandé, et pour les comptes qu'on a nommés.
+	Roles []RoleChange
 	// Reason est ce que dira le message de commit. Vide, il est composé.
 	Reason string
 }
 
+// RoleChange dit ce que devient le rôle d'un compte.
+type RoleChange struct {
+	Username  string `json:"username"`
+	IsTeacher bool   `json:"is_teacher"`
+}
+
 // Learn compose le changement qui fait connaître des personnes.
 func Learn(people ...roster.Person) Change {
-	fiches := make([]Student, 0, len(people))
+	fiches := make([]User, 0, len(people))
 	for _, person := range people {
 		fiches = append(fiches, From(person))
 	}
@@ -266,11 +351,31 @@ func Learn(people ...roster.Person) Change {
 // LearnSlug retient qu'un slug désigne un compte. C'est ce qu'on apprend en
 // adoptant des dépôts déjà nommés autrement que par le nom complet.
 func LearnSlug(username, slug string) Change {
-	return Change{Learn: []Student{{Username: username, Slugs: []string{slug}}}}
+	return Change{Learn: []User{{Username: username, Slugs: []string{slug}}}}
+}
+
+// SetRole compose le changement qui fait d'un compte un enseignant, ou l'en
+// défait. C'est la cooptation : quelqu'un qui enseigne déjà reconnaît que
+// quelqu'un d'autre enseigne aussi.
+func SetRole(username string, teacher bool) Change {
+	verbe := "Retire le rôle d'enseignant à @"
+	if teacher {
+		verbe = "Reconnaît @"
+	}
+	suite := " comme enseignant"
+	if !teacher {
+		suite = ""
+	}
+	return Change{
+		Roles:  []RoleChange{{Username: username, IsTeacher: teacher}},
+		Reason: verbe + strings.TrimSpace(username) + suite,
+	}
 }
 
 // Empty dit qu'il n'y a rien à écrire.
-func (c Change) Empty() bool { return len(c.Learn) == 0 && len(c.Forget) == 0 }
+func (c Change) Empty() bool {
+	return len(c.Learn) == 0 && len(c.Forget) == 0 && len(c.Roles) == 0
+}
 
 // With applique un changement et rend le registre qui en résulte, avec un
 // booléen qui dit s'il a bougé. Appliqué deux fois, le même changement donne
@@ -307,12 +412,32 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 		}
 	}
 
+	// Le rôle se pose après l'apprentissage : coopter quelqu'un qu'on vient
+	// d'apprendre doit marcher en une seule écriture.
+	for _, role := range change.Roles {
+		compte, err := valid.Login(role.Username, "Compte GitHub")
+		if err != nil {
+			return nil, false, err
+		}
+		index, connu := position[strings.ToLower(compte)]
+		if !connu {
+			return nil, false, valid.Errorf(
+				"Le registre ne connaît pas @%s : son rôle ne peut pas être changé "+
+					"tant qu'il n'y figure pas.", compte)
+		}
+		if fiches[index].IsTeacher == role.IsTeacher {
+			continue
+		}
+		fiches[index].IsTeacher = role.IsTeacher
+		bouge = true
+	}
+
 	if len(change.Forget) > 0 {
 		oublies := map[string]bool{}
 		for _, username := range change.Forget {
 			oublies[strings.ToLower(strings.TrimSpace(username))] = true
 		}
-		restantes := make([]Student, 0, len(fiches))
+		restantes := make([]User, 0, len(fiches))
 		for _, fiche := range fiches {
 			if oublies[fiche.Key()] {
 				bouge = true
@@ -326,7 +451,10 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 }
 
 // merge fond ce qu'on vient d'apprendre dans ce qu'on savait déjà.
-func merge(connu, appris Student) Student {
+//
+// Le rôle n'en fait pas partie : il ne s'apprend pas, il se décide. « Roles »
+// est le seul chemin qui le change.
+func merge(connu, appris User) User {
 	// Un nom vide n'efface jamais un nom connu : apprendre un compte sans son
 	// nom — ce que fait l'adoption de dépôts hérités — n'est pas l'oublier.
 	if strings.TrimSpace(appris.FullName) != "" {
@@ -349,9 +477,10 @@ func merge(connu, appris Student) Student {
 
 // same compare deux fiches, pour n'écrire que ce qui a vraiment bougé : un
 // commit qui ne change rien salit l'historique sans rien apprendre.
-func same(left, right Student) bool {
+func same(left, right User) bool {
 	return left.Username == right.Username && left.FullName == right.FullName &&
 		left.StudentID == right.StudentID && left.AddedAt == right.AddedAt &&
+		left.IsTeacher == right.IsTeacher &&
 		strings.Join(left.Slugs, "\x00") == strings.Join(right.Slugs, "\x00")
 }
 
@@ -386,9 +515,25 @@ func plural(count int, singulier, pluriel string) string {
 // -------------------------------------------------------------- lecture/écriture
 
 // document est ce qui est écrit dans le dépôt.
+//
+// Les fiches se rangent sous « users » depuis la version 2, sous « students »
+// avant elle. Les deux clés se relisent : une organisation amorcée par une
+// version antérieure de l'outil ne doit pas perdre ses noms parce qu'un mot a
+// changé. Seule « users » s'écrit.
 type document struct {
-	Version  int       `json:"version"`
-	Students []Student `json:"students"`
+	Version int    `json:"version"`
+	Users   []User `json:"users"`
+	// Legacy porte les fiches d'un fichier en version 1. Elle ne s'écrit
+	// jamais : « omitempty » sur une tranche vide la tait.
+	Legacy []User `json:"students,omitempty"`
+}
+
+// entries rend les fiches du document, d'où qu'elles viennent.
+func (d document) entries() []User {
+	if len(d.Users) > 0 {
+		return d.Users
+	}
+	return d.Legacy
 }
 
 // Encode met le registre en forme. Le fichier est trié et indenté toujours
@@ -396,7 +541,7 @@ type document struct {
 // personnes viendront les relire.
 func (s *Set) Encode() ([]byte, error) {
 	payload, err := json.MarshalIndent(
-		document{Version: Version, Students: s.students}, "", "  ")
+		document{Version: Version, Users: s.users}, "", "  ")
 	if err != nil {
 		return nil, valid.Errorf("Registre illisible à l'écriture : %v", err)
 	}
@@ -418,9 +563,10 @@ func Decode(content []byte) (*Set, []string) {
 			"Le registre est en version %d, l'outil en connaît %d : mettez-le à jour "+
 				"avant d'y écrire.", lu.Version, Version))
 	}
-	fiches := make([]Student, 0, len(lu.Students))
+	lues := lu.entries()
+	fiches := make([]User, 0, len(lues))
 	vus := map[string]bool{}
-	for _, fiche := range lu.Students {
+	for _, fiche := range lues {
 		valide, err := fiche.validate()
 		if err != nil {
 			soucis = append(soucis, "Fiche écartée : "+err.Error())
@@ -441,14 +587,23 @@ func Decode(content []byte) (*Set, []string) {
 func Readme(org string) []byte {
 	return []byte(`# Registre de ` + org + `
 
-Ce dépôt appartient à l'extension ` + "`gh cohorte`" + `. Il retient une seule
-chose : **le nom complet en face de chaque compte GitHub** des étudiants de
-l'organisation.
+Ce dépôt appartient à l'extension ` + "`gh cohorte`" + `. Il retient deux choses :
+**le nom complet en face de chaque compte GitHub** des utilisateurs de
+l'organisation, et **le rôle** que chacun y tient — étudiant ou enseignant.
 
 Les dépôts d'étudiants sont nommés ` + "`session.cours.groupe.travail.étudiant`" + `,
 et le dernier niveau est le nom slugifié — pas le compte. Rien dans les noms de
-dépôts ne dit donc à qui ils appartiennent : c'est ` + "`" + StudentsFile + "`" + ` qui le dit,
+dépôts ne dit donc à qui ils appartiennent : c'est ` + "`" + UsersFile + "`" + ` qui le dit,
 pour tout le monde et depuis n'importe quel poste.
+
+## Le rôle ne donne aucun droit
+
+` + "`is_teacher`" + ` nomme, il n'autorise pas. Personne n'accède à quoi que ce
+soit parce que ce champ vaut ` + "`true`" + ` : ce sont les droits GitHub —
+appartenance à l'organisation, équipes, collaborateurs — qui décident de ce que
+chacun peut lire. C'est l'inverse qui est vrai, et c'est ce qui protège le
+champ : seul quelqu'un qui a déjà le droit d'écrire ici peut le mettre à
+` + "`true`" + `, et un étudiant ne l'a jamais eu.
 
 ## Ce qu'il ne contient pas
 

@@ -206,3 +206,31 @@ func TeamBelongs(parts TeamParts, session, course, group string) bool {
 		strings.EqualFold(parts.Course, course) &&
 		strings.EqualFold(parts.Group, group)
 }
+
+// -------------------------------------------------- équipe enseignante
+
+// TeacherTeam est le nom court réservé à l'équipe enseignante d'un groupe :
+// « a26.5n6.01.enseignants ».
+//
+// Elle suit exactement la nomenclature des équipes d'étudiants, et c'est
+// voulu : une équipe appartient à l'organisation, et sans la place du groupe
+// dans son nom, deux groupes ne pourraient pas avoir chacun la leur. Ce qui la
+// distingue tient en un mot réservé — aucune équipe d'étudiants ne peut porter
+// ce nom court, et le refus est dit au moment où on la nomme.
+//
+// C'est elle, et non le registre, qui décide de ce qu'un enseignant voit. Le
+// registre dit qui enseigne ; l'équipe dit où. Un collègue absent de l'équipe
+// d'un groupe n'accède pas à ses dépôts, quand bien même le registre le
+// déclarerait enseignant.
+const TeacherTeam = "enseignants"
+
+// TeacherTeamName compose le nom de l'équipe enseignante d'un groupe.
+func TeacherTeamName(session, course, group string) string {
+	return TeamName(session, course, group, TeacherTeam)
+}
+
+// IsTeacherTeam dit si un nom d'équipe découpé est celui d'une équipe
+// enseignante.
+func IsTeacherTeam(parts TeamParts) bool {
+	return strings.EqualFold(parts.Team, TeacherTeam)
+}

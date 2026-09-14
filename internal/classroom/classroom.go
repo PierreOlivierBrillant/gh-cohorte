@@ -574,6 +574,27 @@ func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[stri
 }
 
 // Repos renvoie les dépôts d'un travail du groupe, du plus récent au plus ancien.
+// Owned rend tous les dépôts du groupe, travaux confondus. C'est ce qui
+// s'accorde à son équipe enseignante : cloisonner porte sur le groupe entier,
+// pas sur un travail.
+func (c Classroom) Owned(repos []groups.RepoInfo) []groups.Repo {
+	trouves := make([]groups.Repo, 0)
+	for _, repo := range repos {
+		parts, reconnu := naming.Parse(repo.Name)
+		if !reconnu || !naming.Belongs(parts, c.Session, c.Course, c.Group) {
+			continue
+		}
+		trouves = append(trouves, groups.Repo{
+			Name: repo.Name, Suffix: parts.Student,
+			Private: repo.Private, URL: repo.HTMLURL,
+		})
+	}
+	sort.Slice(trouves, func(i, j int) bool {
+		return strings.ToLower(trouves[i].Name) < strings.ToLower(trouves[j].Name)
+	})
+	return trouves
+}
+
 func (c Classroom) Repos(assignmentID string, repos []groups.RepoInfo) []groups.Repo {
 	trouves := make([]groups.Repo, 0)
 	for _, repo := range repos {

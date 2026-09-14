@@ -13,8 +13,8 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -258,21 +258,21 @@ type studentAssignment struct {
 // studentQuery lit les critères de tri et de filtre passés dans l'adresse. Ce
 // qu'ils veulent dire est décidé dans « students » : l'interface ne fait ici
 // que transmettre ce qu'on lui a demandé.
-func studentQuery(request *http.Request) (students.Filter, students.Key, bool, error) {
+func studentQuery(request *http.Request) (users.Filter, users.Key, bool, error) {
 	valeurs := request.URL.Query()
-	filtre, err := students.Filter{
+	filtre, err := users.Filter{
 		Text:         valeurs.Get("q"),
 		Name:         valeurs.Get("name"),
 		Username:     valeurs.Get("username"),
 		Assignment:   valeurs.Get("assignment"),
 		PushedAfter:  valeurs.Get("after"),
 		PushedBefore: valeurs.Get("before"),
-		Activity:     students.Activity(valeurs.Get("activity")),
+		Activity:     users.Activity(valeurs.Get("activity")),
 	}.Validate()
 	if err != nil {
-		return filtre, students.ByName, false, err
+		return filtre, users.ByName, false, err
 	}
-	tri, err := students.ParseKey(valeurs.Get("sort"))
+	tri, err := users.ParseKey(valeurs.Get("sort"))
 	if err != nil {
 		return filtre, tri, false, err
 	}
@@ -307,8 +307,8 @@ func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	toutes := students.Build(cours, repos, equipes)
-	retenues := students.Apply(toutes, filtre, tri, decroissant)
+	toutes := users.Build(cours, repos, equipes)
+	retenues := users.Apply(toutes, filtre, tri, decroissant)
 
 	// Les noms complets manquants se comptent sur le groupe entier : le
 	// bouton qui les retrouve n'a pas à dépendre de ce qui est affiché.
@@ -470,6 +470,9 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 		noms = append(noms, remise.Name)
 	}
 	label := "Dépôts de @" + personne.Username + " — " + strings.Join(noms, ", ")
+	// Un groupe cloisonné doit le rester : le dépôt qu'on crée va d'emblée à
+	// son équipe enseignante.
+	equipe, droit := s.teacherGrant(cours)
 	job := s.jobs.Start("distribution", label, func(job *Job) (any, error) {
 		crees, existants, echecs := 0, 0, 0
 		for index, remise := range remises {
@@ -478,6 +481,7 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 			}
 			executor := runner.New(s.deps.Client, remise.Settings, remise.Bundle)
 			report, err := executor.Run(remise.Items, runner.Options{
+				TeacherTeam: equipe, TeacherPermission: droit,
 				OnProgress: func(_, _ int, result runner.Result) {
 					job.Line(result.Repo+" : "+result.Status, result)
 				},
@@ -909,8 +913,8 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 			noms[repo.Name] = student.FullName
 		}
 	}
-	retenues := students.Apply(
-		students.FromGroup(groups.Group{Prefix: cours.ShortName(id), Repos: trouves}, noms),
+	retenues := users.Apply(
+		users.FromGroup(groups.Group{Prefix: cours.ShortName(id), Repos: trouves}, noms),
 		filtre, tri, decroissant)
 
 	lignes := make([]assignmentRepo, 0, len(retenues))
@@ -1239,11 +1243,17 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 	if body.DryRun {
 		label = "Simulation de « " + cours.ShortName(settings.Assignment) + " »"
 	}
+	// Un groupe cloisonné doit le rester : chaque dépôt créé va d'emblée à son
+	// équipe enseignante, faute de quoi la distribution suivante décloisonnerait
+	// le groupe sans que personne ne s'en aperçoive.
+	equipe, droit := s.teacherGrant(cours)
 	job := s.jobs.Start("distribution", label, func(job *Job) (any, error) {
 		executor := runner.New(s.deps.Client, settings, bundle)
 		report, err := executor.Run(items, runner.Options{
-			DryRun:       body.DryRun,
-			ForceStarter: body.ForceStarter,
+			DryRun:            body.DryRun,
+			ForceStarter:      body.ForceStarter,
+			TeacherTeam:       equipe,
+			TeacherPermission: droit,
 			OnProgress: func(index, total int, result runner.Result) {
 				job.Progress(index, total, result.Repo)
 				job.Line(result.Repo+" : "+result.Status, result)

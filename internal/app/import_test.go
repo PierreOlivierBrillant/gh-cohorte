@@ -86,7 +86,7 @@ func TestImportDepuisGitHubClassroom(t *testing.T) {
 	}
 
 	// Les noms sont montés au registre : c'est là qu'ils vivent désormais.
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	for _, attendu := range []string{"Laurent Adam-Larocque", "ladamlarocque", "Étienne Lyonnais"} {
 		if !strings.Contains(contenu, attendu) {
 			t.Fatalf("« %s » manque au registre :\n%s", attendu, contenu)

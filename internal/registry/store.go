@@ -30,7 +30,7 @@ import (
 const Attempts = 5
 
 // Description est ce que le dépôt du registre annonce sur github.com.
-const Description = "Registre des étudiants — gh cohorte. Privé : contient des renseignements personnels."
+const Description = "Registre des utilisateurs — gh cohorte. Privé : contient des renseignements personnels."
 
 // step nomme l'étape qui a échoué, sans perdre l'erreur d'origine : son statut
 // HTTP et la portée qui lui manque servent encore en aval.
@@ -88,8 +88,8 @@ type Snapshot struct {
 // keptSet est ce que le cache local retient : le registre, et le commit qui le
 // scelle. Tant que la branche pointe sur ce commit, ce contenu vaut toujours.
 type keptSet struct {
-	Head     string    `json:"head"`
-	Students []Student `json:"students"`
+	Head  string `json:"head"`
+	Users []User `json:"users"`
 }
 
 // Load lit le registre.
@@ -129,9 +129,9 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 		garde.Seeded = true
 		return garde, nil
 	}
-	file, err := s.client.ReadFile(s.org, RepoName, StudentsFile, head)
+	file, err := s.client.ReadFile(s.org, RepoName, UsersFile, head)
 	if err != nil {
-		return Snapshot{}, s.step("lecture du fichier "+StudentsFile, err)
+		return Snapshot{}, s.step("lecture du fichier "+UsersFile, err)
 	}
 	if file == nil {
 		return Snapshot{Set: Empty(), Head: head}, nil
@@ -150,7 +150,7 @@ func (s *Store) kept() (Snapshot, bool) {
 	if !s.local.Get(cache.RegistryKey(s.org), cache.RegistryTTL, &garde) || garde.Head == "" {
 		return Snapshot{}, false
 	}
-	return Snapshot{Set: newSet(garde.Students), Head: garde.Head}, true
+	return Snapshot{Set: newSet(garde.Users), Head: garde.Head}, true
 }
 
 // keep scelle sur le disque ce qu'on vient de lire.
@@ -158,7 +158,7 @@ func (s *Store) keep(head string, set *Set) {
 	if s.local == nil || head == "" {
 		return
 	}
-	s.local.Set(cache.RegistryKey(s.org), keptSet{Head: head, Students: set.All()})
+	s.local.Set(cache.RegistryKey(s.org), keptSet{Head: head, Users: set.All()})
 }
 
 // Apply applique un changement et rend le registre tel qu'il devient.
@@ -227,7 +227,7 @@ func (s *Store) commit(set *Set, snapshot Snapshot, message string) (string, err
 	if err != nil {
 		return "", err
 	}
-	fichiers := []ghapi.PushFile{{Path: StudentsFile, Mode: "100644", Content: payload}}
+	fichiers := []ghapi.PushFile{{Path: UsersFile, Mode: "100644", Content: payload}}
 	if !snapshot.Seeded {
 		fichiers = append(fichiers, ghapi.PushFile{
 			Path: ReadmeFile, Mode: "100644", Content: Readme(s.org)})
