@@ -144,6 +144,16 @@ type Options struct {
 	DryRun       bool
 	ForceStarter bool
 	OnProgress   ProgressFunc
+	// TeacherTeam est l'équipe enseignante du groupe, quand il est cloisonné.
+	// Chaque dépôt créé lui est accordé d'emblée : sans cela, un groupe
+	// cloisonné se décloisonnerait tout seul à la distribution suivante, et
+	// l'enseignant ne verrait pas les dépôts qu'il vient de créer.
+	//
+	// Vide, rien n'est accordé : un groupe non cloisonné se comporte comme
+	// avant.
+	TeacherTeam string
+	// TeacherPermission est le droit donné à cette équipe.
+	TeacherPermission string
 }
 
 // Executor applique un plan de génération sur une organisation.
@@ -201,6 +211,16 @@ func (e *Executor) Run(items []plan.PlannedRepo, options Options) (*Report, erro
 	return report, nil
 }
 
+// grantTeachers donne un dépôt à l'équipe enseignante du groupe, s'il y en a
+// une. Sans équipe, il n'y a rien à accorder : le groupe n'est pas cloisonné.
+func (e *Executor) grantTeachers(org, repo string, options Options) error {
+	equipe := strings.TrimSpace(options.TeacherTeam)
+	if equipe == "" {
+		return nil
+	}
+	return e.client.GrantTeamRepo(org, equipe, org, repo, options.TeacherPermission)
+}
+
 func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo string,
 	options Options) Result {
 	org := e.settings.Org
@@ -255,6 +275,15 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 		}
 		if repo.DefaultBranch != "" {
 			branch = repo.DefaultBranch
+		}
+		// Le dépôt vient de naître : l'équipe enseignante du groupe le reçoit
+		// avant tout le reste. Un échec ici n'annule pas la création — le dépôt
+		// existe —, mais il se dit : croire un groupe cloisonné alors qu'un de
+		// ses dépôts ne l'est pas est pire que de le savoir.
+		if err := e.grantTeachers(org, item.Name, options); err != nil {
+			result.Status, result.Error = Failed, fmt.Sprintf(
+				"dépôt créé mais accès de l'équipe enseignante impossible : %v", err)
+			return result
 		}
 	}
 
