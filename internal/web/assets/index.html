@@ -368,7 +368,7 @@
 
       <table class="tableau triable" id="annuaire-table">
         <thead><tr>
-          <th data-tri="nom"><button type="button">Étudiant<span class="fleche"></span></button></th>
+          <th data-tri="nom"><button type="button">Utilisateur<span class="fleche"></span></button></th>
           <th data-tri="compte"><button type="button">Compte GitHub<span class="fleche"></span></button></th>
           <th>Cours suivis</th>
           <th class="etroit">Dépôts</th>
@@ -377,6 +377,38 @@
         <tbody></tbody>
       </table>
       <div class="boite-vide" id="annuaire-vide" hidden></div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------- fiche d'un utilisateur -->
+  <!-- La seule vue centrée sur une personne : son rôle, ses comptes, et la
+       chronologie de son passage — cours suivis et cours donnés mêlés. -->
+  <section id="vue-fiche" class="vue" hidden>
+    <div class="boite">
+      <div class="boite-entete">
+        <strong id="fiche-nom"></strong>
+        <span class="jeton" id="fiche-role" hidden></span>
+        <span class="espace"></span>
+        <span class="note" id="fiche-resume"></span>
+      </div>
+      <div class="boite-corps">
+        <div class="fiche-comptes" id="fiche-comptes"></div>
+        <p class="aide" id="fiche-matricule" hidden></p>
+        <div id="fiche-avis" class="avis-pile"></div>
+      </div>
+      <div class="boite-pied" id="fiche-pied" hidden>
+        <span class="aide" id="fiche-role-aide"></span>
+        <span class="espace"></span>
+        <button type="button" id="fiche-role-bouton" class="bouton"></button>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>Son passage dans l’organisation</strong></div>
+      <div class="boite-corps">
+        <ol class="frise" id="fiche-frise"></ol>
+        <div class="boite-vide" id="fiche-vide" hidden></div>
+      </div>
     </div>
   </section>
 
@@ -756,7 +788,7 @@
       <table class="tableau triable" id="etudiants-table">
         <thead><tr>
           <th class="etroit"></th>
-          <th data-tri="nom"><button type="button">Étudiant<span class="fleche"></span></button></th>
+          <th data-tri="nom"><button type="button">Utilisateur<span class="fleche"></span></button></th>
           <th data-tri="compte"><button type="button">Compte GitHub<span class="fleche"></span></button></th>
           <th>Équipe</th>
           <th>Travaux</th>
@@ -841,6 +873,29 @@
       <div class="boite-pied">
         <span class="espace"></span>
         <button type="button" id="mig-lancer" class="bouton vert" disabled>Renommer les dépôts</button>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete">
+        <strong>Équipe enseignante</strong>
+        <span class="jeton" id="cloison-etat"></span>
+      </div>
+      <div class="boite-corps">
+        <p class="note">Elle reçoit les dépôts du groupe. Ceux qui n’en sont pas
+          ne les voient pas : c’est ce qui sépare deux enseignants d’un même cours.</p>
+        <p class="aide">Équipe GitHub <code id="cloison-nom"></code>.
+          Seul un utilisateur reconnu comme enseignant peut y être inscrit.</p>
+        <div id="cloison-choix" class="pile-cases"></div>
+        <div class="boite-vide" id="cloison-vide" hidden>
+          Aucun enseignant n’est reconnu dans cette organisation. Ouvrez la fiche
+          de quelqu’un depuis l’annuaire pour l’y reconnaître.
+        </div>
+        <div id="cloison-avis" class="avis-pile"></div>
+      </div>
+      <div class="boite-pied">
+        <span class="espace"></span>
+        <button type="button" id="cloison-appliquer" class="bouton vert">Appliquer</button>
       </div>
     </div>
 

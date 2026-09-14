@@ -173,3 +173,33 @@ func TestDepotsSansEtudiantConnuSontComptes(t *testing.T) {
 		t.Fatalf("dépôts non rattachés : %d", orphelins)
 	}
 }
+
+// Les comptes d'une personne sont ceux que tous ses groupes lui connaissent.
+// Un groupe où elle n'en a déclaré qu'un ne doit pas faire oublier le second
+// qu'un autre a retenu — sinon la moitié de son travail semble venir d'ailleurs.
+func TestLAnnuaireReunitLesComptesDeTousLesGroupes(t *testing.T) {
+	cours, inventaire := college()
+	// Le matricule réunit ses lignes ; un seul groupe connaît son autre compte.
+	for index := range cours {
+		for rang := range cours[index].Students {
+			if cours[index].Students[rang].Username == "ecote" {
+				cours[index].Students[rang].StudentID = "2100123"
+			}
+		}
+	}
+	cours[0].Students[1].Also = []string{"emilie-perso"}
+
+	for _, ligne := range users.Directory(cours, inventaire, nil) {
+		if ligne.Username != "ecote" {
+			continue
+		}
+		if len(ligne.Accounts) != 2 {
+			t.Fatalf("comptes = %v", ligne.Accounts)
+		}
+		if ligne.StudentID != "2100123" {
+			t.Errorf("matricule = %q", ligne.StudentID)
+		}
+		return
+	}
+	t.Fatal("Émilie est absente de l'annuaire")
+}

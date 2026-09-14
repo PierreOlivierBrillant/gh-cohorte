@@ -104,12 +104,30 @@ func fusionner(gauche, droite Row) Row {
 	if gauche.StudentID == "" {
 		gauche.StudentID = droite.StudentID
 	}
+	// Les comptes d'une personne sont ceux que tous ses groupes lui
+	// connaissent. Un groupe où elle n'a déclaré qu'un compte ne doit pas
+	// faire oublier le second qu'un autre a retenu.
+	for _, compte := range droite.Accounts {
+		if !holds(gauche.Accounts, compte) {
+			gauche.Accounts = append(gauche.Accounts, compte)
+		}
+	}
 	gauche.Repos = append(gauche.Repos, droite.Repos...)
 	gauche.Enrollments = append(gauche.Enrollments, droite.Enrollments...)
 	if droite.PushedAt > gauche.PushedAt {
 		gauche.PushedAt = droite.PushedAt
 	}
 	return gauche
+}
+
+// holds dit si un compte figure déjà dans une liste, casse ignorée.
+func holds(comptes []string, valeur string) bool {
+	for _, compte := range comptes {
+		if strings.EqualFold(compte, valeur) {
+			return true
+		}
+	}
+	return false
 }
 
 // enrollmentOf décrit l'inscription d'une personne à un groupe. Elle vaut même

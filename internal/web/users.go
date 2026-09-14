@@ -185,8 +185,12 @@ func (s *Server) handleUser(writer http.ResponseWriter, request *http.Request) {
 		"user": fiche, "org": org, "source": source, "notice": avis,
 		// Qui regarde décide de ce que la fiche propose : seul un enseignant
 		// coopte, et la page n'a pas à deviner la règle.
+		//
+		// Le décompte des enseignants va avec : tant que l'organisation n'en a
+		// aucun, quelqu'un doit pouvoir commencer, et une page qui cacherait le
+		// bouton ne laisserait aucun chemin pour le faire.
 		"viewer": s.deps.Viewer, "viewer_teaches": set.Teaches(s.deps.Viewer),
-		"host": s.hostName(),
+		"teachers": len(set.Teachers()), "host": s.hostName(),
 	})
 }
 
