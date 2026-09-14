@@ -379,3 +379,65 @@ func TestUnRegistreEnVersion1SeRelit(t *testing.T) {
 		t.Errorf("réécriture :\n%s", reecrit)
 	}
 }
+
+// Deux lignes pour un même compte sont une redondance du fichier, pas une
+// intention : les écarter perdait ce que la seconde disait.
+//
+// C'est ce qui faisait paraître un compte sans nom alors que « etudiants.json »
+// le portait — et, le nom manquant, plus rien ne rattachait ses dépôts à lui.
+func TestDeuxLignesPourUnMemeCompteSeReunissent(t *testing.T) {
+	set, soucis := registry.Decode([]byte(`{"version":2,"users":[
+		{"username":"1680229","added_at":"2026-08-01"},
+		{"username":"1680229","full_name":"Prénom Nom","slugs":["prenom-nom"],
+		 "is_teacher":true,"student_id":"1680229","added_at":"2026-09-01"}
+	]}`))
+
+	if nom := set.Name("1680229"); nom != "Prénom Nom" {
+		t.Errorf("Name = %q : le nom de la seconde ligne est perdu", nom)
+	}
+	if set.Len() != 1 {
+		t.Errorf("%d fiche(s), attendu 1", set.Len())
+	}
+	// Le slug de la seconde ligne rattache les dépôts déjà créés sous ce nom.
+	if personne, trouve := set.Lookup("prenom-nom"); !trouve ||
+		personne.Username != "1680229" {
+		t.Errorf("Lookup(« prenom-nom ») = %+v, %v", personne, trouve)
+	}
+	// Ni le rôle ni le matricule ne s'oublient.
+	if !set.Teaches("1680229") {
+		t.Error("le rôle déclaré sur la seconde ligne est perdu")
+	}
+	fiche, _ := set.Find("1680229")
+	if fiche.StudentID != "1680229" {
+		t.Errorf("StudentID = %q", fiche.StudentID)
+	}
+	// La plus ancienne date d'ajout l'emporte : c'est depuis elle qu'on connaît
+	// le compte.
+	if fiche.AddedAt != "2026-08-01" {
+		t.Errorf("AddedAt = %q, attendu la plus ancienne", fiche.AddedAt)
+	}
+	// La redondance se signale quand même : le fichier gagnerait à être nettoyé.
+	if len(soucis) != 1 {
+		t.Errorf("soucis = %v, attendu un seul avis", soucis)
+	}
+}
+
+// Deux noms qui se contredisent ne se tranchent pas en silence : le premier
+// reste, et le désaccord se dit. C'est à qui relit le fichier de choisir.
+func TestDeuxNomsQuiSeContredisentSeSignalent(t *testing.T) {
+	set, soucis := registry.Decode([]byte(`{"version":2,"users":[
+		{"username":"ecote","full_name":"Émilie Côté"},
+		{"username":"ECOTE","full_name":"Emilie Cote-Tremblay","slugs":["emilie-cote-tremblay"]}
+	]}`))
+	if nom := set.Name("ecote"); nom != "Émilie Côté" {
+		t.Errorf("Name = %q : le second nom a gagné", nom)
+	}
+	if len(soucis) != 1 || !strings.Contains(soucis[0], "Deux noms") {
+		t.Errorf("soucis = %v", soucis)
+	}
+	// Le slug de la seconde ligne est gardé quand même : il rattache des
+	// dépôts déjà créés, et les perdre les rendrait orphelins.
+	if _, trouve := set.Lookup("emilie-cote-tremblay"); !trouve {
+		t.Error("le slug de la ligne écartée est perdu")
+	}
+}

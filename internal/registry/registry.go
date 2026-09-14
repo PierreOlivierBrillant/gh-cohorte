@@ -695,21 +695,80 @@ func Decode(content []byte) (*Set, []string) {
 	}
 	lues := lu.entries()
 	fiches := make([]User, 0, len(lues))
-	vus := map[string]bool{}
+	position := map[string]int{}
+	doublons := 0
 	for _, fiche := range lues {
 		valide, err := fiche.validate()
 		if err != nil {
 			soucis = append(soucis, "Fiche écartée : "+err.Error())
 			continue
 		}
-		if vus[valide.Key()] {
-			soucis = append(soucis, "Fiche en double écartée : @"+valide.Username)
+		if index, deja := position[valide.Key()]; deja {
+			fusionnee, contredit := fondue(fiches[index], valide)
+			fiches[index] = fusionnee
+			if contredit {
+				soucis = append(soucis, "Deux noms pour @"+fusionnee.Username+
+					" : « "+fusionnee.FullName+" » est retenu.")
+			} else {
+				doublons++
+			}
 			continue
 		}
-		vus[valide.Key()] = true
+		position[valide.Key()] = len(fiches)
 		fiches = append(fiches, valide)
 	}
+	if doublons > 0 {
+		soucis = append(soucis, plural(doublons,
+			"%d fiche en double réunie à la sienne",
+			"%d fiches en double réunies aux leurs")+
+			" : le fichier gagnerait à être nettoyé.")
+	}
 	return newSet(fiches, nil), soucis
+}
+
+// fondue réunit deux fiches que le fichier donne pour un même compte, et dit si
+// elles se contredisent.
+//
+// Relire n'est pas apprendre. Deux lignes pour un même compte sont une
+// redondance du fichier, pas une intention : ce que l'une sait et l'autre pas
+// est gardé. Les écarter perdait ce que la seconde disait — un nom que la
+// première n'avait pas —, et le compte paraissait alors sans nom bien que le
+// fichier le porte. Pire, sans nom, plus rien ne rattachait ses dépôts à lui :
+// leur dernier niveau est le nom slugifié, et il n'y avait plus de nom à
+// slugifier.
+//
+// Deux noms qui se contredisent, en revanche, ne se tranchent pas ici : le
+// premier reste, et le désaccord se signale. Choisir au hasard serait pire que
+// de le dire — c'est aussi ce que « sansMarque » fait de deux fiches que rien
+// ne permet de confondre.
+func fondue(gardee, autre User) (User, bool) {
+	contredit := false
+	if nom := strings.TrimSpace(autre.FullName); nom != "" {
+		switch {
+		case strings.TrimSpace(gardee.FullName) == "":
+			gardee.FullName = nom
+		case !strings.EqualFold(gardee.FullName, nom):
+			contredit = true
+		}
+	}
+	// Le matricule se comble sans jamais s'écraser : c'est la seule chose qui
+	// identifie vraiment quelqu'un.
+	if matricule := strings.TrimSpace(autre.StudentID); matricule != "" &&
+		strings.TrimSpace(gardee.StudentID) == "" {
+		gardee.StudentID = matricule
+	}
+	// Les slugs s'additionnent : chacun rattache des dépôts déjà créés, et en
+	// perdre un les rendrait orphelins.
+	gardee.Slugs = cleanSlugs(append(append([]string(nil), gardee.Slugs...), autre.Slugs...))
+	// Le rôle ne s'oublie pas : un enseignant déclaré sur l'une des deux lignes
+	// le reste.
+	gardee.IsTeacher = gardee.IsTeacher || autre.IsTeacher
+	// La plus ancienne date d'ajout l'emporte : c'est celle qui dit depuis
+	// quand ce compte est connu.
+	if autre.AddedAt != "" && (gardee.AddedAt == "" || autre.AddedAt < gardee.AddedAt) {
+		gardee.AddedAt = autre.AddedAt
+	}
+	return gardee, contredit
 }
 
 // Readme explique le dépôt à qui l'ouvre sur github.com sans savoir ce que
