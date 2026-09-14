@@ -17,6 +17,8 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/preload"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
@@ -64,6 +66,9 @@ type manageSession struct {
 	// redemander à chaque fois.
 	equipes     []teams.Team
 	equipesLues bool
+	// prechargement va chercher d'avance les historiques et les accès des
+	// cours de la session la plus récente, pendant qu'on navigue dans le menu.
+	prechargement *preload.Warmer
 }
 
 func newManageSession(session *Session, initialPrefix string) *manageSession {
@@ -75,7 +80,25 @@ func newManageSession(session *Session, initialPrefix string) *manageSession {
 		sortKey:       session.Options.Sort,
 		sortDesc:      session.Options.SortDesc,
 		resolver:      identity.New(session.Client, session.Cache, session.Options.Jobs),
+		prechargement: preload.New(),
 	}
+}
+
+// precharger prépare en arrière-plan les deux lectures chères — les historiques
+// et les accès — pour les dépôts des cours de la session la plus récente.
+// L'assistant y passera : autant qu'elles soient déjà lues quand il y arrive.
+//
+// Sans mémoire, il n'y a rien à préparer : « --no-cache » demande précisément
+// que tout soit redemandé au moment où on le regarde.
+func (m *manageSession) precharger() {
+	if m.session.Cache == nil || !m.session.Cache.Enabled {
+		return
+	}
+	// Le registre n'entre pas ici : le préchargement ne s'intéresse qu'aux
+	// dépôts, et les noms lui coûteraient une lecture pour rien.
+	visibles := m.session.groupStore().Visible(m.org, m.repos,
+		classroom.DefaultsFrom(m.session.Settings), registry.Empty())
+	m.prechargement.Warm(m.resolver, m.org, visibles, m.repos)
 }
 
 // forget oublie l'inventaire retenu en mémoire, après une purge du cache.
@@ -662,52 +685,52 @@ func (m *manageSession) askStarter() error {
 	return nil
 }
 
-// accessOf renvoie les collaborateurs directs et les invitations en attente.
-func (m *manageSession) accessOf(repo groups.Repo) ([]string, []ghapi.Invitation, error) {
-	collaborators, err := m.session.Client.ListCollaborators(m.org, repo.Name)
-	if err != nil {
-		return nil, nil, err
-	}
-	logins := make([]string, 0, len(collaborators))
-	for _, item := range collaborators {
-		logins = append(logins, item.Login)
-	}
-	invitations, err := m.session.Client.ListInvitations(m.org, repo.Name)
-	if err != nil {
-		return nil, nil, err
-	}
-	return logins, invitations, nil
+// accessOf relève les accès d'un dépôt. Un panneau ouvert sur un dépôt précis
+// relit toujours : c'est là qu'on vient vérifier ce qu'on vient de changer.
+func (m *manageSession) accessOf(repo groups.Repo) (identity.Access, error) {
+	return m.resolver.AccessOf(m.org, repo.Name, identity.Refresh)
 }
 
-// showAccess affiche les accès de tous les dépôts du groupe.
+// showAccess affiche les accès de tous les dépôts du groupe. C'est deux
+// requêtes par dépôt : le geste est explicite, il relit tout, et son résultat
+// est mémorisé — l'interface web montre ensuite la même chose sans rien
+// redemander.
 func (m *manageSession) showAccess(group *groups.Group) error {
 	console := m.session.Console
 	console.Heading("Accès des dépôts de « " + group.Prefix + " »")
-	progress := ui.NewProgress(console, "Dépôts", group.Len())
+	noms := make([]string, 0, group.Len())
+	for _, repo := range group.Repos {
+		noms = append(noms, repo.Name)
+	}
 
-	rows := make([][]string, 0, group.Len())
-	for index, repo := range group.Repos {
-		collaborators, invitations, err := m.accessOf(repo)
-		progress.Update(index+1, repo.Name)
-		if err != nil {
-			progress.Clear()
-			console.Warning("Lecture interrompue : %v", err)
-			return nil
+	progress := ui.NewProgress(console, "Dépôts", group.Len())
+	lus := m.resolver.Accesses(m.org, noms, identity.Refresh,
+		func(done, _ int, repo string) { progress.Update(done, repo) })
+	progress.Finish("")
+
+	rows := make([][]string, 0, len(noms))
+	for _, nom := range noms {
+		acces, inspecte := lus[nom]
+		if !inspecte {
+			continue
 		}
-		pending := make([]string, 0, len(invitations))
-		for _, item := range invitations {
-			if item.Invitee.Login != "" {
-				pending = append(pending, item.Invitee.Login+" (invité)")
-			}
+		pending := make([]string, 0, len(acces.Invitations))
+		for _, invitation := range acces.Invitations {
+			pending = append(pending, invitation.Login+" (invité)")
 		}
 		rows = append(rows, []string{
-			repo.Name,
-			orDim(console, strings.Join(collaborators, ", "), "aucun"),
+			nom,
+			orDim(console, strings.Join(acces.Collaborators, ", "), "aucun"),
 			orDim(console, strings.Join(pending, ", "), "—"),
 		})
 	}
-	progress.Finish("")
-	console.Success("%d dépôt(s) inspecté(s).", group.Len())
+	// Un dépôt illisible — un jeton sans droit dessus — n'est pas inspecté. Le
+	// taire ferait croire que personne n'y a accès.
+	if manquants := len(noms) - len(rows); manquants > 0 {
+		console.Warning("%d dépôt(s) n'ont pas pu être lus : leurs accès restent inconnus.",
+			manquants)
+	}
+	console.Success("%d dépôt(s) inspecté(s).", len(rows))
 	console.Table([]string{"Dépôt", "Collaborateurs", "En attente"}, rows, 40)
 	return nil
 }
@@ -722,27 +745,26 @@ func (m *manageSession) manageCollaborators(group *groups.Group) error {
 
 	for {
 		console.Heading("Accès de « " + repo.Name + " »")
-		var collaborators []string
-		var invitations []ghapi.Invitation
+		var acces identity.Access
 		var err error
 		ui.Await(console, "Lecture des accès de "+repo.Name+"…", func() {
-			collaborators, invitations, err = m.accessOf(*repo)
+			acces, err = m.accessOf(*repo)
 		})
 		if err != nil {
 			console.Failure("%v", err)
 			return nil
 		}
-		if len(collaborators) > 0 {
-			coloured := make([]string, 0, len(collaborators))
-			for _, login := range collaborators {
+		if len(acces.Collaborators) > 0 {
+			coloured := make([]string, 0, len(acces.Collaborators))
+			for _, login := range acces.Collaborators {
 				coloured = append(coloured, console.OK(login))
 			}
 			console.Print("  Collaborateurs : " + strings.Join(coloured, ", "))
 		} else {
 			console.Note("Aucun collaborateur direct.")
 		}
-		for _, item := range invitations {
-			console.Note("Invitation en attente : @%s", item.Invitee.Login)
+		for _, invitation := range acces.Invitations {
+			console.Note("Invitation en attente : @%s", invitation.Login)
 		}
 
 		action, err := m.session.Prompt.Choose("Action", ui.Options(
@@ -761,7 +783,7 @@ func (m *manageSession) manageCollaborators(group *groups.Group) error {
 				return err
 			}
 		default:
-			if err := m.removeCollaborator(*repo, collaborators, invitations); err != nil {
+			if err := m.removeCollaborator(*repo, acces); err != nil {
 				return err
 			}
 		}
@@ -805,6 +827,9 @@ func (m *manageSession) addCollaborator(repo groups.Repo) error {
 		console.Failure("Invitation impossible : %v", err)
 		return nil
 	}
+	// Ce qu'on savait des accès de ce dépôt vient de devenir faux.
+	m.resolver.ForgetAccess(m.org, repo.Name)
+
 	label := "accès accordé"
 	if state == ghapi.CollaboratorInvited {
 		label = "invitation envoyée"
@@ -813,20 +838,16 @@ func (m *manageSession) addCollaborator(repo groups.Repo) error {
 	return nil
 }
 
-func (m *manageSession) removeCollaborator(repo groups.Repo, collaborators []string,
-	invitations []ghapi.Invitation) error {
+func (m *manageSession) removeCollaborator(repo groups.Repo, acces identity.Access) error {
 	console := m.session.Console
-	options := make([]ui.Option, 0, len(collaborators)+len(invitations)+1)
-	for _, login := range collaborators {
+	options := make([]ui.Option, 0, len(acces.Collaborators)+len(acces.Invitations)+1)
+	for _, login := range acces.Collaborators {
 		options = append(options, ui.Option{Value: "collaborateur:" + login, Label: login + " — collaborateur"})
 	}
-	for _, item := range invitations {
-		if item.Invitee.Login == "" {
-			continue
-		}
+	for _, invitation := range acces.Invitations {
 		options = append(options, ui.Option{
-			Value: "invitation:" + strconv.FormatInt(item.ID, 10),
-			Label: item.Invitee.Login + " — invitation en attente",
+			Value: "invitation:" + strconv.FormatInt(invitation.ID, 10),
+			Label: invitation.Login + " — invitation en attente",
 		})
 	}
 	if len(options) == 0 {
@@ -850,6 +871,7 @@ func (m *manageSession) removeCollaborator(repo groups.Repo, collaborators []str
 			console.Failure("%v", err)
 			return nil
 		}
+		m.resolver.ForgetAccess(m.org, repo.Name)
 		console.Success("Invitation annulée.")
 		return nil
 	}
@@ -864,6 +886,7 @@ func (m *manageSession) removeCollaborator(repo groups.Repo, collaborators []str
 		console.Failure("%v", err)
 		return nil
 	}
+	m.resolver.ForgetAccess(m.org, repo.Name)
 	console.Success("@%s n'a plus accès à « %s ».", login, repo.Name)
 	return nil
 }
@@ -1380,6 +1403,9 @@ func shortAssignmentName(prefix string) string {
 
 // run enchaîne les actions de gestion jusqu'à la sortie.
 func (m *manageSession) run() (int, error) {
+	// Ce qui se préparait en arrière-plan n'a plus personne à servir.
+	defer m.prechargement.Stop()
+
 	for {
 		group, err := m.chooseGroup()
 		if err != nil {
@@ -1428,6 +1454,10 @@ func (m *manageSession) run() (int, error) {
 			}
 			return ExitOK, nil
 		}
+
+		// Passé les drapeaux qui font une chose et s'en vont, l'assistant reste
+		// ouvert : ce qu'on va y regarder se prépare pendant qu'on choisit.
+		m.precharger()
 
 		showList := true
 		for {

@@ -26,6 +26,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/preload"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
@@ -64,12 +65,15 @@ type Server struct {
 	deps       Deps
 	jobs       *Jobs
 	classrooms *classroom.Store
-	listener   net.Listener
-	token      string
-	port       string
-	handler    http.Handler
-	stop       chan struct{}
-	stopOnce   sync.Once
+	// warmer prépare d'avance les lectures chères des cours de la session la
+	// plus récente : l'écran qu'on ouvre les montre alors sans attendre.
+	warmer   *preload.Warmer
+	listener net.Listener
+	token    string
+	port     string
+	handler  http.Handler
+	stop     chan struct{}
+	stopOnce sync.Once
 
 	mutex      sync.Mutex
 	settings   config.Settings
@@ -102,6 +106,7 @@ func New(deps Deps) (*Server, error) {
 	server := &Server{
 		deps:       deps,
 		jobs:       NewJobs(),
+		warmer:     preload.New(),
 		listener:   listener,
 		token:      token,
 		port:       port,
@@ -161,6 +166,9 @@ func (s *Server) Serve(lifetime context.Context) error {
 	case <-lifetime.Done():
 	case <-s.stop:
 	}
+
+	// Ce qui se préparait en arrière-plan n'a plus personne à servir.
+	s.warmer.Stop()
 
 	// Les flux d'événements restent ouverts : la fermeture est bornée.
 	shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Second)

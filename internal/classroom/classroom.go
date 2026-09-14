@@ -174,6 +174,31 @@ func SessionsOf(shorts []string) []Session {
 	return sessions
 }
 
+// LatestSession ne garde, parmi des groupes, que ceux de la session la plus
+// récente : tous les cours de cette session-là, et rien des précédentes. La
+// règle est celle de « SessionsOf » — ce qui tombe sous les yeux en premier est
+// aussi ce qu'on prépare d'avance.
+//
+// Les sessions passées ne bougent plus : leurs dépôts ne recevront plus rien,
+// et leurs accès ne changeront plus.
+func LatestSession(items []Classroom) []Classroom {
+	courts := make([]string, 0, len(items))
+	for _, item := range items {
+		courts = append(courts, item.Session)
+	}
+	sessions := SessionsOf(courts)
+	if len(sessions) == 0 {
+		return nil
+	}
+	gardes := make([]Classroom, 0, len(items))
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.Session), sessions[0].Short) {
+			gardes = append(gardes, item)
+		}
+	}
+	return gardes
+}
+
 // Scope désigne ce que le groupe couvre : son préfixe dans les noms de dépôts.
 func (c Classroom) Scope() string {
 	return naming.Prefix(c.Session, c.Course, c.Group)

@@ -631,3 +631,39 @@ func TestPersonnesDeTousLesGroupes(t *testing.T) {
 		}
 	}
 }
+
+func TestLatestSessionGardeTousLesCoursDeLaSessionLaPlusRecente(t *testing.T) {
+	gardes := classroom.LatestSession([]classroom.Classroom{
+		groupe("a26", "5n6", "01", cohorte),
+		groupe("h27", "5n6", "01", cohorte),
+		groupe("h27", "4w6", "02", cohorte),
+		groupe("e26", "5n6", "01", cohorte),
+	})
+	places := make([]string, 0, len(gardes))
+	for _, cours := range gardes {
+		places = append(places, cours.Scope())
+	}
+	// Tous les cours de l'hiver 2027, et rien des sessions précédentes.
+	if strings.Join(places, " ") != "h27.5n6.01 h27.4w6.02" {
+		t.Fatalf("places = %v", places)
+	}
+}
+
+func TestLatestSessionSansGroupeNeGardeRien(t *testing.T) {
+	if gardes := classroom.LatestSession(nil); len(gardes) != 0 {
+		t.Fatalf("gardes = %+v", gardes)
+	}
+}
+
+// Un nom court qui ne suit pas la convention n'a pas de place dans la suite des
+// sessions : il passe après celles qui la suivent, et ne peut pas se faire
+// passer pour la plus récente.
+func TestLatestSessionIgnoreUnNomHorsConvention(t *testing.T) {
+	gardes := classroom.LatestSession([]classroom.Classroom{
+		groupe("session2026", "5n6", "01", cohorte),
+		groupe("a26", "5n6", "01", cohorte),
+	})
+	if len(gardes) != 1 || gardes[0].Session != "a26" {
+		t.Fatalf("gardes = %+v", gardes)
+	}
+}

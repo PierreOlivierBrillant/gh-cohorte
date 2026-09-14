@@ -161,8 +161,12 @@ func (r *Resolver) crewOf(org, repo string) Crew {
 			}
 		}
 	}
-	for _, login := range r.accessOf(org, repo) {
-		ajouter(login, FromAccess, "")
+	// Un dépôt dont les accès ne se lisent pas garde ses deux autres sources :
+	// les équipes et les commits disent déjà qui s'y trouve.
+	if acces, err := r.accessOf(org, repo); err == nil {
+		for _, login := range acces.Logins() {
+			ajouter(login, FromAccess, "")
+		}
 	}
 	if auteurs, err := r.client.ListContributors(org, repo); err == nil {
 		for _, login := range auteurs {

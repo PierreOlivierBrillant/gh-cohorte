@@ -1464,6 +1464,13 @@ async function chargerTravail(travail, force, toutCocher) {
     // n'est déclarée nulle part, et la fiche du groupe peut être plus vieille.
     kind: detail.kind || travail.kind,
   };
+  // Le serveur verse ce qu'il sait déjà des accès : ceux qu'un préchargement a
+  // lus, et ceux qu'une inspection précédente a mémorisés. La colonne est
+  // remplie avant qu'on ait cliqué, et « Inspecter les accès » ne sert plus
+  // qu'à aller voir maintenant.
+  for (const repo of detail.repos) {
+    if (repo.access) etat.acces.set(repo.name, repo.access);
+  }
   // Une sélection ne survit pas à ce que le filtre écarte : on agit sur ce
   // qu'on voit, et rien d'autre.
   const visibles = new Set(detail.repos.map((repo) => repo.name));
@@ -1765,9 +1772,11 @@ function pourChampDate(due) {
 
 $('detail-acces').addEventListener('click', async () => {
   menuTravail.deplier(false);
+  // « refresh » comme pour les remises : la colonne montre déjà ce qu'on savait,
+  // et venir ici veut dire qu'on veut l'état d'aujourd'hui.
   const fiche = await tenter(() => api('POST',
-    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/${encode(etat.travail.name)}/access`),
-    'Accès');
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/` +
+    `${encode(etat.travail.name)}/access?refresh=1`), 'Accès');
   if (!fiche) return;
   const resultats = await suivre(fiche);
   if (!Array.isArray(resultats)) return;
