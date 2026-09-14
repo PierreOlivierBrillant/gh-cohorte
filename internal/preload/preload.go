@@ -20,6 +20,7 @@ package preload
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
@@ -31,6 +32,13 @@ import (
 // qui a été lu est mémorisé au fur et à mesure — un préchargement interrompu
 // laisse la moitié de l'écran prête plutôt que rien.
 const Batch = 20
+
+// Arret borne l'attente d'un préchargement qu'on abandonne. Le lot en cours ne
+// s'interrompt pas — on ne rappelle pas une requête déjà partie —, mais on lui
+// laisse le temps de poser ce qu'il a lu plutôt que d'écrire dans le dos de qui
+// vient de quitter. Passé ce délai on s'en va quand même : l'écriture du cache
+// est atomique, et une requête qui n'arrive pas ne doit pas retenir la sortie.
+const Arret = 2 * time.Second
 
 // Reader est ce qu'un préchargement lit. Le résolveur de « identity » le fait
 // déjà ; l'interface n'est là que pour que les tests puissent l'observer.
@@ -64,9 +72,12 @@ func Repos(cours []classroom.Classroom, repos []groups.RepoInfo) []string {
 // organisation, lancé une seule fois, abandonné dès qu'on quitte.
 type Warmer struct {
 	arret chan struct{}
-	once  sync.Once
 
+	// Le drapeau d'arrêt et le compteur sont pris sous le même verrou : sans
+	// cela, un préchargement pourrait s'annoncer juste après qu'on ait cessé
+	// de les attendre.
 	mutex  sync.Mutex
+	arrete bool
 	lances map[string]bool
 	fini   sync.WaitGroup
 }
@@ -85,7 +96,7 @@ func New() *Warmer {
 // de rien, puisque le geste explicite qu'il devait épargner reste là.
 func (w *Warmer) Warm(reader Reader, org string, cours []classroom.Classroom,
 	repos []groups.RepoInfo) {
-	if reader == nil || strings.TrimSpace(org) == "" || w.Stopped() {
+	if reader == nil || strings.TrimSpace(org) == "" {
 		return
 	}
 	noms := Repos(cours, repos)
@@ -94,7 +105,7 @@ func (w *Warmer) Warm(reader Reader, org string, cours []classroom.Classroom,
 	}
 
 	w.mutex.Lock()
-	if w.lances[strings.ToLower(org)] {
+	if w.arrete || w.lances[strings.ToLower(org)] {
 		w.mutex.Unlock()
 		return
 	}
@@ -125,9 +136,26 @@ func (w *Warmer) lire(reader Reader, org string, noms []string) {
 	}
 }
 
-// Stop abandonne les préchargements en cours. Il ne les attend pas : ce qu'ils
-// avaient lu est déjà mémorisé, et le reste ne manquera à personne.
-func (w *Warmer) Stop() { w.once.Do(func() { close(w.arret) }) }
+// Stop abandonne les préchargements en cours : les lots qui restent ne partent
+// pas, et celui qui est en route a « Arret » pour se poser.
+func (w *Warmer) Stop() {
+	w.mutex.Lock()
+	if !w.arrete {
+		w.arrete = true
+		close(w.arret)
+	}
+	w.mutex.Unlock()
+
+	fini := make(chan struct{})
+	go func() {
+		defer close(fini)
+		w.fini.Wait()
+	}()
+	select {
+	case <-fini:
+	case <-time.After(Arret):
+	}
+}
 
 // Stopped dit qu'un arrêt a été demandé.
 func (w *Warmer) Stopped() bool {
@@ -139,8 +167,9 @@ func (w *Warmer) Stopped() bool {
 	}
 }
 
-// Wait attend la fin des préchargements lancés. Les tests en ont besoin ; les
-// interfaces, non — c'est un travail qu'on oublie.
+// Wait attend la fin des préchargements lancés, sans borne. Les tests en ont
+// besoin ; les interfaces, non — elles passent par « Stop », qui ne retient pas
+// indéfiniment qui s'en va.
 func (w *Warmer) Wait() { w.fini.Wait() }
 
 // lots découpe une liste de dépôts en tranches de taille bornée.

@@ -1,6 +1,7 @@
 package preload_test
 
 import (
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -14,12 +15,14 @@ import (
 // lecteur joue le résolveur : il note ce qu'on lui demande, sans rien lire.
 type lecteur struct {
 	mutex sync.Mutex
-	// avant est refermé au premier lot, apres attendu avant de le rendre :
-	// c'est ce qui permet d'arrêter un préchargement en plein travail.
-	avant, apres chan struct{}
-	remises      []string
-	acces        []string
-	lots         int
+	// avant s'ouvre quand le premier lot est parti, et celui-ci ne rend la
+	// main qu'une fois « retenir » arrêté : c'est ce qui permet d'observer un
+	// préchargement coupé en plein travail.
+	avant   chan struct{}
+	retenir *preload.Warmer
+	remises []string
+	acces   []string
+	lots    int
 }
 
 func (l *lecteur) Handins(_ string, repos []string, jusqua identity.Reading,
@@ -47,9 +50,13 @@ func (l *lecteur) note(cible *[]string, repos []string, jusqua identity.Reading)
 	premier := l.lots == 1
 	l.mutex.Unlock()
 
-	if premier && l.avant != nil {
+	// Le premier lot ne rend la main qu'une fois l'arrêt demandé : c'est
+	// l'instant précis où le suivant doit renoncer à partir.
+	if premier && l.retenir != nil {
 		close(l.avant)
-		<-l.apres
+		for !l.retenir.Stopped() {
+			runtime.Gosched()
+		}
 	}
 }
 
@@ -135,10 +142,11 @@ func TestWarmNeFaitRienSansDepotDansLaSession(t *testing.T) {
 }
 
 // Un arrêt demandé est pris entre deux lots : ce qui avait été lu est mémorisé,
-// et le reste ne part pas.
+// et le reste ne part pas. « Stop » attend le lot en route, sans quoi il
+// écrirait dans le dos de qui vient de quitter.
 func TestStopAbandonneLesLotsQuiRestent(t *testing.T) {
-	journal := &lecteur{avant: make(chan struct{}), apres: make(chan struct{})}
 	chauffage := preload.New()
+	journal := &lecteur{avant: make(chan struct{}), retenir: chauffage}
 
 	noms := make([]string, 0, preload.Batch+1)
 	for index := 0; index <= preload.Batch; index++ {
@@ -148,10 +156,9 @@ func TestStopAbandonneLesLotsQuiRestent(t *testing.T) {
 	chauffage.Warm(journal, "acme", []classroom.Classroom{cours("a26", "5n6", "01")},
 		depots(noms...))
 
+	// Le premier lot est parti : c'est en plein travail qu'on abandonne.
 	<-journal.avant
 	chauffage.Stop()
-	close(journal.apres)
-	chauffage.Wait()
 
 	journal.mutex.Lock()
 	lots := journal.lots
