@@ -49,7 +49,8 @@ func college() ([]classroom.Classroom, []groups.RepoInfo) {
 }
 
 func annuaire() []students.Row {
-	return students.Directory(college())
+	cours, inventaire := college()
+	return students.Directory(cours, inventaire, nil)
 }
 
 func TestAnnuaireFondUnePersonneVueParPlusieursGroupes(t *testing.T) {
@@ -97,7 +98,7 @@ func TestAnnuaireRecupereUnNomCompletConnuAilleurs(t *testing.T) {
 	cours, inventaire := college()
 	cours[0].Students = append(cours[0].Students,
 		roster.Person{FullName: "Aminata Diallo", Username: "aminata-d"})
-	for _, ligne := range students.Directory(cours, inventaire) {
+	for _, ligne := range students.Directory(cours, inventaire, nil) {
 		if ligne.Username == "aminata-d" && ligne.FullName != "Aminata Diallo" {
 			t.Fatalf("nom complet d'Aminata : %q", ligne.FullName)
 		}
@@ -136,7 +137,7 @@ func TestUneInscriptionSansDepotCompte(t *testing.T) {
 	cours, inventaire := college()
 	cours[1].Students = append(cours[1].Students,
 		roster.Person{FullName: "Jean-Luc Picard", Username: "jlpicard"})
-	lignes := students.Directory(cours, inventaire)
+	lignes := students.Directory(cours, inventaire, nil)
 	retenues := students.Apply(lignes,
 		students.Filter{Session: "a26", Course: "4w6"}, students.ByName, false)
 	if comptes(retenues) != "ecote,jlpicard" {
@@ -168,7 +169,7 @@ func TestSessionsEtCoursDeLAnnuaire(t *testing.T) {
 // l'annuaire — mais il ne disparaît pas non plus.
 func TestDepotsSansEtudiantConnuSontComptes(t *testing.T) {
 	cours, inventaire := college()
-	if orphelins := students.Unmatched(cours, inventaire); orphelins != 1 {
+	if orphelins := students.Unmatched(cours, inventaire, nil); orphelins != 1 {
 		t.Fatalf("dépôts non rattachés : %d", orphelins)
 	}
 }

@@ -77,9 +77,15 @@ type State struct {
 	Repos                 map[string]*RepoState
 	Templates             map[string]bool
 
-	// Équipes par organisation, et droit qu'elles ont sur chaque dépôt.
-	Teams     map[string][]string          // organisation → équipes
-	TeamRepos map[string]map[string]string // « org/équipe » → dépôt → droit
+	// Équipes par « organisation/slug », et droit qu'elles ont sur chaque dépôt.
+	Teams        map[string]*TeamState
+	TeamRepos    map[string]map[string]string // « org/équipe » → dépôt → droit
+	DeletedTeams []string
+	// Contributors dit qui a écrit dans un dépôt : « org/depot » → comptes.
+	Contributors map[string][]string
+	// OutsideOrg nomme les comptes qui ne sont pas membres de l'organisation :
+	// les inscrire dans une équipe les invite plutôt que de les y mettre.
+	OutsideOrg map[string]bool
 
 	Collaborators map[string]map[string]string // dépôt → compte → droit
 	Invitations   map[string][]invitation
@@ -132,10 +138,15 @@ func NewState() *State {
 			"aminata-d":   "", // profil sans nom complet
 			"prof":        "Professeure",
 		},
-		Repos:          map[string]*RepoState{},
-		Templates:      map[string]bool{"acme/modele-tp": true},
-		Teams:          map[string][]string{"acme": {"enseignants", "direction"}},
+		Repos:     map[string]*RepoState{},
+		Templates: map[string]bool{"acme/modele-tp": true},
+		Teams: map[string]*TeamState{
+			"acme/enseignants": newTeam("acme", "enseignants"),
+			"acme/direction":   newTeam("acme", "direction"),
+		},
 		TeamRepos:      map[string]map[string]string{},
+		Contributors:   map[string][]string{},
+		OutsideOrg:     map[string]bool{},
 		Collaborators:  map[string]map[string]string{},
 		Invitations:    map[string][]invitation{},
 		Blobs:          map[string][]byte{},
@@ -442,12 +453,7 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 			s.notFound(writer)
 			return
 		}
-		payload := make([]map[string]any, 0)
-		for _, nom := range state.Teams[match[1]] {
-			payload = append(payload, map[string]any{
-				"name": nom, "slug": nom, "privacy": "closed"})
-		}
-		s.send(writer, 200, payload)
+		s.sendPaged(writer, request, state.teamsOfLocked(match[1]))
 		return
 	}
 	if match := orgReposRe.FindStringSubmatch(path); match != nil {
@@ -589,6 +595,9 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		s.send(writer, 200, s.repoPayload(repo))
 		return
 	}
+	if s.teamsGet(writer, path) {
+		return
+	}
 	s.notFound(writer)
 }
 
@@ -603,12 +612,10 @@ func (s *Server) post(writer http.ResponseWriter, request *http.Request, path st
 			s.notFound(writer)
 			return
 		}
-		payload := make([]map[string]any, 0)
-		for _, nom := range state.Teams[match[1]] {
-			payload = append(payload, map[string]any{
-				"name": nom, "slug": nom, "privacy": "closed"})
+		if s.teamsPost(writer, path, body) {
+			return
 		}
-		s.send(writer, 200, payload)
+		s.notFound(writer)
 		return
 	}
 	if match := orgReposRe.FindStringSubmatch(path); match != nil {
@@ -785,14 +792,7 @@ func (s *Server) put(writer http.ResponseWriter, request *http.Request, path str
 	}
 	if match := teamRepoRe.FindStringSubmatch(path); match != nil {
 		org, equipe, depot := match[1], match[2], match[3]+"/"+match[4]
-		connue := false
-		for _, nom := range state.Teams[org] {
-			if nom == equipe {
-				connue = true
-				break
-			}
-		}
-		if !connue {
+		if _, connue := state.Teams[org+"/"+equipe]; !connue {
 			s.notFound(writer)
 			return
 		}
@@ -847,6 +847,9 @@ func (s *Server) put(writer http.ResponseWriter, request *http.Request, path str
 			"id":      item.ID,
 			"invitee": map[string]any{"login": login},
 		})
+		return
+	}
+	if s.teamsPut(writer, path, body) {
 		return
 	}
 	s.notFound(writer)
@@ -913,6 +916,9 @@ func (s *Server) patch(writer http.ResponseWriter, request *http.Request, path s
 		s.send(writer, 200, s.repoPayload(repo))
 		return
 	}
+	if s.teamsPatch(writer, path, body) {
+		return
+	}
 	s.notFound(writer)
 }
 
@@ -951,6 +957,9 @@ func (s *Server) delete(writer http.ResponseWriter, request *http.Request, path 
 		writer.WriteHeader(204)
 		return
 	}
+	if s.teamsDelete(writer, path) {
+		return
+	}
 	s.notFound(writer)
 }
 
@@ -979,6 +988,16 @@ func (s *Server) repoPayload(repo *RepoState) map[string]any {
 
 // sendPage renvoie une page de dépôts avec l'en-tête Link attendu par le client.
 func (s *Server) sendPage(writer http.ResponseWriter, request *http.Request, repos []*RepoState) {
+	payload := make([]map[string]any, 0, len(repos))
+	for _, repo := range repos {
+		payload = append(payload, s.repoPayload(repo))
+	}
+	s.sendPaged(writer, request, payload)
+}
+
+// sendPaged découpe une collection quelconque en pages et pose l'en-tête Link.
+func (s *Server) sendPaged(writer http.ResponseWriter, request *http.Request,
+	items []map[string]any) {
 	perPage := s.State.PerPage
 	if perPage <= 0 {
 		perPage, _ = strconv.Atoi(request.URL.Query().Get("per_page"))
@@ -992,29 +1011,25 @@ func (s *Server) sendPage(writer http.ResponseWriter, request *http.Request, rep
 	}
 	start := (page - 1) * perPage
 	end := start + perPage
-	if start > len(repos) {
-		start = len(repos)
+	if start > len(items) {
+		start = len(items)
 	}
-	if end > len(repos) {
-		end = len(repos)
-	}
-	payload := make([]map[string]any, 0, end-start)
-	for _, repo := range repos[start:end] {
-		payload = append(payload, s.repoPayload(repo))
+	if end > len(items) {
+		end = len(items)
 	}
 	// GitHub annonce à la fois la page suivante et la dernière ; c'est cette
 	// dernière qui permet au client de charger les pages de front. Les omettre
 	// laisserait le parcours parallèle hors des tests.
-	if end < len(repos) {
+	if end < len(items) {
 		liens := []string{fmt.Sprintf("<%s>; rel=\"next\"", s.pageURL(request, page+1, perPage))}
 		if !s.State.NoLastLink {
-			dernier := (len(repos) + perPage - 1) / perPage
+			dernier := (len(items) + perPage - 1) / perPage
 			liens = append(liens,
 				fmt.Sprintf("<%s>; rel=\"last\"", s.pageURL(request, dernier, perPage)))
 		}
 		writer.Header().Set("Link", strings.Join(liens, ", "))
 	}
-	s.send(writer, 200, payload)
+	s.send(writer, 200, items[start:end])
 }
 
 // sendHistory rend une page de commits, du plus récent au plus ancien, avec le

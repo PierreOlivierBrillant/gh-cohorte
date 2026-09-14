@@ -36,9 +36,10 @@ gh extension upgrade cohorte
 - **`gh` authentifié** (`gh auth login`) : l'extension reprend son jeton, son
   hôte et ses limites de débit.
 - **Portées** : `repo` pour créer les dépôts et inviter les personnes,
-  `read:org` pour lister vos organisations. À la demande : `delete_repo` pour
-  supprimer un dépôt, `workflow` pour déposer des fichiers dans
-  `.github/workflows` (`gh auth refresh -s delete_repo,workflow`).
+  `read:org` pour lister vos organisations. À la demande : `admin:org` pour les
+  travaux d'équipe, `delete_repo` pour supprimer un dépôt, `workflow` pour
+  déposer des fichiers dans `.github/workflows`
+  (`gh auth refresh -s admin:org,delete_repo,workflow`).
 - **`git`**, uniquement pour cloner et mettre à jour des clones.
 
 Le droit de créer des dépôts dans l'organisation visée est requis ; un rôle
@@ -117,9 +118,14 @@ reprennent d'un bloc : l'outil lit les travaux que leurs préfixes dessinent,
 rapproche les comptes des étudiants de la liste, puis renomme vers la
 nomenclature. GitHub garde une redirection depuis chaque ancien nom.
 
+Un travail fait en équipe se reprend de même, en disant que ce qui suit le
+préfixe nomme une équipe et non une personne : il n'y a alors aucune liste à
+rapprocher, les membres venant des accès au dépôt.
+
 ```bash
 gh cohorte --import                                    # lister les travaux repérés
 gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+gh cohorte --import projet --teams --into a26.5n6.1030  # travail d'équipe
 ```
 
 ## Nommage des dépôts
@@ -136,10 +142,21 @@ non alphanumérique par un tiret, si bien qu'un nom venu d'un CSV en est nettoy�
 (« J.-P. Tremblay » devient `j-p-tremblay`) et qu'un compte GitHub n'en contient
 jamais. Un nom se relit donc sans rien deviner.
 
-Le dernier niveau est le **nom de l'étudiant**, pas son compte GitHub : un dépôt
-se lit sans connaître le pseudonyme de personne. En contrepartie, le nom complet
+Le dernier niveau nomme le **destinataire** du dépôt. Pour un travail
+individuel, c'est le **nom de l'étudiant**, pas son compte GitHub : un dépôt se
+lit sans connaître le pseudonyme de personne. En contrepartie, le nom complet
 est obligatoire et deux homonymes font échouer la préparation avant toute
-écriture.
+écriture — à moins que le matricule ne dise qu'il s'agit de la même personne
+sous deux comptes. C'est lui, et lui seul, qui identifie quelqu'un : le nom ne
+distingue pas deux homonymes, et rien ne rapproche deux comptes d'une même
+personne.
+
+Pour un travail d'équipe, c'est le nom de l'**équipe** — `a26.5n6.01.projet.eq1`.
+Une équipe est une vraie équipe d'organisation GitHub, et son nom porte lui
+aussi la place du groupe (`a26.5n6.01.eq1`) : une organisation n'accepte qu'un
+nom d'équipe donné, et sans cette place deux groupes ne pourraient pas avoir
+chacun leur « eq1 ». Un travail est donc d'équipe ou individuel selon ce que son
+dernier niveau nomme, et rien n'est déclaré ailleurs.
 
 **GitHub reste la seule source de vérité.** Sessions, cours, groupes et travaux
 se lisent dans le nom des dépôts : un groupe n'a rien à déclarer pour exister.
@@ -177,15 +194,20 @@ déjà distribués continuent de fonctionner.
   `--pushed-before`, `--never-pushed`, `--sort`).
 - **Déplacer un travail ou des étudiants** d'un groupe à l'autre : leurs dépôts
   sont renommés, puisque c'est leur nom qui dit à quel groupe ils appartiennent.
+- **Distribuer un travail en équipe** : un dépôt par équipe, partagé avec elle
+  plutôt qu'avec chacun de ses membres — changer sa composition suffit donc à
+  changer qui y accède. Les équipes se créent, se renomment, se suppriment, et
+  une équipe déjà présente dans l'organisation s'adopte telle quelle.
 
 Ce que GitHub Classroom fait et que l'outil ne fait pas : pas de lien
 d'invitation à distribuer — les dépôts sont créés directement —, pas d'échéance,
-pas de correction automatique, pas de travail en équipe.
+pas de correction automatique.
 
 L'assistant du terminal ignore la notion de groupe et travaille par préfixe
 (`--manage tp1`). Déclarer un groupe, tenir sa liste d'étudiants ou déplacer une
-personne n'existent donc que dans l'interface web ; tout le reste est disponible
-partout.
+personne n'existent donc que dans l'interface web. Les équipes, elles,
+appartiennent à un groupe : au terminal, c'est la place du groupe qui en tient
+lieu (`--manage a26.5n6.01 --teams`). Tout le reste est disponible partout.
 
 ## Fiabilité
 
@@ -231,6 +253,8 @@ Les plus courantes :
 | `--roster FICHIER` | liste « nom complet, compte GitHub » au format CSV |
 | `--assignment NOM` | identifiant du travail |
 | `--manage [PREFIXE]` | gérer un groupe existant au lieu d'en créer un |
+| `--teams` | travail d'équipe ; avec `--manage`, les équipes du groupe |
+| `--team NOM` | équipe visée, ou équipes à servir |
 | `--import [TRAVAIL]` | reprendre des dépôts nommés « travail-compte » |
 | `--into PLACE` | place d'arrivée d'une reprise (« a26.5n6.1030 ») |
 | `--template ORG/DEPOT` | dépôt modèle |
@@ -259,7 +283,8 @@ Les tests montent un faux serveur GitHub local (`internal/fakegh`) et de vrais
 dépôts git locaux (`file://`) : rien ne sort de la machine.
 
 La logique vit dans les paquets du domaine — `internal/naming` (la
-nomenclature), `internal/classroom` (les groupes), `internal/registry` (le
+nomenclature), `internal/classroom` (les groupes), `internal/teams` (les
+équipes), `internal/registry` (le
 registre des étudiants), `internal/plan`, `internal/groups`, `internal/roster`,
 `internal/students`, `internal/runner`, `internal/clone` — et les trois
 interfaces (`internal/web`, `internal/app`) n'en sont que des façades. C'est ce

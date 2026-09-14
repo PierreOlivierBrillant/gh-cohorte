@@ -112,7 +112,7 @@ func TestOptionsAvanceesPorteesDuJeton(t *testing.T) {
 	code, _ := h.script(
 		"avance",
 		"portees",
-		"1,2,4", // repo, read:org et delete_repo
+		"1,2,5", // repo, read:org et delete_repo
 		"oui",   // générer un nouveau jeton
 		"revenir",
 		"quitter",
@@ -128,7 +128,8 @@ func TestOptionsAvanceesPorteesDuJeton(t *testing.T) {
 
 func TestOptionsAvanceesPorteesDejaCompletes(t *testing.T) {
 	h := nouveau(t, nil)
-	code, _ := h.script("avance", "portees", "1,2,3,4", "revenir", "quitter")
+	// Les portées que le jeton d'essai porte déjà : « admin:org » n'en est pas.
+	code, _ := h.script("avance", "portees", "1,2,4,5", "revenir", "quitter")
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}

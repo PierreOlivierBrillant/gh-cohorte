@@ -7,6 +7,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 )
 
 // L'annuaire répond à une question que la liste d'un groupe ne peut pas poser :
@@ -39,11 +40,12 @@ type Enrollment struct {
 // par personne, avec les cours qu'elle a suivis. Les groupes viennent de
 // l'appelant — déclarés ou lus dans les noms de dépôts, l'annuaire ne fait pas
 // la différence.
-func Directory(courses []classroom.Classroom, repos []groups.RepoInfo) []Row {
+func Directory(courses []classroom.Classroom, repos []groups.RepoInfo,
+	equipes []teams.Team) []Row {
 	parCompte := map[string]int{}
 	annuaire := make([]Row, 0)
 	for _, cours := range courses {
-		for _, ligne := range Build(cours, repos) {
+		for _, ligne := range Build(cours, repos, equipes) {
 			cle := strings.ToLower(ligne.Username)
 			if position, connu := parCompte[cle]; connu {
 				annuaire[position] = fusionner(annuaire[position], ligne)
@@ -83,10 +85,11 @@ func sortEnrollments(inscriptions []Enrollment) {
 // suivent la nomenclature, mais leur dernier niveau ne désigne aucun étudiant
 // connu. C'est ce qu'il manque pour que l'annuaire soit complet — le dire
 // évite de lire une liste trouée comme si elle était entière.
-func Unmatched(courses []classroom.Classroom, repos []groups.RepoInfo) int {
+func Unmatched(courses []classroom.Classroom, repos []groups.RepoInfo,
+	equipes []teams.Team) int {
 	orphelins := 0
 	for _, cours := range courses {
-		for _, travail := range cours.Assignments(repos) {
+		for _, travail := range cours.Assignments(repos, equipes) {
 			orphelins += travail.Others
 		}
 	}

@@ -687,6 +687,10 @@ type Team struct {
 	// Privacy vaut « secret » ou « closed » ; les équipes secrètes ne sont
 	// visibles que de leurs membres.
 	Privacy string `json:"privacy"`
+	// Description n'apprend rien à l'outil — c'est le nom qui dit à quel
+	// groupe une équipe appartient —, mais elle sert à qui lit la page de
+	// l'équipe sur GitHub.
+	Description string `json:"description"`
 }
 
 // ListOrgTeams énumère les équipes de l'organisation. La portée « read:org »

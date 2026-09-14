@@ -694,7 +694,9 @@ func TestCollisionDeNomsRefuseeAvantToutEcrit(t *testing.T) {
 	if code := h.muet(); code != app.ExitValidation {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	h.contient("Collision de noms")
+	// Le refus dit ce qu'il faut faire : distinguer les noms, ou déclarer que
+	// c'est la même personne sous deux comptes.
+	h.contient("Jean Tremblay", "porteraient le même nom")
 	if noms := h.depots(); len(noms) != 0 {
 		t.Errorf("rien ne devait être créé : %v", noms)
 	}

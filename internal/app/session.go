@@ -225,6 +225,12 @@ func (s *Session) run() (int, error) {
 	if mode == "etudiants" {
 		return newDirectorySession(s).run()
 	}
+	// Les équipes appartiennent à un groupe, pas à un préfixe : quand les
+	// drapeaux en parlent, « --manage » ne désigne plus un lot de dépôts mais
+	// la place du groupe — « a26.5n6.01 ».
+	if mode == "equipes" || (mode == "gerer" && s.Options.wantsTeams()) {
+		return s.teamsMode()
+	}
 	if mode == "gerer" {
 		s.manager = newManageSession(s, s.Options.Manage)
 		return s.manager.run()
@@ -257,12 +263,18 @@ func (s *Session) chooseMode() (string, error) {
 		return "gerer", nil
 	}
 	if !s.Interactive() {
+		if s.Options.wantsTeams() && s.Options.Assignment == "" {
+			return "equipes", nil
+		}
 		return "creer", nil
 	}
 	// Un lancement déjà paramétré pour créer ne doit pas poser de question.
 	if s.Options.Roster != "" || s.Options.Assignment != "" || s.Options.TemplateSet ||
 		s.Options.StarterSet || s.Options.Pattern != "" || s.Options.Yes {
 		return "creer", nil
+	}
+	if s.Options.wantsTeams() {
+		return "equipes", nil
 	}
 	if !s.Options.CLI {
 		return "web", nil
@@ -272,6 +284,7 @@ func (s *Session) chooseMode() (string, error) {
 		choice, err := s.Prompt.Choose("Que voulez-vous faire ?", ui.Options(
 			"creer", "Créer des dépôts pour une liste de personnes",
 			"gerer", "Lister et gérer un groupe de dépôts existant",
+			"equipes", "Gérer les équipes d'un groupe",
 			"etudiants", "Lister les étudiants de l'organisation",
 			"importer", "Reprendre des dépôts nommés autrement",
 			"registre", "Publier les noms au registre de l'organisation",

@@ -548,7 +548,15 @@ func TestEquipesEtAccesAuDepot(t *testing.T) {
 	if err != nil || len(equipes) != 2 {
 		t.Fatalf("ListOrgTeams = %+v, %v", equipes, err)
 	}
-	if equipes[0].Slug != "enseignants" {
+	// Le faux serveur rend les équipes par slug : on cherche celle qu'on veut
+	// plutôt que de compter sur son rang.
+	trouvee := false
+	for _, equipe := range equipes {
+		if equipe.Slug == "enseignants" {
+			trouvee = true
+		}
+	}
+	if !trouvee {
 		t.Fatalf("équipes = %+v", equipes)
 	}
 

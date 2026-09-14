@@ -1,5 +1,7 @@
 // Package runner applique un plan de génération : création des dépôts, dépôt des
-// fichiers de départ, puis invitation des personnes.
+// fichiers de départ, puis attribution de l'accès — une invitation à la
+// personne pour un travail individuel, un partage avec l'équipe pour un travail
+// d'équipe.
 package runner
 
 import (
@@ -33,12 +35,18 @@ const (
 	StarterFailed   = "échec"
 	CollaboratorNo  = "non"
 	CollaboratorYes = "prévu"
+	// TeamShared dit qu'un dépôt d'équipe a été partagé avec elle. L'accès est
+	// accordé à l'équipe entière : personne n'est invité individuellement, et
+	// changer sa composition suffit à changer qui voit le dépôt.
+	TeamShared = "équipe"
 )
 
 // Result est l'issue du traitement d'un dépôt.
 type Result struct {
-	Username     string `json:"username"`
-	FullName     string `json:"full_name"`
+	Username string `json:"username"`
+	FullName string `json:"full_name"`
+	// Team nomme l'équipe destinataire ; vide pour un travail individuel.
+	Team         string `json:"team,omitempty"`
 	Repo         string `json:"repo"`
 	Status       string `json:"status"`
 	URL          string `json:"url"`
@@ -113,12 +121,12 @@ func (r *Report) Save(directory string) (string, string, error) {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	records := [][]string{{
-		"nom_complet", "github_username", "depot", "statut",
+		"nom_complet", "github_username", "equipe", "depot", "statut",
 		"collaborateur", "fichiers_de_depart", "url", "erreur",
 	}}
 	for _, result := range r.Results {
 		records = append(records, []string{
-			result.FullName, result.Username, result.Repo, result.Status,
+			result.FullName, result.Username, result.Team, result.Repo, result.Status,
 			result.Collaborator, result.Starter, result.URL, result.Error,
 		})
 	}
@@ -199,10 +207,14 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 	result := Result{
 		Username:     item.Person.Username,
 		FullName:     item.Person.FullName,
+		Team:         item.Team,
 		Repo:         item.Name,
 		Status:       Skipped,
 		Collaborator: CollaboratorNo,
 		Starter:      StarterNone,
+	}
+	if item.ForTeam() {
+		result.FullName = item.Recipient()
 	}
 
 	existing, err := e.client.GetRepo(org, item.Name)
@@ -261,16 +273,58 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 		result.Collaborator = CollaboratorYes
 		return result
 	}
-	state, err := e.client.AddCollaborator(org, item.Name, item.Person.Username, e.settings.Permission)
-	if err != nil {
-		previous := result.Status
-		result.Status = Failed
-		result.Collaborator = "échec"
-		result.Error = fmt.Sprintf("dépôt %s mais invitation impossible : %v", previous, err)
+	// L'équipe reçoit le dépôt, pas ses membres : c'est ce qui fait qu'un
+	// changement de composition suffit ensuite à changer qui y accède.
+	if item.ForTeam() {
+		if err := e.client.GrantTeamRepo(org, item.TeamSlug, org, item.Name,
+			e.settings.Permission); err != nil {
+			previous := result.Status
+			result.Status = Failed
+			result.Collaborator = "échec"
+			result.Error = fmt.Sprintf("dépôt %s mais partage avec l'équipe impossible : %v",
+				previous, err)
+			return result
+		}
+		result.Collaborator = TeamShared
 		return result
 	}
-	result.Collaborator = state
+	// Une personne qui travaille sous deux comptes n'a qu'un dépôt : elle y est
+	// invitée sous chacun d'eux, faute de quoi la moitié de son travail se
+	// ferait depuis un compte sans accès.
+	etats := make([]string, 0, 2)
+	for _, compte := range comptesDe(item) {
+		state, err := e.client.AddCollaborator(org, item.Name, compte, e.settings.Permission)
+		if err != nil {
+			previous := result.Status
+			result.Status = Failed
+			result.Collaborator = "échec"
+			result.Error = fmt.Sprintf("dépôt %s mais invitation impossible : %v", previous, err)
+			return result
+		}
+		etats = append(etats, state)
+	}
+	result.Collaborator = strings.Join(etats, ", ")
 	return result
+}
+
+// comptesDe rend les comptes à inviter sur le dépôt d'une personne. Un plan qui
+// n'en nomme aucun retombe sur celui de la personne : c'est ce que fait un
+// appelant qui ne connaît pas encore les autres.
+func comptesDe(item plan.PlannedRepo) []string {
+	propres := make([]string, 0, len(item.Accounts))
+	vus := map[string]bool{}
+	for _, compte := range item.Accounts {
+		compte = strings.TrimSpace(compte)
+		if compte == "" || vus[strings.ToLower(compte)] {
+			continue
+		}
+		vus[strings.ToLower(compte)] = true
+		propres = append(propres, compte)
+	}
+	if len(propres) == 0 && strings.TrimSpace(item.Person.Username) != "" {
+		propres = append(propres, item.Person.Username)
+	}
+	return propres
 }
 
 // previewStarter annonce en simulation ce qui arriverait aux fichiers de départ.

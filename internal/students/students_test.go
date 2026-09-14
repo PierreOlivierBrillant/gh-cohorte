@@ -9,6 +9,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 )
 
 // cohorte déclare le groupe qui sert de décor à ces tests : trois personnes,
@@ -33,6 +34,12 @@ func cohorte() (classroom.Classroom, []groups.RepoInfo) {
 	return cours, inventaire
 }
 
+// build dresse les lignes sans aucune équipe : ces tests-ci ne portent que sur
+// des travaux individuels.
+func build(cours classroom.Classroom, repos []groups.RepoInfo) []students.Row {
+	return students.Build(cours, repos, nil)
+}
+
 // comptes rend les comptes d'une liste, dans l'ordre où elle les donne.
 func comptes(lignes []students.Row) string {
 	noms := make([]string, 0, len(lignes))
@@ -43,7 +50,7 @@ func comptes(lignes []students.Row) string {
 }
 
 func TestLigneRetientLePlusRecentEnvoi(t *testing.T) {
-	lignes := students.Build(cohorte())
+	lignes := build(cohorte())
 	trouve := map[string]students.Row{}
 	for _, ligne := range lignes {
 		trouve[ligne.Username] = ligne
@@ -59,7 +66,7 @@ func TestLigneRetientLePlusRecentEnvoi(t *testing.T) {
 }
 
 func TestRechercheIgnoreCasseEtAccents(t *testing.T) {
-	lignes := students.Build(cohorte())
+	lignes := build(cohorte())
 	for _, cherche := range []string{"cote", "CÔTÉ", "Émilie"} {
 		retenues := students.Apply(lignes, students.Filter{Text: cherche}, students.ByName, false)
 		if comptes(retenues) != "ecote" {
@@ -78,7 +85,7 @@ func TestRechercheIgnoreCasseEtAccents(t *testing.T) {
 }
 
 func TestBornesDuDernierEnvoi(t *testing.T) {
-	lignes := students.Build(cohorte())
+	lignes := build(cohorte())
 
 	apres := students.Apply(lignes,
 		students.Filter{PushedAfter: "2026-10-01"}, students.ByName, false)
@@ -103,7 +110,7 @@ func TestActiviteEtTravail(t *testing.T) {
 	cours, inventaire := cohorte()
 	cours.Students = append(cours.Students,
 		roster.Person{FullName: "Zoé Tremblay", Username: "ztremblay"})
-	lignes := students.Build(cours, inventaire)
+	lignes := build(cours, inventaire)
 
 	sans := students.Apply(lignes,
 		students.Filter{Activity: students.WithoutRepos}, students.ByName, false)
@@ -123,7 +130,7 @@ func TestActiviteEtTravail(t *testing.T) {
 }
 
 func TestTriParNomCompteEtEnvoi(t *testing.T) {
-	lignes := students.Build(cohorte())
+	lignes := build(cohorte())
 
 	// Les accents ne dispersent pas l'ordre : « Émilie » se range avec les E.
 	if ordre := comptes(students.Apply(lignes, students.Filter{},
@@ -183,5 +190,49 @@ func TestLignesDUnGroupeLuParPrefixe(t *testing.T) {
 	if retenues := students.Apply(lignes, students.Filter{Text: "picard"},
 		students.ByName, false); comptes(retenues) != "jlpicard" {
 		t.Fatalf("recherche : %s", comptes(retenues))
+	}
+}
+
+// Le dépôt d'une équipe est celui de chacun de ses membres : sans cela, un
+// travail fait en équipe laisserait tout le monde à « aucun dépôt », alors que
+// tout le monde en a un.
+func TestUnDepotDEquipeCompteChezChacunDeSesMembres(t *testing.T) {
+	cours, inventaire := cohorte()
+	inventaire = append(inventaire, groups.RepoInfo{
+		Name: "a26.5n6.01.projet.eq1", PushedAt: "2026-10-02T08:00:00Z",
+	})
+	equipes := cours.Teams([]teams.Info{{
+		Slug: "a26-5n6-01-eq1", Name: "a26.5n6.01.eq1",
+		Members: []string{"ecote", "aminata-d"},
+	}})
+
+	lignes := students.Build(cours, inventaire, equipes)
+	trouve := map[string]students.Row{}
+	for _, ligne := range lignes {
+		trouve[ligne.Username] = ligne
+	}
+	for _, compte := range []string{"ecote", "aminata-d"} {
+		partage := false
+		for _, depot := range trouve[compte].Repos {
+			if depot.Name != "a26.5n6.01.projet.eq1" {
+				continue
+			}
+			partage = true
+			if depot.Team != "eq1" {
+				t.Fatalf("le dépôt devrait nommer son équipe : %+v", depot)
+			}
+		}
+		if !partage {
+			t.Fatalf("@%s devrait avoir le dépôt de son équipe : %+v",
+				compte, trouve[compte].Repos)
+		}
+	}
+	// Aminata n'avait jamais rien envoyé : l'envoi de son équipe devient le sien.
+	if envoi := trouve["aminata-d"].PushedAt; envoi != "2026-10-02" {
+		t.Fatalf("dernier envoi d'Aminata attendu du dépôt d'équipe, trouvé %q", envoi)
+	}
+	// Jean-Luc n'est dans aucune équipe : ses deux dépôts restent les siens.
+	if depots := trouve["jlpicard"].Repos; len(depots) != 2 {
+		t.Fatalf("@jlpicard ne devrait rien recevoir d'une équipe : %+v", depots)
 	}
 }

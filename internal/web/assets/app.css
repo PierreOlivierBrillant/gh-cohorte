@@ -245,6 +245,51 @@ main { padding: 1.5rem; max-width: 1100px; }
 .travail-ligne .detail { color: var(--texte-doux); font-size: .8125rem; }
 .travail-ligne .chevron { color: var(--texte-doux); }
 
+/* ------------------------------------------------------------------ équipes */
+
+/* Une équipe se lit d'un coup d'œil : son nom, ses membres, ce qu'on peut en
+   faire. Les membres sont des jetons plutôt qu'une liste, parce qu'ils sont
+   courts et qu'on les compare d'une équipe à l'autre. */
+.equipe-rangee {
+  padding: .75rem .9rem;
+  border-bottom: 1px solid var(--bord);
+}
+
+.equipe-rangee:last-child { border-bottom: 0; }
+.equipe-entete { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.equipe-titre { font-weight: 600; font-size: 1rem; }
+.equipe-nom { color: var(--texte-doux); font-size: .8125rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.equipe-actions { display: flex; gap: .3rem; flex-wrap: nowrap; }
+
+/* Un membre par ligne : le nom et le compte se lisent en regard l'un de
+   l'autre, et il reste la place de dire ce qui cloche et de l'y régler. */
+.equipe-membres { display: flex; flex-direction: column; gap: .15rem;
+  margin-top: .5rem; }
+.equipe-membre {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .2rem .3rem;
+  border-radius: 6px;
+  font-size: .875rem;
+}
+
+.equipe-membre:hover { background: var(--fond-doux); }
+.membre-nom { min-width: 11rem; }
+.membre-comptes {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .8125rem;
+  overflow-wrap: anywhere;
+}
+
+/* Le compte mène au profil. Il garde la couleur discrète du texte secondaire
+   tant qu'on ne le vise pas : c'est une sortie, pas la commande de la ligne. */
+.lien-compte { color: var(--texte-doux); }
+.lien-compte:hover { color: var(--lien); text-decoration: underline; }
+
+.jetons { display: flex; gap: .4rem; flex-wrap: wrap; }
+
 .jeton {
   display: inline-block;
   padding: 0 .6rem;
@@ -260,6 +305,22 @@ main { padding: 1.5rem; max-width: 1100px; }
 .jeton.oui { color: var(--succes); background: var(--succes-fond); border-color: transparent; }
 .jeton.non { color: var(--erreur); background: var(--erreur-fond); border-color: transparent; }
 .jeton.lien { color: var(--lien); }
+/* Le compte d'une personne, à côté de son nom : c'est leur association qu'on
+   lit, et le compte se reconnaît à sa fonte. */
+.jeton .compte {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .6875rem;
+  color: var(--texte-doux);
+}
+/* Un membre que la liste du groupe ne connaît pas : il a l'accès sans être
+   inscrit nulle part, et cela doit se voir. */
+.jeton.etranger { color: var(--erreur); border-style: dashed; }
+/* Un membre qu'on a mis là soi-même, par opposition à ceux que GitHub a
+   désignés : la différence compte quand on relit une composition. */
+.jeton.choisi { color: var(--lien); border-color: var(--lien); }
+/* Invité sans avoir encore accepté : la personne est de l'équipe, elle ne le
+   sait pas encore. Le taire ferait croire que rien ne s'est passé. */
+.jeton.attente { color: var(--alerte); border-style: dashed; }
 .etiquettes { display: flex; gap: .4rem; flex-wrap: wrap; }
 
 /* ------------------------------------------------------------------- étapes */
@@ -571,6 +632,12 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .tableau tbody tr:hover { background: var(--fond-doux); }
 .tableau .etroit { width: 1%; white-space: nowrap; }
 .tableau .vide { color: var(--texte-doux); font-style: italic; }
+/* Une valeur sans espace — un nom de dépôt, une suite de comptes — ne doit pas
+   élargir le tableau au point d'en pousser la dernière colonne hors de la
+   boîte, qui masque ce qui dépasse. Elle se coupe ; et si le tableau déborde
+   quand même, il défile chez lui plutôt que de se laisser rogner. */
+.tableau td { overflow-wrap: anywhere; }
+.tableau-large { overflow-x: auto; }
 /* Les actions d'une ligne restent côte à côte : la colonne s'élargit d'autant,
    plutôt que chaque ligne du tableau de doubler de hauteur. */
 .tableau td .actions { flex-wrap: nowrap; }

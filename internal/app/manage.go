@@ -1212,7 +1212,18 @@ func (m *manageSession) relocateTo(group *groups.Group, place, name string) (int
 // et elle ne doit se raconter que d'une façon. Seule la phrase de succès
 // distingue les deux — elle porte un « %d » pour le nombre de dépôts.
 func (m *manageSession) appliquerRenommage(lignes []classroom.Move, succes string) (int, error) {
-	console := m.session.Console
+	suivis, code, err := m.session.renommerDepots(m.org, lignes, succes)
+	m.suivre(func(repos []groups.RepoInfo) []groups.RepoInfo {
+		return groups.WithRenamed(repos, suivis)
+	})
+	return code, err
+}
+
+// renommerDepots est cette écriture-là, sans l'inventaire que la gestion tient
+// à jour : déplacer une équipe la fait aussi, et depuis un autre écran.
+func (s *Session) renommerDepots(org string, lignes []classroom.Move, succes string) (
+	[]groups.Renamed, int, error) {
+	console := s.Console
 	rows := make([][]string, 0, len(lignes))
 	for index, ligne := range lignes {
 		rows = append(rows, []string{itoa(index + 1), ligne.Repo, ligne.Target})
@@ -1220,16 +1231,16 @@ func (m *manageSession) appliquerRenommage(lignes []classroom.Move, succes strin
 	console.Table([]string{"#", "Dépôt actuel", "Nouveau nom"}, rows, 40)
 	console.Note("GitHub garde une redirection depuis chaque ancien nom.")
 
-	if m.session.Options.DryRun {
+	if s.Options.DryRun {
 		console.Warning("Simulation : aucun dépôt n'a été renommé.")
-		return ExitOK, nil
+		return nil, ExitOK, nil
 	}
-	if !m.session.Options.Yes {
-		suite, err := m.session.Prompt.Confirm(
+	if !s.Options.Yes {
+		suite, err := s.Prompt.Confirm(
 			"Renommer ces "+itoa(len(lignes))+" dépôt(s) ?", false)
 		if err != nil || !suite {
 			console.Warning("Annulé : rien n'a été renommé.")
-			return ExitOK, err
+			return nil, ExitOK, err
 		}
 	}
 
@@ -1237,7 +1248,7 @@ func (m *manageSession) appliquerRenommage(lignes []classroom.Move, succes strin
 	renommes, echecs := 0, 0
 	var suivis []groups.Renamed
 	for index, ligne := range lignes {
-		apres, err := m.session.Client.RenameRepo(m.org, ligne.Repo, ligne.Target)
+		apres, err := s.Client.RenameRepo(org, ligne.Repo, ligne.Target)
 		if err != nil {
 			progress.Clear()
 			console.Failure("%s : %v", ligne.Repo, err)
@@ -1250,15 +1261,12 @@ func (m *manageSession) appliquerRenommage(lignes []classroom.Move, succes strin
 	}
 	progress.Finish("")
 
-	m.suivre(func(repos []groups.RepoInfo) []groups.RepoInfo {
-		return groups.WithRenamed(repos, suivis)
-	})
 	if echecs > 0 {
 		console.Warning("%d dépôt(s) renommé(s), %d en échec.", renommes, echecs)
-		return ExitFailure, nil
+		return suivis, ExitFailure, nil
 	}
 	console.Success(succes, renommes)
-	return ExitOK, nil
+	return suivis, ExitOK, nil
 }
 
 // ------------------------------------------------------ renommer le travail

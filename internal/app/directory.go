@@ -7,6 +7,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 )
 
@@ -114,8 +115,15 @@ func (d *directorySession) load(force bool) error {
 	d.avis = avis
 	visibles := store.Visible(d.org, repos,
 		classroom.DefaultsFrom(d.session.Settings), set)
-	d.rows = students.Directory(visibles, repos)
-	d.orphelins = students.Unmatched(visibles, repos)
+	// Les équipes disent lesquels des dépôts appartiennent à une équipe plutôt
+	// qu'à personne : sans elles, l'annuaire les compterait orphelins.
+	infos, _ := d.session.Client.LoadOrgTeams(d.org, d.session.Options.Jobs)
+	equipes := make([]teams.Team, 0, len(infos))
+	for _, cours := range visibles {
+		equipes = append(equipes, cours.Teams(infos)...)
+	}
+	d.rows = students.Directory(visibles, repos, equipes)
+	d.orphelins = students.Unmatched(visibles, repos, equipes)
 	d.loaded = true
 	return nil
 }

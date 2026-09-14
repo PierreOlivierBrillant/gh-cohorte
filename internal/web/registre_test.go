@@ -3,6 +3,7 @@ package web_test
 import (
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -399,7 +400,9 @@ func TestDonnerAccesAUneEquipeDepuisLInterface(t *testing.T) {
 
 	var apercu publicationVue
 	h.json(http.MethodGet, "/api/orgs/acme/registry", nil, &apercu)
-	if len(apercu.Teams) != 2 || apercu.Teams[0] != "enseignants" {
+	// Le faux serveur rend les équipes par slug : on cherche celle qu'on veut
+	// plutôt que de compter sur son rang.
+	if len(apercu.Teams) != 2 || !slices.Contains(apercu.Teams, "enseignants") {
 		t.Fatalf("équipes proposées = %v", apercu.Teams)
 	}
 

@@ -189,6 +189,7 @@ func PlanImport(arrivee Classroom, demande ImportRequest,
 		// le renommage et le registre attendent.
 		connus = append(connus, roster.Person{
 			FullName: trouve.Entry.FullName, Username: trouve.Login,
+			StudentID: trouve.Entry.StudentID,
 		})
 	}
 	for _, entree := range entries {

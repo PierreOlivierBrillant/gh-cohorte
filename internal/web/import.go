@@ -35,6 +35,14 @@ type importInput struct {
 	// NamedOnly laisse où ils sont les dépôts dont on ne connaît pas la
 	// personne.
 	NamedOnly bool `json:"named_only"`
+	// Teams dit que le travail a été fait en équipe : ce qui suit le préfixe
+	// nomme alors une équipe, pas une personne, et il n'y a rien à rapprocher
+	// d'une liste.
+	Teams bool `json:"teams"`
+	// Crews impose la composition d'une équipe, par son nom court. Sa présence
+	// dit qu'on a tranché à l'écran : le serveur ne redevine plus rien pour
+	// cette équipe, y compris quand on a choisi de n'y mettre personne.
+	Crews map[string][]string `json:"crews"`
 	// Only nomme les dépôts retenus. Vide, le travail est repris entier.
 	Only []string `json:"only"`
 	// People remplace la liste quand un rapprochement a été corrigé à l'écran.
@@ -191,23 +199,7 @@ func (s *Server) connus(org string) map[string]string {
 // retient, et l'écran les redemande à chaque correction de rapprochement.
 func (s *Server) owners(org, prefix string, seulement []string,
 	repos []groups.RepoInfo) map[string]string {
-	groupe := groups.Build(prefix, repos)
-	if groupe.Len() == 0 {
-		return nil
-	}
-	// Un dépôt écarté ne sera ni repris ni rapproché : lire ses accès coûterait
-	// une requête pour rien.
-	retenus := map[string]bool{}
-	for _, nom := range seulement {
-		retenus[strings.ToLower(strings.TrimSpace(nom))] = true
-	}
-	noms := make([]string, 0, groupe.Len())
-	for _, depot := range groupe.Repos {
-		if len(retenus) > 0 && !retenus[strings.ToLower(depot.Name)] {
-			continue
-		}
-		noms = append(noms, depot.Name)
-	}
+	noms := s.aLire(prefix, seulement, repos)
 	if len(noms) == 0 {
 		return nil
 	}
@@ -219,6 +211,41 @@ func (s *Server) owners(org, prefix string, seulement []string,
 		}
 	}
 	return comptes
+}
+
+// aLire nomme les dépôts d'un préfixe dont les accès sont à lire. Un dépôt
+// écarté ne sera ni repris ni rapproché : lire les siens coûterait une requête
+// pour rien.
+func (s *Server) aLire(prefix string, seulement []string,
+	repos []groups.RepoInfo) []string {
+	groupe := groups.Build(prefix, repos)
+	if groupe.Len() == 0 {
+		return nil
+	}
+	retenus := map[string]bool{}
+	for _, nom := range seulement {
+		retenus[strings.ToLower(strings.TrimSpace(nom))] = true
+	}
+	noms := make([]string, 0, groupe.Len())
+	for _, depot := range groupe.Repos {
+		if len(retenus) > 0 && !retenus[strings.ToLower(depot.Name)] {
+			continue
+		}
+		noms = append(noms, depot.Name)
+	}
+	return noms
+}
+
+// membres rend, pour chaque dépôt, qui l'a fait : l'équipe GitHub à qui il est
+// partagé, ses collaborateurs directs, ses auteurs de commits. C'est « identity »
+// qui décide de ce que chaque source vaut.
+func (s *Server) membres(org, prefix string, seulement []string,
+	repos []groups.RepoInfo) map[string]identity.Crew {
+	noms := s.aLire(prefix, seulement, repos)
+	if len(noms) == 0 {
+		return nil
+	}
+	return s.resolver(org).Crews(org, noms, s.deps.Viewer, nil)
 }
 
 // entries rend la liste du groupe et dit s'il reste quelque chose à deviner.
@@ -293,6 +320,17 @@ func (s *Server) handleImportPreview(writer http.ResponseWriter, request *http.R
 		fail(writer, err)
 		return
 	}
+	// Une reprise en équipe suit les mêmes écrans : c'est ici qu'elle bifurque,
+	// et le corps de la réponse dit laquelle des deux il décrit.
+	if body.Teams {
+		plan, _, err := s.teamImportPlan(org, body)
+		if err != nil {
+			fail(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, plan)
+		return
+	}
 	plan, _, err := s.importPlan(org, body)
 	if err != nil {
 		fail(writer, err)
@@ -307,6 +345,10 @@ func (s *Server) handleImport(writer http.ResponseWriter, request *http.Request)
 	org, body, err := s.importRequest(request)
 	if err != nil {
 		fail(writer, err)
+		return
+	}
+	if body.Teams {
+		s.handleTeamImport(writer, org, body)
 		return
 	}
 	plan, arrivee, err := s.importPlan(org, body)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -29,6 +30,10 @@ type Repo struct {
 	URL        string
 	// PushedAt est la date seule — « 2026-08-21 » —, vide si rien n'y a été envoyé.
 	PushedAt string
+	// Team nomme l'équipe à qui le dépôt appartient ; vide pour un travail
+	// individuel. Un dépôt d'équipe figure chez chacun de ses membres : c'est
+	// bien leur travail, même s'il ne porte pas leur nom.
+	Team string
 	// Scope est la place du groupe d'où vient ce dépôt. Elle ne sert que
 	// lorsqu'une ligne en rassemble plusieurs : deux groupes peuvent avoir
 	// chacun leur « tp1 », et rien d'autre ne les distinguerait.
@@ -39,6 +44,9 @@ type Repo struct {
 type Row struct {
 	FullName string
 	Username string
+	// Accounts porte tous les comptes de la personne : elle n'en a qu'un le
+	// plus souvent, et parfois deux — celui du collège et le sien.
+	Accounts []string
 	Repos    []Repo
 	// Enrollments dit les groupes dont la personne est. La liste d'un groupe
 	// n'en porte qu'un ; l'annuaire de l'organisation les rassemble tous.
@@ -50,27 +58,60 @@ type Row struct {
 // Build croise les étudiants du groupe avec les dépôts de l'organisation :
 // c'est l'équivalent du « a accepté le devoir » de GitHub Classroom, déduit des
 // dépôts existants plutôt que d'une invitation.
-func Build(cours classroom.Classroom, repos []groups.RepoInfo) []Row {
+//
+// Les équipes du groupe entrent dans le compte : le dépôt d'une équipe est
+// celui de chacun de ses membres. Sans elles, un travail fait en équipe
+// laisserait tout le monde à « aucun dépôt », alors que tout le monde en a un.
+func Build(cours classroom.Classroom, repos []groups.RepoInfo,
+	equipes []teams.Team) []Row {
 	parEtudiant := map[string][]Repo{}
 	scope := cours.Scope()
-	for _, travail := range cours.Assignments(repos) {
+	ajouter := func(username string, depot Repo) {
+		cle := strings.ToLower(username)
+		parEtudiant[cle] = append(parEtudiant[cle], depot)
+	}
+
+	for _, travail := range cours.Assignments(repos, equipes) {
 		for _, depot := range cours.Repos(travail.ID, repos) {
+			ligne := Repo{
+				Assignment: travail.Name, ID: travail.ID, Name: depot.Name,
+				URL: depot.URL, PushedAt: depot.PushedAt, Scope: scope,
+			}
+			if equipe, appartient := cours.TeamOf(depot.Name, equipes); appartient {
+				ligne.Team = equipe.Short
+				for _, membre := range equipe.Members {
+					ajouter(membre, ligne)
+				}
+				continue
+			}
 			student, inscrit := cours.StudentOf(depot.Name)
 			if !inscrit {
 				continue
 			}
-			cle := strings.ToLower(student.Username)
-			parEtudiant[cle] = append(parEtudiant[cle], Repo{
-				Assignment: travail.Name, ID: travail.ID, Name: depot.Name,
-				URL: depot.URL, PushedAt: depot.PushedAt, Scope: scope,
-			})
+			ajouter(student.Username, ligne)
 		}
 	}
 
-	lignes := make([]Row, 0, len(cours.Students))
-	for _, student := range cours.Students {
-		ligne := compose(student.FullName, student.Username,
-			parEtudiant[strings.ToLower(student.Username)])
+	// Une ligne par personne, non par compte : c'est le matricule qui les
+	// réunit, et les montrer deux fois ferait deux étudiants d'un seul.
+	identites := cours.Identities()
+	lignes := make([]Row, 0, len(identites))
+	for _, identite := range identites {
+		// Les dépôts d'une personne peuvent être arrivés sous l'un ou l'autre
+		// de ses comptes : ils sont les siens sous tous.
+		depots := make([]Repo, 0)
+		vus := map[string]bool{}
+		for _, compte := range identite.Accounts {
+			for _, depot := range parEtudiant[strings.ToLower(compte)] {
+				if vus[strings.ToLower(depot.Name)] {
+					continue
+				}
+				vus[strings.ToLower(depot.Name)] = true
+				depots = append(depots, depot)
+			}
+		}
+		ligne := compose(identite.FullName, identite.Username(), depots)
+		ligne.Accounts = identite.Accounts
 		ligne.Enrollments = []Enrollment{enrollmentOf(cours, ligne.Repos)}
 		lignes = append(lignes, ligne)
 	}

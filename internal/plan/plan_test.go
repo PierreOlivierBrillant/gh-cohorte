@@ -88,7 +88,10 @@ func TestBuildRefuseLesCollisions(t *testing.T) {
 	if err == nil {
 		t.Fatal("deux personnes visant le même dépôt doivent être refusées")
 	}
-	if !strings.Contains(err.Error(), "Collision") {
+	// Le refus dit lequel des deux cas on a sous les yeux : deux homonymes, ou
+	// une même personne sous deux comptes.
+	if !strings.Contains(err.Error(), "Jean Tremblay") ||
+		!strings.Contains(err.Error(), "porteraient le même nom") {
 		t.Errorf("message inattendu : %v", err)
 	}
 }

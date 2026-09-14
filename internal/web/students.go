@@ -3,8 +3,10 @@ package web
 import (
 	"net/http"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 )
 
 // L'annuaire regarde l'organisation entière plutôt qu'un groupe : c'est la
@@ -73,7 +75,11 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 	}
 
 	visibles := s.visibles(org, repos)
-	toutes := students.Directory(visibles, repos)
+	// Les équipes disent lesquels des dépôts appartiennent à une équipe plutôt
+	// qu'à personne : sans elles, l'annuaire les compterait orphelins.
+	infos, _ := s.orgTeams(org, false)
+	equipes := teamsOfAll(visibles, infos)
+	toutes := students.Directory(visibles, repos, equipes)
 	retenues := students.Apply(toutes, filtre, tri, decroissant)
 
 	lignes := make([]directoryRow, 0, len(retenues))
@@ -91,7 +97,7 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 		"total":    len(toutes), "shown": len(lignes),
 		// Les dépôts que personne ne réclame : sans eux, une liste incomplète
 		// se lirait comme si elle était entière.
-		"unmatched": students.Unmatched(visibles, repos),
+		"unmatched": students.Unmatched(visibles, repos, equipes),
 		"org":       org, "source": source,
 	})
 }
@@ -125,4 +131,14 @@ func (s *Server) directoryRow(org string, ligne students.Row) directoryRow {
 		FullName: ligne.FullName, Username: ligne.Username,
 		Enrollments: inscriptions, Repos: len(ligne.Repos), PushedAt: ligne.PushedAt,
 	}
+}
+
+// teamsOfAll rassemble les équipes de plusieurs groupes : l'annuaire regarde
+// l'organisation entière, pas un groupe à la fois.
+func teamsOfAll(courses []classroom.Classroom, infos []teams.Info) []teams.Team {
+	toutes := make([]teams.Team, 0, len(infos))
+	for _, cours := range courses {
+		toutes = append(toutes, cours.Teams(infos)...)
+	}
+	return toutes
 }

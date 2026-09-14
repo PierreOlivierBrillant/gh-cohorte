@@ -19,6 +19,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -122,6 +123,7 @@ func (s *Server) handleClearCache(writer http.ResponseWriter, _ *http.Request) {
 	removed := s.deps.Cache.Clear()
 	s.mutex.Lock()
 	s.inventory = map[string][]groups.RepoInfo{}
+	s.squads = map[string][]teams.Info{}
 	s.resolvers = map[string]*identity.Resolver{}
 	s.mutex.Unlock()
 	writeJSON(writer, http.StatusOK, map[string]any{
@@ -255,6 +257,47 @@ func (s *Server) forget(org string) {
 	delete(s.inventory, org)
 	s.mutex.Unlock()
 	s.deps.Cache.Forget(cache.ReposKey(org))
+}
+
+// orgTeams charge les équipes de l'organisation : mémoire, puis cache, puis
+// API. Elles suivent le même chemin que les dépôts — elles vivent sur GitHub,
+// et rien n'en est retenu localement.
+func (s *Server) orgTeams(org string, force bool) ([]teams.Info, error) {
+	if !force {
+		s.mutex.Lock()
+		known, found := s.squads[org]
+		s.mutex.Unlock()
+		if found {
+			return known, nil
+		}
+		var cached []teams.Info
+		if s.deps.Cache.Get(cache.TeamsKey(org), cache.TeamsTTL, &cached) {
+			s.rememberTeams(org, cached)
+			return cached, nil
+		}
+	}
+
+	fetched, err := s.deps.Client.LoadOrgTeams(org, s.deps.Jobs)
+	if err != nil {
+		return nil, err
+	}
+	s.deps.Cache.Set(cache.TeamsKey(org), fetched)
+	s.rememberTeams(org, fetched)
+	return fetched, nil
+}
+
+func (s *Server) rememberTeams(org string, list []teams.Info) {
+	s.mutex.Lock()
+	s.squads[org] = list
+	s.mutex.Unlock()
+}
+
+// forgetTeams oublie les équipes d'une organisation, après une écriture.
+func (s *Server) forgetTeams(org string) {
+	s.mutex.Lock()
+	delete(s.squads, org)
+	s.mutex.Unlock()
+	s.deps.Cache.Forget(cache.TeamsKey(org))
 }
 
 // updateInventory applique à l'inventaire retenu — en mémoire comme dans le

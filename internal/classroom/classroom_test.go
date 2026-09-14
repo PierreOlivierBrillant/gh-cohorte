@@ -81,11 +81,11 @@ func TestPlusieursGroupesDansUnMemeCours(t *testing.T) {
 	premier := groupe("a26", "5n6", "01", cohorte)
 	second := groupe("a26", "5n6", "02", cohorte)
 
-	if travaux := premier.Assignments(inventaire); len(travaux) != 1 ||
+	if travaux := premier.Assignments(inventaire, nil); len(travaux) != 1 ||
 		travaux[0].Repos != 1 || travaux[0].Students != 1 {
 		t.Fatalf("groupe 01 : %+v", travaux)
 	}
-	if travaux := second.Assignments(inventaire); len(travaux) != 1 ||
+	if travaux := second.Assignments(inventaire, nil); len(travaux) != 1 ||
 		travaux[0].Repos != 1 || travaux[0].Students != 1 {
 		t.Fatalf("groupe 02 : %+v", travaux)
 	}
@@ -102,7 +102,7 @@ func TestTravauxDuGroupe(t *testing.T) {
 	)
 	cours := groupe("a26", "5n6", "01", cohorte)
 
-	travaux := cours.Assignments(inventaire)
+	travaux := cours.Assignments(inventaire, nil)
 	if len(travaux) != 2 {
 		t.Fatalf("travaux trouvés : %v", noms(travaux))
 	}
@@ -132,7 +132,7 @@ func TestDepotHorsListeCompteApart(t *testing.T) {
 	)
 	cours := groupe("a26", "5n6", "01", cohorte)
 
-	travaux := cours.Assignments(inventaire)
+	travaux := cours.Assignments(inventaire, nil)
 	if len(travaux) != 1 {
 		t.Fatalf("travaux trouvés : %v", noms(travaux))
 	}
@@ -179,7 +179,7 @@ func TestUnCompteSansNomCompletResteUnEtudiantDuGroupe(t *testing.T) {
 	if _, sien := cours.StudentOf("a26.5n6.01.tp1.aleksilepaj"); !sien {
 		t.Error("le dépôt doit être rattaché à son étudiant")
 	}
-	travaux := cours.Assignments(inventaire)
+	travaux := cours.Assignments(inventaire, nil)
 	if len(travaux) != 1 || travaux[0].Students != 2 || travaux[0].Others != 1 {
 		t.Fatalf("comptage : %+v", travaux)
 	}

@@ -7,6 +7,12 @@
 // ne retient que ce que les noms de dépôts ne savent pas dire — qui sont les
 // étudiants, et avec quels réglages leurs dépôts sont créés. Un groupe se
 // déclare donc sans rien écrire sur GitHub, et se supprime sans rien y effacer.
+//
+// Un travail est individuel ou d'équipe, et cela non plus ne se déclare pas :
+// le dernier niveau du nom de ses dépôts nomme une équipe du groupe, ou un
+// étudiant. Les équipes elles-mêmes vivent sur GitHub — ce sont de vraies
+// équipes d'organisation —, si bien qu'elles sont passées en argument là où
+// elles comptent plutôt que retenues ici.
 package classroom
 
 import (
@@ -18,6 +24,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -220,9 +227,9 @@ func (c Classroom) Settings(assignmentName string) config.Settings {
 // peut pas être nommé.
 func (c Classroom) MissingNames() []roster.Person {
 	var incomplets []roster.Person
-	for _, student := range c.Students {
-		if _, err := naming.Student(student.FullName); err != nil {
-			incomplets = append(incomplets, student)
+	for _, identite := range c.Identities() {
+		if _, err := naming.Student(identite.FullName); err != nil {
+			incomplets = append(incomplets, identite.Person())
 		}
 	}
 	return incomplets
@@ -258,12 +265,22 @@ func (c Classroom) Enrich(names Names, repos []groups.RepoInfo) Classroom {
 	complets := make([]roster.Person, 0, len(c.Students))
 	connus := map[string]bool{}
 	for _, student := range c.Students {
-		if strings.TrimSpace(student.FullName) == "" {
-			if trouve, ok := names.Lookup(student.Username); ok {
+		if trouve, ok := names.Lookup(student.Username); ok {
+			if strings.TrimSpace(student.FullName) == "" {
 				student.FullName = trouve.FullName
 			}
+			// Le matricule vient du registre comme le nom : c'est lui qui
+			// réunit les comptes d'une personne, et il doit valoir d'un poste
+			// à l'autre.
+			if strings.TrimSpace(student.StudentID) == "" {
+				student.StudentID = trouve.StudentID
+			}
 		}
-		connus[strings.ToLower(student.Username)] = true
+		// Tous ses comptes comptent comme connus : un dépôt arrivé sous l'un
+		// d'eux ne doit pas la faire inscrire une seconde fois.
+		for _, compte := range student.Accounts() {
+			connus[strings.ToLower(compte)] = true
+		}
 		complets = append(complets, student)
 	}
 
@@ -381,9 +398,11 @@ func (k known) personne(fragment string) (roster.Person, bool) {
 // désignent quelqu'un : c'est lui que la nomenclature écrit.
 func knownBy(people []roster.Person) known {
 	connus := make(known, 2*len(people))
-	for _, person := range people {
-		if strings.TrimSpace(person.Username) != "" {
-			connus[strings.ToLower(person.Username)] = person
+	for _, identite := range identitiesOf(people) {
+		// Tous ses comptes la désignent : un dépôt adopté sous l'un d'eux est
+		// le sien, et le renommer lui donnera son nom.
+		for _, compte := range identite.Accounts {
+			connus[strings.ToLower(compte)] = identite.Person()
 		}
 	}
 	for _, person := range people {
@@ -416,10 +435,13 @@ func (c Classroom) Add(person roster.Person) (Classroom, error) {
 }
 
 // Find retrouve un étudiant du groupe par son compte GitHub.
+// Le matricule réunit les lignes d'une même personne : c'est elle qui est
+// rendue, avec tous ses comptes, et non la ligne qui portait celui qu'on
+// cherchait.
 func (c Classroom) Find(username string) (roster.Person, bool) {
-	for _, student := range c.Students {
-		if strings.EqualFold(student.Username, username) {
-			return student, true
+	for _, identite := range c.Identities() {
+		if identite.Has(username) {
+			return identite.Person(), true
 		}
 	}
 	return roster.Person{}, false
@@ -427,21 +449,41 @@ func (c Classroom) Find(username string) (roster.Person, bool) {
 
 // ------------------------------------------------------------------- travaux
 
+// Nature d'un travail. Elle ne se déclare pas : elle se lit dans le dernier
+// niveau du nom des dépôts, qui nomme une équipe du groupe ou un étudiant.
+const (
+	Individual = "individuel"
+	TeamWork   = "équipe"
+)
+
 // Assignment est un travail du groupe, tel que les dépôts le racontent.
 type Assignment struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Repos    int    `json:"repos"`
 	Students int    `json:"students"` // étudiants du groupe qui ont un dépôt
-	Others   int    `json:"others"`   // dépôts dont l'étudiant n'est pas du groupe
+	Teams    int    `json:"teams"`    // équipes du groupe qui ont un dépôt
+	Others   int    `json:"others"`   // dépôts dont le destinataire est inconnu
+	// Kind vaut « équipe » dès qu'un dépôt du travail porte le nom d'une équipe
+	// du groupe, « individuel » sinon.
+	Kind     string `json:"kind"`
 	PushedAt string `json:"pushed_at"`
 }
+
+// ForTeams dit si le travail est distribué aux équipes.
+func (a Assignment) ForTeams() bool { return a.Kind == TeamWork }
 
 // Assignments retrouve les travaux du groupe parmi les dépôts de l'organisation.
 // La nomenclature courante se relit sans rien deviner : un dépôt est du
 // groupe, ou il ne l'est pas.
-func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
+//
+// Les équipes du groupe sont données parce qu'elles vivent sur GitHub, pas dans
+// un fichier local : c'est en confrontant le dernier niveau d'un nom de dépôt à
+// leurs noms qu'on sait si le travail est d'équipe. Une liste vide n'est pas
+// une erreur — le groupe n'a alors que des travaux individuels.
+func (c Classroom) Assignments(repos []groups.RepoInfo, equipes []teams.Team) []Assignment {
 	connus := c.fragments()
+	nomsDEquipes := teamFragments(equipes)
 	parNom := map[string]*Assignment{}
 
 	for _, repo := range repos {
@@ -454,14 +496,19 @@ func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
 		if !deja {
 			travail = &Assignment{
 				ID:   naming.AssignmentID(c.Session, c.Course, c.Group, parts.Assignment),
-				Name: parts.Assignment,
+				Name: parts.Assignment, Kind: Individual,
 			}
 			parNom[cle] = travail
 		}
 		travail.Repos++
-		if _, inscrit := connus[strings.ToLower(parts.Student)]; inscrit {
+		_, inscrit := connus[strings.ToLower(parts.Student)]
+		switch {
+		case nomsDEquipes[strings.ToLower(parts.Student)]:
+			travail.Teams++
+			travail.Kind = TeamWork
+		case inscrit:
 			travail.Students++
-		} else {
+		default:
 			travail.Others++
 		}
 		if repo.PushedAt > travail.PushedAt {
@@ -477,6 +524,16 @@ func (c Classroom) Assignments(repos []groups.RepoInfo) []Assignment {
 	return trouves
 }
 
+// teamFragments rassemble les noms courts d'équipes, pour reconnaître le dernier
+// niveau d'un nom de dépôt.
+func teamFragments(equipes []teams.Team) map[string]bool {
+	noms := make(map[string]bool, len(equipes))
+	for _, equipe := range equipes {
+		noms[strings.ToLower(equipe.Short)] = true
+	}
+	return noms
+}
+
 func sortAssignments(found []Assignment) {
 	sort.Slice(found, func(i, j int) bool {
 		if found[i].PushedAt != found[j].PushedAt {
@@ -487,9 +544,14 @@ func sortAssignments(found []Assignment) {
 }
 
 // Served renvoie les comptes du groupe qui ont déjà un dépôt pour ce travail.
+//
+// Une personne qui travaille sous deux comptes n'a qu'un dépôt — c'est son nom
+// qui le nomme, pas son compte : le trouver la tient pour servie sous chacun
+// d'eux, sans quoi le second en réclamerait un autre du même nom.
 func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[string]bool {
 	servis := map[string]bool{}
 	connus := c.fragments()
+	comptes := c.Accounts()
 	for _, repo := range repos {
 		parts, reconnu := naming.Parse(repo.Name)
 		if !reconnu {
@@ -499,8 +561,13 @@ func (c Classroom) Served(assignmentID string, repos []groups.RepoInfo) map[stri
 		if !strings.EqualFold(id, assignmentID) {
 			continue
 		}
-		if student, inscrit := connus.personne(parts.Student); inscrit {
-			servis[strings.ToLower(student.Username)] = true
+		student, inscrit := connus.personne(parts.Student)
+		if !inscrit {
+			continue
+		}
+		servis[strings.ToLower(student.Username)] = true
+		for _, autre := range comptes[strings.ToLower(student.Username)] {
+			servis[strings.ToLower(autre)] = true
 		}
 	}
 	return servis
@@ -589,6 +656,11 @@ func dedupe(people []roster.Person) []roster.Person {
 		if position, connu := vus[person.Key()]; connu {
 			if uniques[position].FullName == "" && person.FullName != "" {
 				uniques[position].FullName = person.FullName
+			}
+			// Le matricule non plus ne se perd pas : c'est lui qui réunira
+			// cette ligne avec les autres comptes de la même personne.
+			if uniques[position].StudentID == "" && person.StudentID != "" {
+				uniques[position].StudentID = person.StudentID
 			}
 			continue
 		}
@@ -703,7 +775,7 @@ func (c Classroom) Rename(username string, person roster.Person) (Classroom, err
 	}
 	position := -1
 	for index, student := range c.Students {
-		if strings.EqualFold(student.Username, username) {
+		if student.Owns(username) {
 			position = index
 			break
 		}
@@ -711,9 +783,16 @@ func (c Classroom) Rename(username string, person roster.Person) (Classroom, err
 	if position < 0 {
 		return c, valid.Errorf("@%s n'est pas dans « %s ».", strings.TrimSpace(username), c.Label())
 	}
+	// Aucun de ses comptes ne peut être celui de quelqu'un d'autre : ce serait
+	// donner à deux personnes les mêmes dépôts.
 	for index, student := range c.Students {
-		if index != position && strings.EqualFold(student.Username, person.Username) {
-			return c, valid.Errorf("@%s est déjà dans « %s ».", person.Username, c.Label())
+		if index == position {
+			continue
+		}
+		for _, compte := range person.Accounts() {
+			if student.Owns(compte) {
+				return c, valid.Errorf("@%s est déjà dans « %s ».", compte, c.Label())
+			}
 		}
 	}
 	c.Students = append([]roster.Person(nil), c.Students...)

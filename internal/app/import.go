@@ -67,6 +67,16 @@ func (i *importSession) run() (int, error) {
 	// chaque dépôt, donc lesquels l'organisation nomme déjà — et si cette liste
 	// a encore quelque chose à apprendre.
 	i.proprietaires = i.acces(prefixe, i.retenus, repos)
+
+	// Un travail d'équipe se reprend autrement : le dernier niveau du nom
+	// désigne une équipe, il n'y a donc rien à rapprocher d'une liste — et pas
+	// de liste à charger.
+	equipe, err := i.enEquipeDemandee(prefixe, repos)
+	if err != nil {
+		return ExitOK, err
+	}
+	// La liste sert dans les deux cas : les équipes disent qui a fait le
+	// travail, elle dit comment ces gens s'appellent.
 	entrees, fichier, err := i.charger(prefixe, repos)
 	if err != nil {
 		return ExitOK, err
@@ -87,6 +97,9 @@ func (i *importSession) run() (int, error) {
 		classroom.DefaultsFrom(i.session.Settings))
 	if err != nil {
 		return ExitValidation, err
+	}
+	if equipe {
+		return i.enEquipe(arrivee, prefixe, nom, entrees, repos)
 	}
 	plan, err := classroom.PlanImport(arrivee, classroom.ImportRequest{
 		Prefix: prefixe, Name: nom, Entries: entrees,
@@ -144,6 +157,44 @@ func (i *importSession) run() (int, error) {
 		}
 	}
 	return i.appliquer(arrivee, plan)
+}
+
+// enEquipeDemandee dit si le travail à reprendre a été fait en équipe.
+//
+// Le drapeau tranche s'il est là. Sinon la question ne se pose que lorsque les
+// accès la rendent plausible : un dépôt individuel n'a qu'une personne, et
+// poser la question devant une cohorte entière de dépôts à un collaborateur
+// ajouterait une étape à tout le monde pour le cas d'un seul.
+func (i *importSession) enEquipeDemandee(prefixe string,
+	repos []groups.RepoInfo) (bool, error) {
+	if i.session.Options.Teams {
+		return true, nil
+	}
+	if !i.session.Interactive() || !plusieurs(i.membres(prefixe, i.retenus, repos)) {
+		return false, nil
+	}
+	i.session.Console.Note(
+		"Plusieurs personnes ont accès à un même dépôt : ce travail a peut-être " +
+			"été fait en équipe.")
+	choix, err := i.session.Prompt.Choose("Ce travail a-t-il été fait en équipe ?",
+		ui.Options(
+			"individuel", "Individuel — ce qui suit le préfixe nomme une personne",
+			"equipe", "En équipe — ce qui suit le préfixe nomme une équipe",
+		), "individuel")
+	if err != nil {
+		return false, err
+	}
+	return choix == "equipe", nil
+}
+
+// plusieurs dit qu'un dépôt au moins rassemble plus d'une personne.
+func plusieurs(equipes map[string]identity.Crew) bool {
+	for _, crew := range equipes {
+		if len(crew.Members) > 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // choisirTravail propose les travaux devinés, ou retient celui qu'on a nommé.
@@ -368,12 +419,22 @@ func (i *importSession) charger(prefixe string, repos []groups.RepoInfo) (
 		for _, ligne := range strings.Split(roster.OmnivoxHelp, "\n") {
 			console.Note("%s", ligne)
 		}
-		console.Note("Laissez vide pour passer : les dépôts que rien ne nomme " +
-			"garderont le compte qu'ils portent.")
+		// La question accepte une réponse vide, et le dit : sans liste, la
+		// reprise se fait quand même. Un chemin mémorisé serait repris par une
+		// réponse vide — il faut alors effacer le champ, et le dire aussi.
+		retenu := strings.TrimSpace(i.session.Settings.RosterPath)
+		if retenu == "" {
+			console.Note("Laissez vide pour passer : les dépôts que rien ne nomme " +
+				"garderont le compte qu'ils portent.")
+		} else {
+			console.Note("Entrée reprend « %s » ; effacez le champ pour passer "+
+				"sans liste.", retenu)
+		}
 		reponse, err := i.session.Prompt.Ask(ui.Question{
-			Title:    "Chemin du fichier",
-			Default:  i.session.Settings.RosterPath,
-			Complete: complete.Path,
+			Title:      "Chemin du fichier",
+			Default:    retenu,
+			AllowEmpty: true,
+			Complete:   complete.Path,
 		})
 		if err != nil {
 			return nil, "", err

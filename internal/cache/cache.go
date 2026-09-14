@@ -14,8 +14,12 @@ import (
 
 // Durées de validité : la liste des dépôts bouge plus souvent qu'un nom de profil.
 const (
-	ReposTTL   = 6 * time.Hour
-	OrgsTTL    = 12 * time.Hour
+	ReposTTL = 6 * time.Hour
+	OrgsTTL  = 12 * time.Hour
+	// Les équipes changent sous la main de qui enseigne — une composition
+	// corrigée sur github.com doit se voir vite : elles se gardent moins
+	// longtemps que les dépôts.
+	TeamsTTL   = time.Hour
 	ProfileTTL = 30 * 24 * time.Hour
 	// AccessTTL est courte : un étudiant ajouté à un dépôt doit être vu le jour
 	// même, là où un nom de profil ne change presque jamais.
@@ -30,6 +34,9 @@ const (
 // ReposKey est la clé de la liste des dépôts d'une organisation.
 func ReposKey(org string) string { return "repos:" + strings.ToLower(org) }
 
+// TeamsKey est la clé des équipes d'une organisation.
+func TeamsKey(org string) string { return "teams:" + strings.ToLower(org) }
+
 // OrgsKey est la clé des organisations accessibles à un compte.
 func OrgsKey(viewer string) string { return "orgs:" + strings.ToLower(viewer) }
 
@@ -42,6 +49,12 @@ func ProfileKey(login string) string { return "profile:" + strings.ToLower(login
 // AccessKey est la clé des comptes qui ont accès à un dépôt.
 func AccessKey(org, repo string) string {
 	return "access:" + strings.ToLower(org) + "/" + strings.ToLower(repo)
+}
+
+// CrewKey est la clé des personnes qu'un dépôt d'équipe rassemble : ses
+// équipes GitHub, ses collaborateurs, ses auteurs de commits.
+func CrewKey(org, repo string) string {
+	return "crew:" + strings.ToLower(org) + "/" + strings.ToLower(repo)
 }
 
 // Dir renvoie l'emplacement du cache, conforme au standard du système.

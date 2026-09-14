@@ -63,6 +63,29 @@ type Options struct {
 	Sort       students.Key
 	SortDesc   bool
 	Assignment string
+	// Teams dit que le travail se distribue aux équipes : un dépôt par équipe
+	// plutôt qu'un dépôt par personne. En mode gestion, sans autre drapeau
+	// d'équipe, il liste les équipes du groupe ; à la reprise, il dit que le
+	// dernier niveau des noms désigne une équipe et non une personne.
+	Teams bool
+	// Team désigne la ou les équipes visées. En gestion, une seule à la fois ;
+	// à la distribution, celles à servir — les autres attendront.
+	Team []string
+	// Opérations sur l'équipe visée, en mode gestion.
+	TeamMembers   []string
+	TeamMembersOn bool
+	TeamAdd       []string
+	TeamRemove    []string
+	TeamRename    string
+	TeamAdopt     string
+	// TeamMove est la place du groupe où l'équipe s'en va, avec ses membres et
+	// tout ce qu'ils ont rendu.
+	TeamMove   string
+	TeamDelete bool
+	// TeamDeleteRepos emporte aussi les dépôts que l'équipe a rendus. Ils ne
+	// la suivent pas d'eux-mêmes : le travail survit à l'équipe qui l'a fait.
+	TeamDeleteRepos bool
+	TeamShare       bool
 	// MoveTo déplace le travail ouvert vers une place de la nomenclature
 	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra. Sans
 	// MoveTo, RenameTo renomme le travail là où il est déjà.
@@ -121,12 +144,16 @@ Utilisation :
   gh cohorte --students --session a26         étudiants de la session a26
   gh cohorte --import                         reprendre des dépôts nommés autrement
   gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+  gh cohorte --import projet --teams --into a26.5n6.01 -y
   gh cohorte --publish-registry --dry-run     ce que publier les noms ferait
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
   gh cohorte --refresh-token --scopes delete_repo
   gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
   gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
+  gh cohorte --org acme --manage a26.5n6.01 --teams
+  gh cohorte --org acme --manage a26.5n6.01 --team eq1 --team-members "ec,jlp"
+  gh cohorte --org acme --assignment a26.5n6.01.tp1 --teams --team eq1,eq2 -y
 
 Drapeaux :
   --org ORG                organisation GitHub cible
@@ -150,6 +177,19 @@ Drapeaux :
   --named-only             ne reprendre que les dépôts dont l'étudiant est connu
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
+  --teams                  travail d'équipe : un dépôt par équipe, partagé avec elle
+                           (avec --manage seul : liste les équipes du groupe ;
+                            avec --import : le dernier niveau nomme une équipe)
+  --team NOM[,NOM]         équipe visée ; à la distribution, celles à servir
+  --team-members COMPTES   composition exacte de l'équipe visée (la crée au besoin)
+  --team-add COMPTES       inscrire des comptes dans l'équipe (ils quittent la leur)
+  --team-remove COMPTES    retirer des comptes de l'équipe
+  --team-rename NOM        renommer l'équipe visée
+  --team-move PLACE        déplacer l'équipe vers un autre groupe
+  --team-delete            supprimer l'équipe visée
+  --team-delete-repos      supprimer aussi ses dépôts (avec --team-delete)
+  --team-adopt EQUIPE      adopter une équipe de l'organisation sous le nom de --team
+  --team-share             (re)partager les dépôts du travail avec leurs équipes
   --move-to PLACE          déplacer le travail géré vers « session.cours.groupe »
   --rename-to NOM          nom que le travail prend ; seul, il le renomme sur place
   --template ORG/DEPOT     dépôt modèle (vide = dépôt neuf initialisé)
@@ -236,6 +276,19 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"ne reprendre que les dépôts dont l'étudiant est connu")
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
+	set.BoolVar(&options.Teams, "teams", false, "travail d'équipe")
+	equipe := set.String("team", "", "équipe visée")
+	membres := set.String("team-members", unset, "composition exacte de l'équipe")
+	ajouts := set.String("team-add", "", "comptes à inscrire dans l'équipe")
+	retraits := set.String("team-remove", "", "comptes à retirer de l'équipe")
+	set.StringVar(&options.TeamRename, "team-rename", "", "nouveau nom de l'équipe")
+	set.StringVar(&options.TeamAdopt, "team-adopt", "", "équipe existante à adopter")
+	set.StringVar(&options.TeamMove, "team-move", "",
+		"place du groupe où déplacer l'équipe")
+	set.BoolVar(&options.TeamDelete, "team-delete", false, "supprimer l'équipe visée")
+	set.BoolVar(&options.TeamDeleteRepos, "team-delete-repos", false,
+		"supprimer aussi les dépôts de l'équipe")
+	set.BoolVar(&options.TeamShare, "team-share", false, "repartager les dépôts avec les équipes")
 	set.StringVar(&options.MoveTo, "move-to", "", "place d'arrivée du travail géré")
 	set.StringVar(&options.RenameTo, "rename-to", "", "nom que le travail prend")
 	set.StringVar(&options.Pattern, "pattern", "", "gabarit de nom des dépôts")
@@ -291,6 +344,16 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		return nil, err
 	}
 
+	options.Team = splitList(*equipe)
+	options.TeamAdd = splitList(*ajouts)
+	options.TeamRemove = splitList(*retraits)
+	// Une composition vide reste une composition : « --team-members "" » vide
+	// l'équipe, alors que le drapeau absent ne demande rien.
+	if *membres != unset {
+		options.TeamMembersOn = true
+		options.TeamMembers = splitList(*membres)
+	}
+
 	if *manage != unset {
 		options.ManageRequested = true
 		options.Manage = *manage
@@ -311,6 +374,18 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.DelaySet = true
 		options.Delay = *delay
 	}
+	// Repartager un travail suppose de savoir lequel : le dire ici évite un
+	// refus surgi du fond de la distribution.
+	if options.TeamShare && strings.TrimSpace(options.Assignment) == "" {
+		return nil, valid.Errorf(
+			"--team-share : indiquez le travail à repartager avec « --assignment a26.5n6.01.tp1 ».")
+	}
+	// « --team-delete-repos » seul détruirait sans qu'on ait demandé la
+	// suppression : il accompagne « --team-delete », il ne la remplace pas.
+	if options.TeamDeleteRepos && !options.TeamDelete {
+		return nil, valid.Errorf(
+			"--team-delete-repos accompagne « --team-delete » : ajoutez-le pour supprimer l'équipe.")
+	}
 	if options.Jobs < 1 {
 		options.Jobs = 1
 	}
@@ -318,6 +393,20 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.Depth = 0
 	}
 	return options, nil
+}
+
+// splitList découpe une liste écrite d'un trait — « eq1,eq2 » ou « eq1 eq2 » —
+// en écartant les vides : une virgule en trop ne doit pas produire un nom vide.
+func splitList(value string) []string {
+	items := make([]string, 0, 4)
+	for _, item := range strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == ';'
+	}) {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 // translateFlagError met en français les messages du paquet flag.

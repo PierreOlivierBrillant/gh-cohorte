@@ -29,11 +29,12 @@ type Scope struct {
 }
 
 // Catalog énumère les portées dont l'outil se sert. Les deux premières font
-// partie du socle que gh accorde à tout jeton qu'il crée ; les deux autres se
+// partie du socle que gh accorde à tout jeton qu'il crée ; les autres se
 // demandent, et un jeton ordinaire ne les a pas.
 var Catalog = []Scope{
 	{"repo", "Dépôts", "Créer, lire et modifier les dépôts de l'organisation.", true},
 	{"read:org", "Organisations", "Lister vos organisations et y lire votre rôle.", true},
+	{"admin:org", "Équipes", "Créer les équipes d'un groupe et les composer.", false},
 	{"workflow", "Actions", "Déposer des fichiers dans .github/workflows.", false},
 	{"delete_repo", "Suppression", "Supprimer définitivement un dépôt.", false},
 }
