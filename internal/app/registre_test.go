@@ -36,7 +36,7 @@ func TestDistributionEnLigneDeCommandeInscritAuRegistre(t *testing.T) {
 	if depot == nil || !depot.Private {
 		t.Fatalf("registre = %+v", depot)
 	}
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	for _, attendu := range []string{"emilie-cote", "Émilie Côté", "jlpicard"} {
 		if !strings.Contains(contenu, attendu) {
 			t.Fatalf("« %s » manque au registre :\n%s", attendu, contenu)
@@ -100,7 +100,7 @@ func TestAnnuaireDuTerminalLitLeRegistre(t *testing.T) {
 	}
 	state.AddRepo("acme", registry.RepoName, true)
 	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
-		registry.StudentsFile: `{
+		registry.UsersFile: `{
   "version": 1,
   "students": [
     {"username": "emilie-cote", "full_name": "Émilie Côté", "slugs": ["emilie-cote"]},
@@ -137,7 +137,7 @@ func TestPublicationVerseLesNomsDuPoste(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	for _, attendu := range []string{"Émilie Côté", "Jean-Luc Picard", "emilie-cote"} {
 		if !strings.Contains(contenu, attendu) {
 			t.Fatalf("« %s » manque au registre :\n%s", attendu, contenu)
@@ -187,7 +187,7 @@ func TestPublicationSignaleUnCompteNommeDeuxFois(t *testing.T) {
 
 	// Les deux slugs sont montés : aucun dépôt ne se détache, quel que soit le
 	// nom retenu.
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	for _, slug := range []string{"emilie-cote", "emlie-cote"} {
 		if !strings.Contains(contenu, slug) {
 			t.Fatalf("le slug « %s » n'est pas monté :\n%s", slug, contenu)
@@ -231,7 +231,7 @@ func TestPublicationMontreUnDesaccordSansTrancherSeule(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddRepo("acme", registry.RepoName, true)
 	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
-		registry.StudentsFile: `{"version":1,"students":[` +
+		registry.UsersFile: `{"version":1,"students":[` +
 			`{"username":"emilie-cote","full_name":"Émilie Côté","slugs":["emilie-cote"]}]}`,
 	}, registry.Branch)
 
@@ -247,7 +247,7 @@ func TestPublicationMontreUnDesaccordSansTrancherSeule(t *testing.T) {
 	}
 	h.contient("désaccord", "le registre garde le sien")
 
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	if !strings.Contains(contenu, "Émilie Côté") || strings.Contains(contenu, `"Emilie Cote"`) {
 		t.Fatalf("le registre n'a pas gardé son nom :\n%s", contenu)
 	}
@@ -357,7 +357,7 @@ func TestUnNomNonRepriResteDansLeFichierLocal(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddRepo("acme", registry.RepoName, true)
 	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
-		registry.StudentsFile: `{"version":1,"students":[` +
+		registry.UsersFile: `{"version":1,"students":[` +
 			`{"username":"emilie-cote","full_name":"Émilie Côté","slugs":["emilie-cote"]}]}`,
 	}, registry.Branch)
 

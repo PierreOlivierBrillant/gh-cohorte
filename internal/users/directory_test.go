@@ -1,4 +1,4 @@
-package students_test
+package users_test
 
 import (
 	"strings"
@@ -8,7 +8,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
 
 // college décrit deux sessions et deux cours autour des mêmes personnes :
@@ -48,9 +48,9 @@ func college() ([]classroom.Classroom, []groups.RepoInfo) {
 	return cours, inventaire
 }
 
-func annuaire() []students.Row {
+func annuaire() []users.Row {
 	cours, inventaire := college()
-	return students.Directory(cours, inventaire, nil)
+	return users.Directory(cours, inventaire, nil)
 }
 
 func TestAnnuaireFondUnePersonneVueParPlusieursGroupes(t *testing.T) {
@@ -59,7 +59,7 @@ func TestAnnuaireFondUnePersonneVueParPlusieursGroupes(t *testing.T) {
 		t.Fatalf("annuaire : %s", comptes(lignes))
 	}
 
-	var emilie students.Row
+	var emilie users.Row
 	for _, ligne := range lignes {
 		if ligne.Username == "ecote" {
 			emilie = ligne
@@ -98,7 +98,7 @@ func TestAnnuaireRecupereUnNomCompletConnuAilleurs(t *testing.T) {
 	cours, inventaire := college()
 	cours[0].Students = append(cours[0].Students,
 		roster.Person{FullName: "Aminata Diallo", Username: "aminata-d"})
-	for _, ligne := range students.Directory(cours, inventaire, nil) {
+	for _, ligne := range users.Directory(cours, inventaire, nil) {
 		if ligne.Username == "aminata-d" && ligne.FullName != "Aminata Diallo" {
 			t.Fatalf("nom complet d'Aminata : %q", ligne.FullName)
 		}
@@ -123,8 +123,8 @@ func TestFiltrerParSessionEtParCours(t *testing.T) {
 		{cours: "4W6", attendus: "ecote"},
 	}
 	for _, essai := range cas {
-		filtre := students.Filter{Session: essai.session, Course: essai.cours}
-		retenues := students.Apply(lignes, filtre, students.ByName, false)
+		filtre := users.Filter{Session: essai.session, Course: essai.cours}
+		retenues := users.Apply(lignes, filtre, users.ByName, false)
 		if comptes(retenues) != essai.attendus {
 			t.Fatalf("session %q, cours %q : %s (attendu %s)",
 				essai.session, essai.cours, comptes(retenues), essai.attendus)
@@ -137,9 +137,9 @@ func TestUneInscriptionSansDepotCompte(t *testing.T) {
 	cours, inventaire := college()
 	cours[1].Students = append(cours[1].Students,
 		roster.Person{FullName: "Jean-Luc Picard", Username: "jlpicard"})
-	lignes := students.Directory(cours, inventaire, nil)
-	retenues := students.Apply(lignes,
-		students.Filter{Session: "a26", Course: "4w6"}, students.ByName, false)
+	lignes := users.Directory(cours, inventaire, nil)
+	retenues := users.Apply(lignes,
+		users.Filter{Session: "a26", Course: "4w6"}, users.ByName, false)
 	if comptes(retenues) != "ecote,jlpicard" {
 		t.Fatalf("inscrits à 4W6 : %s", comptes(retenues))
 	}
@@ -148,7 +148,7 @@ func TestUneInscriptionSansDepotCompte(t *testing.T) {
 func TestSessionsEtCoursDeLAnnuaire(t *testing.T) {
 	lignes := annuaire()
 	sessions := make([]string, 0, 2)
-	for _, session := range students.SessionsIn(lignes) {
+	for _, session := range users.SessionsIn(lignes) {
 		sessions = append(sessions, session.Short+" ("+session.Name+")")
 	}
 	// De la plus récente à la plus ancienne, comme partout ailleurs.
@@ -156,11 +156,11 @@ func TestSessionsEtCoursDeLAnnuaire(t *testing.T) {
 		t.Fatalf("sessions : %v", sessions)
 	}
 
-	if tous := students.CoursesIn(lignes, ""); strings.Join(tous, ",") != "4w6,5n6" {
+	if tous := users.CoursesIn(lignes, ""); strings.Join(tous, ",") != "4w6,5n6" {
 		t.Fatalf("cours : %v", tous)
 	}
 	// Une session choisie ne propose que les cours qu'elle a portés.
-	if hiver := students.CoursesIn(lignes, "h27"); strings.Join(hiver, ",") != "5n6" {
+	if hiver := users.CoursesIn(lignes, "h27"); strings.Join(hiver, ",") != "5n6" {
 		t.Fatalf("cours de l'hiver : %v", hiver)
 	}
 }
@@ -169,7 +169,7 @@ func TestSessionsEtCoursDeLAnnuaire(t *testing.T) {
 // l'annuaire — mais il ne disparaît pas non plus.
 func TestDepotsSansEtudiantConnuSontComptes(t *testing.T) {
 	cours, inventaire := college()
-	if orphelins := students.Unmatched(cours, inventaire, nil); orphelins != 1 {
+	if orphelins := users.Unmatched(cours, inventaire, nil); orphelins != 1 {
 		t.Fatalf("dépôts non rattachés : %d", orphelins)
 	}
 }

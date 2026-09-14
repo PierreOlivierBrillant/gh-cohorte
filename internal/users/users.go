@@ -1,11 +1,17 @@
-// Package students dresse la liste des étudiants d'un groupe — chacun avec les
-// dépôts qu'il a déjà —, puis la filtre et la trie.
+// Package users dresse la liste des utilisateurs d'une organisation — chacun
+// avec les dépôts qu'il a déjà —, puis la filtre et la trie.
 //
-// Ces trois opérations vivent ici plutôt que dans une interface : « trié par
+// « Utilisateur » est le mot qui englobe : un étudiant est un utilisateur, un
+// enseignant aussi. La liste d'un groupe ne montre que ses étudiants ;
+// l'annuaire de l'organisation montre tout le monde, et c'est là que la
+// distinction se voit. Le rôle vient du registre, jamais du nom d'un dépôt :
+// rien dans « a26.5n6.01.tp1.emilie-cote » ne dit qui enseigne.
+//
+// Le filtre et le tri vivent ici plutôt que dans une interface : « trié par
 // dernier envoi » doit donner le même ordre au navigateur et au terminal, et
 // « avant le 1er octobre » doit y vouloir dire la même chose. Une interface ne
 // fait que dire ce qu'elle veut ; c'est ce paquet qui sait ce que cela signifie.
-package students
+package users
 
 import (
 	"sort"

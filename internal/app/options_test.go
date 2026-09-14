@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
 
 func analyser(t *testing.T, args ...string) *app.Options {
@@ -168,10 +168,10 @@ func TestOptionsFiltreEtTriDeLaListe(t *testing.T) {
 	if options.Filter.Text != "cote" || options.Filter.PushedAfter != "2026-10-01" {
 		t.Fatalf("filtre : %+v", options.Filter)
 	}
-	if options.Filter.Activity != students.Silent {
+	if options.Filter.Activity != users.Silent {
 		t.Fatalf("activité : %q", options.Filter.Activity)
 	}
-	if options.Sort != students.ByPushed || !options.SortDesc {
+	if options.Sort != users.ByPushed || !options.SortDesc {
 		t.Fatalf("tri : %q (décroissant : %v)", options.Sort, options.SortDesc)
 	}
 

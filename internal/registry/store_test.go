@@ -70,7 +70,7 @@ func TestLaPremiereEcritureAmorceLeDepot(t *testing.T) {
 		t.Error("le registre porte des noms d'étudiants : il doit être privé")
 	}
 	fichiers := serveur.State.Files("acme/"+registry.RepoName, registry.Branch)
-	if _, present := fichiers[registry.StudentsFile]; !present {
+	if _, present := fichiers[registry.UsersFile]; !present {
 		t.Fatalf("fichiers = %v", fichiers)
 	}
 	if lisezmoi := fichiers[registry.ReadmeFile]; !strings.Contains(lisezmoi, "privé") {
@@ -638,8 +638,8 @@ func verifierAucuneRequeteVersUnDepotVide(t *testing.T, preparer func(*fakegh.St
 	if !strings.Contains(fichiers[registry.ReadmeFile], "gh cohorte") {
 		t.Fatalf("%s = %q", registry.ReadmeFile, fichiers[registry.ReadmeFile])
 	}
-	if !strings.Contains(fichiers[registry.StudentsFile], "Émilie Côté") {
-		t.Fatalf("registre = %q", fichiers[registry.StudentsFile])
+	if !strings.Contains(fichiers[registry.UsersFile], "Émilie Côté") {
+		t.Fatalf("registre = %q", fichiers[registry.UsersFile])
 	}
 	if len(sortedNoms(fichiers)) != 2 {
 		t.Fatalf("le dépôt porte autre chose que ses deux fichiers : %v", sortedNoms(fichiers))

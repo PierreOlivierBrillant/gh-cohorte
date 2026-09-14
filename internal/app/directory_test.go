@@ -8,7 +8,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
 
 // college monte deux sessions et deux cours autour des mêmes personnes :
@@ -78,7 +78,7 @@ func TestAnnuaireDuTerminal(t *testing.T) {
 // même paquet qui les applique dans les trois interfaces.
 func TestAnnuaireFiltreParSessionEtParCours(t *testing.T) {
 	h := college(t)
-	h.Options.Filter = students.Filter{Session: "h27"}
+	h.Options.Filter = users.Filter{Session: "h27"}
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
@@ -88,7 +88,7 @@ func TestAnnuaireFiltreParSessionEtParCours(t *testing.T) {
 	// Les deux critères portent sur la même inscription : Picard a bien fait
 	// 5N6, mais pas à l'hiver.
 	croise := college(t)
-	croise.Options.Filter = students.Filter{Session: "a26", Course: "4w6"}
+	croise.Options.Filter = users.Filter{Session: "a26", Course: "4w6"}
 	if code := croise.muet(); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, croise.texte())
 	}

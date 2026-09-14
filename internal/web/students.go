@@ -5,8 +5,8 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
 
 // L'annuaire regarde l'organisation entière plutôt qu'un groupe : c'est la
@@ -39,20 +39,20 @@ type directoryEnrollment struct {
 // directoryQuery lit les critères de l'annuaire. Ce sont ceux de la liste d'un
 // groupe, plus la session et le cours — les deux seuls qu'un groupe seul ne
 // pouvait pas poser.
-func directoryQuery(request *http.Request) (students.Filter, students.Key, bool, error) {
+func directoryQuery(request *http.Request) (users.Filter, users.Key, bool, error) {
 	valeurs := request.URL.Query()
-	filtre, err := students.Filter{
+	filtre, err := users.Filter{
 		Text:         valeurs.Get("q"),
 		Session:      valeurs.Get("session"),
 		Course:       valeurs.Get("course"),
 		PushedAfter:  valeurs.Get("after"),
 		PushedBefore: valeurs.Get("before"),
-		Activity:     students.Activity(valeurs.Get("activity")),
+		Activity:     users.Activity(valeurs.Get("activity")),
 	}.Validate()
 	if err != nil {
-		return filtre, students.ByName, false, err
+		return filtre, users.ByName, false, err
 	}
-	tri, err := students.ParseKey(valeurs.Get("sort"))
+	tri, err := users.ParseKey(valeurs.Get("sort"))
 	if err != nil {
 		return filtre, tri, false, err
 	}
@@ -79,8 +79,8 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 	// qu'à personne : sans elles, l'annuaire les compterait orphelins.
 	infos, _ := s.orgTeams(org, false)
 	equipes := teamsOfAll(visibles, infos)
-	toutes := students.Directory(visibles, repos, equipes)
-	retenues := students.Apply(toutes, filtre, tri, decroissant)
+	toutes := users.Directory(visibles, repos, equipes)
+	retenues := users.Apply(toutes, filtre, tri, decroissant)
 
 	lignes := make([]directoryRow, 0, len(retenues))
 	for _, ligne := range retenues {
@@ -92,19 +92,19 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 	// permettrait d'en sortir.
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"students": lignes,
-		"sessions": students.SessionsIn(toutes),
-		"courses":  students.CoursesIn(toutes, filtre.Session),
+		"sessions": users.SessionsIn(toutes),
+		"courses":  users.CoursesIn(toutes, filtre.Session),
 		"total":    len(toutes), "shown": len(lignes),
 		// Les dépôts que personne ne réclame : sans eux, une liste incomplète
 		// se lirait comme si elle était entière.
-		"unmatched": students.Unmatched(visibles, repos, equipes),
+		"unmatched": users.Unmatched(visibles, repos, equipes),
 		"org":       org, "source": source,
 	})
 }
 
 // directoryRow rassemble les dépôts d'une personne sous le groupe d'où ils
 // viennent : deux groupes peuvent avoir chacun leur « tp1 ».
-func (s *Server) directoryRow(org string, ligne students.Row) directoryRow {
+func (s *Server) directoryRow(org string, ligne users.Row) directoryRow {
 	parPlace := map[string][]studentAssignment{}
 	for _, depot := range ligne.Repos {
 		parPlace[depot.Scope] = append(parPlace[depot.Scope], studentAssignment{

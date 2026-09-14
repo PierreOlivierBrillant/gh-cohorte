@@ -134,7 +134,7 @@ func TestUnSlugApprisRattacheLesDepots(t *testing.T) {
 // Le fichier doit se relire sur github.com : trié, indenté pareil, stable d'une
 // écriture à l'autre.
 func TestLeFichierEstStableEtTrie(t *testing.T) {
-	set, _, _ := appliquer(t, registry.Empty(), registry.Change{Learn: []registry.Student{
+	set, _, _ := appliquer(t, registry.Empty(), registry.Change{Learn: []registry.User{
 		registry.From(personne("Jean-Luc Picard", "jlpicard")),
 		registry.From(personne("Émilie Côté", "ecote")),
 		registry.From(personne("Aminata Diallo", "aminata-d")),
@@ -157,8 +157,8 @@ func TestLeFichierEstStableEtTrie(t *testing.T) {
 
 	// Rangé par compte : les différences restent lisibles d'une version à l'autre.
 	var lu struct {
-		Version  int              `json:"version"`
-		Students []map[string]any `json:"students"`
+		Version int              `json:"version"`
+		Users   []map[string]any `json:"users"`
 	}
 	if err := json.Unmarshal(premier, &lu); err != nil {
 		t.Fatal(err)
@@ -166,9 +166,14 @@ func TestLeFichierEstStableEtTrie(t *testing.T) {
 	if lu.Version != registry.Version {
 		t.Errorf("version écrite = %d", lu.Version)
 	}
-	comptes := make([]string, 0, len(lu.Students))
-	for _, fiche := range lu.Students {
+	comptes := make([]string, 0, len(lu.Users))
+	for _, fiche := range lu.Users {
 		comptes = append(comptes, fiche["username"].(string))
+		// Le rôle est écrit pour tout le monde, « false » compris : un champ
+		// absent se lirait « on ne sait pas », alors qu'on sait.
+		if _, porte := fiche["is_teacher"]; !porte {
+			t.Errorf("@%s : le rôle doit être écrit", fiche["username"])
+		}
 	}
 	if strings.Join(comptes, ",") != "aminata-d,ecote,jlpicard" {
 		t.Fatalf("ordre = %v", comptes)
@@ -258,4 +263,119 @@ func TestUneFicheSansNomDesigneQuandMemeQuelquun(t *testing.T) {
 func appliquer(t *testing.T, set *registry.Set, change registry.Change) (*registry.Set, bool, error) {
 	t.Helper()
 	return set.With(change, "2026-09-06")
+}
+
+// ------------------------------------------------------------------- rôles
+
+// Le rôle ne s'apprend pas, il se décide. Une liste de classe réimportée ne
+// sait pas qui enseigne : si elle pouvait l'écrire, elle ferait redescendre
+// étudiant l'enseignant qui s'y trouve.
+func TestApprendreQuelquunNeChangePasSonRole(t *testing.T) {
+	set, _, err := appliquer(t, registry.Empty(), registry.Learn(personne("Kathryn Janeway", "kjaneway")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, _, err = appliquer(t, set, registry.SetRole("kjaneway", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !set.Teaches("kjaneway") {
+		t.Fatal("la cooptation doit être retenue")
+	}
+
+	// Le même compte, réappris par une liste : il enseigne toujours.
+	set, _, err = appliquer(t, set, registry.Learn(personne("Kathryn Janeway", "kjaneway")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !set.Teaches("kjaneway") {
+		t.Error("réapprendre quelqu'un ne doit pas lui retirer son rôle")
+	}
+}
+
+// Coopter est réversible, et rejouable : deux fois le même changement donne le
+// même registre, sans faux commit entre les deux.
+func TestLeRoleSeRetireEtNeBougeQuUneFois(t *testing.T) {
+	set, _, err := appliquer(t, registry.Empty(), registry.Learn(personne("Kathryn Janeway", "kjaneway")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, bouge, err := appliquer(t, set, registry.SetRole("kjaneway", true))
+	if err != nil || !bouge {
+		t.Fatalf("première cooptation : bouge=%v, err=%v", bouge, err)
+	}
+	if _, rebouge, _ := appliquer(t, set, registry.SetRole("kjaneway", true)); rebouge {
+		t.Error("rejouer la même cooptation ne doit rien écrire")
+	}
+	set, bouge, err = appliquer(t, set, registry.SetRole("kjaneway", false))
+	if err != nil || !bouge {
+		t.Fatalf("retrait : bouge=%v, err=%v", bouge, err)
+	}
+	if set.Teaches("kjaneway") {
+		t.Error("le rôle doit avoir été retiré")
+	}
+}
+
+// On ne coopte que quelqu'un que le registre connaît : un compte inventé
+// n'entre pas par la porte du rôle.
+func TestOnNeCoopteQueQuelquunDeConnu(t *testing.T) {
+	if _, _, err := appliquer(t, registry.Empty(), registry.SetRole("inconnu", true)); err == nil {
+		t.Fatal("coopter un compte inconnu doit être refusé")
+	}
+}
+
+// Teachers sert à chercher les cours qu'un collègue a donnés : il ne rend que
+// ceux qui enseignent, rangés par compte.
+func TestTeachersNeRendQueLesEnseignants(t *testing.T) {
+	set, _, err := appliquer(t, registry.Empty(), registry.Learn(
+		personne("Émilie Côté", "ecote"), personne("Kathryn Janeway", "kjaneway")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, _, err = appliquer(t, set, registry.SetRole("kjaneway", true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enseignants := set.Teachers()
+	if len(enseignants) != 1 || enseignants[0].Username != "kjaneway" {
+		t.Fatalf("enseignants = %+v", enseignants)
+	}
+	if enseignants[0].Role() != registry.RoleTeacher {
+		t.Errorf("rôle = %q", enseignants[0].Role())
+	}
+	fiche, _ := set.Find("ecote")
+	if fiche.Role() != registry.RoleStudent {
+		t.Errorf("rôle par défaut = %q", fiche.Role())
+	}
+}
+
+// Une organisation amorcée par une version antérieure range ses fiches sous
+// « students ». Elle ne doit pas perdre ses noms parce qu'un mot a changé.
+func TestUnRegistreEnVersion1SeRelit(t *testing.T) {
+	set, soucis := registry.Decode([]byte(`{
+  "version": 1,
+  "students": [
+    {"username": "ecote", "full_name": "Émilie Côté", "slugs": ["emilie-cote"]}
+  ]
+}`))
+	if len(soucis) != 0 {
+		t.Fatalf("soucis = %v", soucis)
+	}
+	fiche, connu := set.Find("ecote")
+	if !connu || fiche.FullName != "Émilie Côté" {
+		t.Fatalf("fiche = %+v, %v", fiche, connu)
+	}
+	// Sans rôle écrit, personne n'enseigne : c'est ce que la version 1 disait.
+	if fiche.IsTeacher {
+		t.Error("une fiche de version 1 ne déclare aucun enseignant")
+	}
+	// Et elle se réécrit sous la clé courante.
+	reecrit, err := set.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(reecrit), `"users"`) ||
+		strings.Contains(string(reecrit), `"students"`) {
+		t.Errorf("réécriture :\n%s", reecrit)
+	}
 }

@@ -6,9 +6,9 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
 
 // L'annuaire prend la hiérarchie à l'envers. Gérer un groupe répond à « qui est
@@ -68,11 +68,11 @@ var directoryMenu = ui.Options(
 type directorySession struct {
 	session   *Session
 	org       string
-	rows      []students.Row
+	rows      []users.Row
 	loaded    bool
 	orphelins int
-	filter    students.Filter
-	sortKey   students.Key
+	filter    users.Filter
+	sortKey   users.Key
 	sortDesc  bool
 	// avis dit ce qu'il faut savoir du registre : illisible, périmé, troué.
 	// Une liste de noms incomplète qu'on prend pour entière égare.
@@ -122,8 +122,8 @@ func (d *directorySession) load(force bool) error {
 	for _, cours := range visibles {
 		equipes = append(equipes, cours.Teams(infos)...)
 	}
-	d.rows = students.Directory(visibles, repos, equipes)
-	d.orphelins = students.Unmatched(visibles, repos, equipes)
+	d.rows = users.Directory(visibles, repos, equipes)
+	d.orphelins = users.Unmatched(visibles, repos, equipes)
 	d.loaded = true
 	return nil
 }
@@ -131,7 +131,7 @@ func (d *directorySession) load(force bool) error {
 // show écrit l'annuaire : une personne par ligne, ses cours en face.
 func (d *directorySession) show() {
 	console := d.session.Console
-	visibles := students.Apply(d.rows, d.filter, d.sortKey, d.sortDesc)
+	visibles := users.Apply(d.rows, d.filter, d.sortKey, d.sortDesc)
 
 	titre := "Étudiants de « " + d.org + " » — " + itoa(len(d.rows)) + " personne(s)"
 	if len(visibles) != len(d.rows) {
@@ -181,7 +181,7 @@ func (d *directorySession) show() {
 
 // coursSuivis énumère les places des groupes suivis, de la session la plus
 // récente à la plus ancienne : c'est l'ordre où l'on cherche quelqu'un.
-func coursSuivis(ligne students.Row) string {
+func coursSuivis(ligne users.Row) string {
 	places := make([]string, 0, len(ligne.Enrollments))
 	for _, inscription := range ligne.Enrollments {
 		places = append(places, inscription.Scope)
@@ -208,15 +208,15 @@ func (d *directorySession) criteria() string {
 	if d.filter.PushedBefore != "" {
 		parts = append(parts, "envoi avant le "+d.filter.PushedBefore)
 	}
-	if d.filter.Activity == students.Silent {
+	if d.filter.Activity == users.Silent {
 		parts = append(parts, "aucun envoi")
 	}
 	sens := "croissant"
 	if d.sortDesc {
 		sens = "décroissant"
 	}
-	tri := map[students.Key]string{
-		students.ByName: "nom", students.ByUsername: "compte", students.ByPushed: "dernier envoi",
+	tri := map[users.Key]string{
+		users.ByName: "nom", users.ByUsername: "compte", users.ByPushed: "dernier envoi",
 	}[d.sortKey]
 	if tri == "" {
 		tri = "nom"
@@ -237,8 +237,8 @@ func (d *directorySession) menu() (int, error) {
 		case "quitter":
 			return ExitOK, nil
 		case "vider":
-			d.filter = students.Filter{}
-			d.sortKey, d.sortDesc = students.ByName, false
+			d.filter = users.Filter{}
+			d.sortKey, d.sortDesc = users.ByName, false
 		case "session":
 			if err := d.askSession(); err != nil {
 				return ExitOK, err
@@ -264,10 +264,10 @@ func (d *directorySession) menu() (int, error) {
 		case "muets":
 			// Un seul état à basculer : ou bien tout le monde, ou bien ceux qui
 			// n'ont jamais rien envoyé.
-			if d.filter.Activity == students.Silent {
-				d.filter.Activity = students.AnyActivity
+			if d.filter.Activity == users.Silent {
+				d.filter.Activity = users.AnyActivity
 			} else {
-				d.filter.Activity = students.Silent
+				d.filter.Activity = users.Silent
 			}
 		case "tri":
 			if err := d.askSort(); err != nil {
@@ -291,7 +291,7 @@ func (d *directorySession) menu() (int, error) {
 // la plus ancienne.
 func (d *directorySession) askSession() error {
 	options := []ui.Option{{Value: "", Label: "Toutes les sessions"}}
-	for _, session := range students.SessionsIn(d.rows) {
+	for _, session := range users.SessionsIn(d.rows) {
 		options = append(options, ui.Option{Value: session.Short,
 			Label: session.Name + "  (" + session.Short + ")"})
 	}
@@ -306,7 +306,7 @@ func (d *directorySession) askSession() error {
 	d.filter.Session = choix
 	// Un cours que la session choisie n'a pas porté ne filtrerait plus rien :
 	// mieux vaut l'effacer que laisser une liste vide sans raison visible.
-	if d.filter.Course != "" && !contientCours(students.CoursesIn(d.rows, choix), d.filter.Course) {
+	if d.filter.Course != "" && !contientCours(users.CoursesIn(d.rows, choix), d.filter.Course) {
 		d.filter.Course = ""
 	}
 	return nil
@@ -315,7 +315,7 @@ func (d *directorySession) askSession() error {
 // askCourse propose les cours de la session retenue, ou tous si aucune ne l'est.
 func (d *directorySession) askCourse() error {
 	options := []ui.Option{{Value: "", Label: "Tous les cours"}}
-	for _, cours := range students.CoursesIn(d.rows, d.filter.Session) {
+	for _, cours := range users.CoursesIn(d.rows, d.filter.Session) {
 		options = append(options, ui.Option{Value: cours, Label: cours})
 	}
 	if len(options) == 1 {
@@ -350,7 +350,7 @@ func (d *directorySession) askDate(borne string) error {
 	date, err := d.session.Prompt.Ask(ui.Question{
 		Title: titre, Default: courant, AllowEmpty: true,
 		Validate: func(value string) (string, error) {
-			return students.ParseDate(value, "Dernier envoi")
+			return users.ParseDate(value, "Dernier envoi")
 		},
 	})
 	if err != nil {
@@ -370,12 +370,12 @@ func (d *directorySession) askSort() error {
 	if err != nil {
 		return err
 	}
-	key, err := students.ParseKey(choix)
+	key, err := users.ParseKey(choix)
 	if err != nil {
 		return err
 	}
 	decroissant, err := d.session.Prompt.Confirm("Du plus grand au plus petit ?",
-		key == students.ByPushed)
+		key == users.ByPushed)
 	if err != nil {
 		return err
 	}

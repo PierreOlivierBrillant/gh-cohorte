@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -59,8 +59,8 @@ type Options struct {
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
-	Filter     students.Filter
-	Sort       students.Key
+	Filter     users.Filter
+	Sort       users.Key
 	SortDesc   bool
 	Assignment string
 	// Teams dit que le travail se distribue aux équipes : un dépôt par équipe
@@ -328,19 +328,19 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 
 	// Les critères de liste sont validés ici : une date mal écrite doit
 	// arrêter la ligne de commande, pas se perdre en cours de route.
-	options.Filter = students.Filter{
+	options.Filter = users.Filter{
 		Text: *filtre, PushedAfter: *apres, PushedBefore: *avant,
 		Session: *session, Course: *sigle,
 	}
 	if *muets {
-		options.Filter.Activity = students.Silent
+		options.Filter.Activity = users.Silent
 	}
 	filtreValide, err := options.Filter.Validate()
 	if err != nil {
 		return nil, err
 	}
 	options.Filter = filtreValide
-	if options.Sort, err = students.ParseKey(*tri); err != nil {
+	if options.Sort, err = users.ParseKey(*tri); err != nil {
 		return nil, err
 	}
 

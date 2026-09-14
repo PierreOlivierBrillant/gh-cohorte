@@ -278,7 +278,7 @@ func TestPublicationParLInterfaceWeb(t *testing.T) {
 	if vue.Published != 1 || vue.Total != 0 || vue.RegistrySize != 1 {
 		t.Fatalf("publication = %+v", vue)
 	}
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	if !strings.Contains(contenu, "Émilie Côté") {
 		t.Fatalf("registre =\n%s", contenu)
 	}
@@ -304,7 +304,7 @@ func TestLeDesaccordSeTrancheALaDemande(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddRepo("acme", registry.RepoName, true)
 	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
-		registry.StudentsFile: `{"version":1,"students":[` +
+		registry.UsersFile: `{"version":1,"students":[` +
 			`{"username":"emilie-cote","full_name":"Émilie Côté","slugs":["emilie-cote"]}]}`,
 	}, registry.Branch)
 
@@ -317,7 +317,7 @@ func TestLeDesaccordSeTrancheALaDemande(t *testing.T) {
 	}
 
 	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{"prefer_local": true}, nil)
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	if !strings.Contains(contenu, `"Emilie Cote"`) {
 		t.Fatalf("le nom du poste n'a pas été repris :\n%s", contenu)
 	}
@@ -382,7 +382,7 @@ func TestEffacerLHistoriqueGardeLeContenu(t *testing.T) {
 		t.Errorf("message = %q", bilan.Message)
 	}
 
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	for _, attendu := range []string{"Émilie Côté", "Jean-Luc Picard"} {
 		if !strings.Contains(contenu, attendu) {
 			t.Fatalf("« %s » a disparu du registre :\n%s", attendu, contenu)

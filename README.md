@@ -285,8 +285,8 @@ dépôts git locaux (`file://`) : rien ne sort de la machine.
 La logique vit dans les paquets du domaine — `internal/naming` (la
 nomenclature), `internal/classroom` (les groupes), `internal/teams` (les
 équipes), `internal/registry` (le
-registre des étudiants), `internal/plan`, `internal/groups`, `internal/roster`,
-`internal/students`, `internal/runner`, `internal/clone` — et les trois
+registre des utilisateurs), `internal/plan`, `internal/groups`, `internal/roster`,
+`internal/users`, `internal/runner`, `internal/clone` — et les trois
 interfaces (`internal/web`, `internal/app`) n'en sont que des façades. C'est ce
 qui garantit qu'elles ne divergent pas.
 [`CLAUDE.md`](CLAUDE.md) énonce les règles à ne pas perdre de vue.
