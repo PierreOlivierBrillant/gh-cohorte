@@ -2,6 +2,7 @@ package registry_test
 
 import (
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,20 @@ func magasin(t *testing.T, state *fakegh.State) (*registry.Store, *fakegh.Server
 		t.Fatalf("New : %v", err)
 	}
 	return registry.New(client, "acme", nil), serveur
+}
+
+// clientDe monte un second client sur le même faux GitHub : c'est ce qu'il
+// faut pour jouer un autre poste, qui ne partage ni mémoire ni cache.
+func clientDe(t *testing.T, serveur *fakegh.Server) *ghapi.Client {
+	t.Helper()
+	client, err := ghapi.New(ghapi.Options{
+		Host: "127.0.0.1", Token: "jeton-de-test", BaseURL: serveur.URL(),
+		Sleep: func(time.Duration) {},
+	})
+	if err != nil {
+		t.Fatalf("New : %v", err)
+	}
+	return client
 }
 
 // Une organisation où l'on n'a rien écrit n'est pas une panne : elle a
@@ -643,5 +658,74 @@ func verifierAucuneRequeteVersUnDepotVide(t *testing.T, preparer func(*fakegh.St
 	}
 	if len(sortedNoms(fichiers)) != 2 {
 		t.Fatalf("le dépôt porte autre chose que ses deux fichiers : %v", sortedNoms(fichiers))
+	}
+}
+
+// cacheEt monte un magasin doté d'un cache sur disque, et rend les deux.
+func cacheEt(t *testing.T, state *fakegh.State) (*registry.Store, *cache.Cache) {
+	t.Helper()
+	serveur := fakegh.New(state)
+	t.Cleanup(serveur.Close)
+	stockage := cache.NewIn(filepath.Join(t.TempDir(), "cache"), true)
+	return registry.New(clientDe(t, serveur), "acme", stockage), stockage
+}
+
+// registreSeme dépose un registre d'une fiche et rend le commit qui le scelle.
+func registreSeme(state *fakegh.State) string {
+	state.AddRepo("acme", registry.RepoName, true)
+	return state.SeedCommit("acme/"+registry.RepoName, map[string]string{
+		registry.UsersFile: `{"version":2,"users":[{"username":"1680229",` +
+			`"full_name":"Prénom Nom","slugs":["prenom-nom"]}]}`,
+	}, registry.Branch)
+}
+
+// Une entrée de cache écrite par une version antérieure ne se relit pas.
+//
+// Elle se relisait en silence, ses champs inconnus à zéro : un registre vide
+// scellé par le bon commit, donc tenu pour à jour. Les noms que le fichier
+// local ne redit plus disparaissaient alors de l'écran, et leurs dépôts avec
+// eux — c'est le nom slugifié qui les rattache.
+func TestUnCacheDUneFormeInconnueEstIgnore(t *testing.T) {
+	state := fakegh.NewState()
+	tete := registreSeme(state)
+	store, stockage := cacheEt(t, state)
+
+	// Ce qu'une version d'avant le renommage de « students » avait laissé.
+	stockage.Set(cache.RegistryKey("acme"), map[string]any{
+		"head": tete,
+		"students": []map[string]any{
+			{"username": "1680229", "full_name": "Prénom Nom"},
+		},
+	})
+
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load : %v", err)
+	}
+	if nom := snapshot.Set.Name("1680229"); nom != "Prénom Nom" {
+		t.Errorf("Name = %q : le cache périmé s'est fait passer pour le registre", nom)
+	}
+}
+
+// Le cache de la forme courante, lui, épargne bien la lecture du fichier : une
+// lecture qui n'a pas bougé ne doit coûter qu'une requête.
+func TestUnCacheDeLaFormeCouranteEviteDeRelireLeFichier(t *testing.T) {
+	state := fakegh.NewState()
+	registreSeme(state)
+	store, _ := cacheEt(t, state)
+
+	if _, err := store.Load(); err != nil {
+		t.Fatalf("Load : %v", err)
+	}
+	lectures := state.CallCount("/contents/" + registry.UsersFile)
+	snapshot, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load : %v", err)
+	}
+	if nom := snapshot.Set.Name("1680229"); nom != "Prénom Nom" {
+		t.Errorf("Name = %q depuis le cache", nom)
+	}
+	if apres := state.CallCount("/contents/" + registry.UsersFile); apres != lectures {
+		t.Errorf("%d lecture(s) du fichier, %d avant : le cache ne sert plus", apres, lectures)
 	}
 }

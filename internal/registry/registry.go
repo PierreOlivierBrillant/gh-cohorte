@@ -1,6 +1,7 @@
-// Package registry tient le registre des utilisateurs d'une organisation : le
-// nom complet en face de chaque compte GitHub, et le rôle tenu — étudiant ou
-// enseignant —, rangé dans l'organisation elle-même plutôt que sur le poste de
+// Package registry tient le registre d'une organisation : ce que ni les noms de
+// dépôts ni un poste ne peuvent dire — le nom complet en face de chaque compte
+// GitHub, le rôle tenu (étudiant ou enseignant), et la date de remise de chaque
+// travail —, rangé dans l'organisation elle-même plutôt que sur le poste de
 // chacun.
 //
 // Une organisation nomme ses dépôts « session.cours.groupe.travail.étudiant »,
@@ -11,11 +12,12 @@
 // mêmes noms pour son compte — trois exemplaires d'une même personne, libres
 // de diverger.
 //
-// Le registre est un fichier unique dans un dépôt de service de
-// l'organisation. Une lecture complète coûte une requête ; deux mille
-// utilisateurs sur cinq ans pèsent quelques centaines de kilo-octets. Le
-// découper resterait possible : rien de ce qui suit ne dépend du nombre de
-// fichiers.
+// Le registre tient dans un dépôt de service de l'organisation, en deux
+// fichiers : les utilisateurs, et les dates de remise des travaux. Un seul
+// commit les scelle, si bien qu'une lecture courante coûte une requête ; deux
+// mille utilisateurs sur cinq ans pèsent quelques centaines de kilo-octets. Le
+// découper davantage resterait possible : rien de ce qui suit ne dépend du
+// nombre de fichiers.
 //
 // Le rôle qu'il porte nomme, il n'autorise pas. Savoir qu'un compte enseigne
 // sert à le proposer, à le montrer, à chercher les cours qu'il a donnés ; ce
@@ -45,10 +47,15 @@ const (
 	RepoName = ".cohorte"
 	// Branch est la seule branche écrite.
 	Branch = "main"
-	// UsersFile porte le registre lui-même. Il garde son nom d'origine bien
-	// qu'il porte désormais aussi les enseignants : le renommer obligerait
-	// chaque organisation déjà amorcée à une migration, pour un mot.
+	// UsersFile porte les utilisateurs. Il garde son nom d'origine bien qu'il
+	// porte désormais aussi les enseignants : le renommer obligerait chaque
+	// organisation déjà amorcée à une migration, pour un mot.
 	UsersFile = "etudiants.json"
+	// AssignmentsFile porte les dates de remise. Il est à part plutôt que dans
+	// le même fichier : les utilisateurs et les travaux ne changent ni au même
+	// rythme ni sous la même main, et deux fichiers rendent lisible sur
+	// github.com ce qu'un commit a vraiment touché.
+	AssignmentsFile = "travaux.json"
 	// ReadmeFile explique le dépôt à qui l'ouvre sur github.com. C'est bien
 	// « README.md » : GitHub n'affiche que celui-là sur la page du dépôt, et
 	// c'est aussi le fichier que la création avec « auto_init » y dépose — le
@@ -187,18 +194,32 @@ type Set struct {
 	users   []User // rangés par compte, casse ignorée
 	byLogin map[string]int
 	bySlug  map[string]int
+	// Le registre a deux sections, dans deux fichiers : les utilisateurs, et
+	// les dates de remise. Elles sont tenues ensemble parce qu'un seul commit
+	// les scelle — ce qu'on a lu de l'une vaut aussi longtemps que l'autre.
+	assignments  []Assignment
+	byAssignment map[string]int
 }
 
 // newSet range les fiches et dresse ses index.
-func newSet(users []User) *Set {
+func newSet(users []User, assignments []Assignment) *Set {
 	rangees := append([]User(nil), users...)
 	sort.SliceStable(rangees, func(i, j int) bool {
 		return rangees[i].Key() < rangees[j].Key()
 	})
+	travaux := append([]Assignment(nil), assignments...)
+	sort.SliceStable(travaux, func(i, j int) bool {
+		return travaux[i].Key() < travaux[j].Key()
+	})
 	set := &Set{
-		users:   rangees,
-		byLogin: make(map[string]int, len(rangees)),
-		bySlug:  make(map[string]int, 2*len(rangees)),
+		users:        rangees,
+		byLogin:      make(map[string]int, len(rangees)),
+		bySlug:       make(map[string]int, 2*len(rangees)),
+		assignments:  travaux,
+		byAssignment: make(map[string]int, len(travaux)),
+	}
+	for position, travail := range travaux {
+		set.byAssignment[travail.Key()] = position
 	}
 	for position, fiche := range rangees {
 		set.byLogin[fiche.Key()] = position
@@ -214,7 +235,7 @@ func newSet(users []User) *Set {
 
 // Empty rend un registre vide : celui d'une organisation qu'on n'a pas encore
 // amorcée.
-func Empty() *Set { return newSet(nil) }
+func Empty() *Set { return newSet(nil, nil) }
 
 // Len compte les personnes connues.
 func (s *Set) Len() int { return len(s.users) }
@@ -222,6 +243,24 @@ func (s *Set) Len() int { return len(s.users) }
 // All rend les fiches, rangées par compte. La copie évite qu'un appelant
 // modifie le registre dans son dos.
 func (s *Set) All() []User { return append([]User(nil), s.users...) }
+
+// Assignments rend les travaux datés, rangés par identifiant. La copie évite
+// qu'un appelant modifie le registre dans son dos.
+func (s *Set) Assignments() []Assignment {
+	return append([]Assignment(nil), s.assignments...)
+}
+
+// Due rend la date cible d'un travail, ou une chaîne vide s'il n'en a pas.
+//
+// C'est la seconde question que le registre permet de poser, et « classroom »
+// ne lui en pose pas d'autre : quand ce travail est-il attendu ?
+func (s *Set) Due(assignmentID string) string {
+	position, connu := s.byAssignment[strings.ToLower(strings.TrimSpace(assignmentID))]
+	if !connu {
+		return ""
+	}
+	return s.assignments[position].Due
+}
 
 // Find retrouve une personne par son compte GitHub.
 func (s *Set) Find(username string) (User, bool) {
@@ -329,6 +368,10 @@ type Change struct {
 	// redescendre étudiant l'enseignant qui s'y trouve. Le rôle ne change donc
 	// que lorsqu'on l'a demandé, et pour les comptes qu'on a nommés.
 	Roles []RoleChange
+	// Deadlines fixe la date cible de travaux. Une date vide la retire : il
+	// n'y a pas de geste séparé pour cela, c'est la même décision prise dans
+	// l'autre sens.
+	Deadlines []Assignment
 	// Reason est ce que dira le message de commit. Vide, il est composé.
 	Reason string
 }
@@ -372,9 +415,24 @@ func SetRole(username string, teacher bool) Change {
 	}
 }
 
+// Schedule compose le changement qui fixe la date cible d'un travail, désigné
+// par son identifiant complet — « a26.5n6.01.tp1 ». Une date vide la retire.
+func Schedule(assignmentID, due string) Change {
+	return Change{Deadlines: []Assignment{{ID: assignmentID, Due: due}}}
+}
+
+// Reschedule compose le changement qui fixe plusieurs échéances d'un coup.
+// C'est ce que demande un travail renommé ou déplacé : son échéance quitte
+// l'identifiant qu'il avait pour celui qu'il prend, et les deux mouvements ne
+// doivent pas pouvoir se séparer.
+func Reschedule(travaux ...Assignment) Change {
+	return Change{Deadlines: append([]Assignment(nil), travaux...)}
+}
+
 // Empty dit qu'il n'y a rien à écrire.
 func (c Change) Empty() bool {
-	return len(c.Learn) == 0 && len(c.Forget) == 0 && len(c.Roles) == 0
+	return len(c.Learn) == 0 && len(c.Forget) == 0 &&
+		len(c.Roles) == 0 && len(c.Deadlines) == 0
 }
 
 // With applique un changement et rend le registre qui en résulte, avec un
@@ -447,7 +505,69 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 		}
 		fiches = restantes
 	}
-	return newSet(fiches), bouge, nil
+
+	travaux, datesOnt, err := s.scheduled(change.Deadlines, today)
+	if err != nil {
+		return nil, false, err
+	}
+	return newSet(fiches, travaux), bouge || datesOnt, nil
+}
+
+// scheduled applique à la section des échéances ce qu'un changement lui
+// demande, et rend les travaux datés qui en résultent.
+func (s *Set) scheduled(demandes []Assignment, today string) ([]Assignment, bool, error) {
+	if len(demandes) == 0 {
+		return s.assignments, false, nil
+	}
+	travaux := s.Assignments()
+	position := make(map[string]int, len(travaux))
+	for index, travail := range travaux {
+		position[travail.Key()] = index
+	}
+
+	bouge := false
+	retires := map[string]bool{}
+	for _, demande := range demandes {
+		valide, err := demande.validate()
+		if err != nil {
+			return nil, false, err
+		}
+		index, connu := position[valide.Key()]
+		if valide.Due == "" {
+			if connu && !retires[valide.Key()] {
+				retires[valide.Key()] = true
+				bouge = true
+			}
+			continue
+		}
+		// Fixer une date sur un travail qu'on vient de retirer dans le même
+		// changement le remet : c'est ce que fait un travail renommé.
+		delete(retires, valide.Key())
+		valide.SetAt = today
+		if !connu {
+			position[valide.Key()] = len(travaux)
+			travaux = append(travaux, valide)
+			bouge = true
+			continue
+		}
+		// Redire la même date ne change rien : « set_at » ne bouge que quand
+		// l'échéance bouge, sans quoi chaque enregistrement ferait un commit.
+		if travaux[index].Due != valide.Due {
+			travaux[index] = valide
+			bouge = true
+		}
+	}
+	if len(retires) == 0 {
+		return travaux, bouge, nil
+	}
+	gardes := make([]Assignment, 0, len(travaux))
+	for _, travail := range travaux {
+		if retires[travail.Key()] {
+			continue
+		}
+		gardes = append(gardes, travail)
+	}
+	return gardes, bouge, nil
 }
 
 // merge fond ce qu'on vient d'apprendre dans ce qu'on savait déjà.
@@ -496,6 +616,16 @@ func (c Change) message() string {
 	}
 	if n := len(c.Forget); n > 0 {
 		parties = append(parties, plural(n, "retire %d compte", "retire %d comptes"))
+	}
+	// Une échéance se lit dans l'historique comme le reste : c'est souvent la
+	// seule trace de la date qu'un travail avait avant qu'on ne la déplace.
+	if n := len(c.Deadlines); n > 0 {
+		if len(parties) == 0 {
+			return "Fixe " + plural(n, "la date de remise de %d travail",
+				"la date de remise de %d travaux")
+		}
+		parties = append(parties, plural(n, "date de remise de %d travail",
+			"dates de remise de %d travaux"))
 	}
 	if len(parties) == 0 {
 		return "Met le registre à jour"
@@ -565,21 +695,80 @@ func Decode(content []byte) (*Set, []string) {
 	}
 	lues := lu.entries()
 	fiches := make([]User, 0, len(lues))
-	vus := map[string]bool{}
+	position := map[string]int{}
+	doublons := 0
 	for _, fiche := range lues {
 		valide, err := fiche.validate()
 		if err != nil {
 			soucis = append(soucis, "Fiche écartée : "+err.Error())
 			continue
 		}
-		if vus[valide.Key()] {
-			soucis = append(soucis, "Fiche en double écartée : @"+valide.Username)
+		if index, deja := position[valide.Key()]; deja {
+			fusionnee, contredit := fondue(fiches[index], valide)
+			fiches[index] = fusionnee
+			if contredit {
+				soucis = append(soucis, "Deux noms pour @"+fusionnee.Username+
+					" : « "+fusionnee.FullName+" » est retenu.")
+			} else {
+				doublons++
+			}
 			continue
 		}
-		vus[valide.Key()] = true
+		position[valide.Key()] = len(fiches)
 		fiches = append(fiches, valide)
 	}
-	return newSet(fiches), soucis
+	if doublons > 0 {
+		soucis = append(soucis, plural(doublons,
+			"%d fiche en double réunie à la sienne",
+			"%d fiches en double réunies aux leurs")+
+			" : le fichier gagnerait à être nettoyé.")
+	}
+	return newSet(fiches, nil), soucis
+}
+
+// fondue réunit deux fiches que le fichier donne pour un même compte, et dit si
+// elles se contredisent.
+//
+// Relire n'est pas apprendre. Deux lignes pour un même compte sont une
+// redondance du fichier, pas une intention : ce que l'une sait et l'autre pas
+// est gardé. Les écarter perdait ce que la seconde disait — un nom que la
+// première n'avait pas —, et le compte paraissait alors sans nom bien que le
+// fichier le porte. Pire, sans nom, plus rien ne rattachait ses dépôts à lui :
+// leur dernier niveau est le nom slugifié, et il n'y avait plus de nom à
+// slugifier.
+//
+// Deux noms qui se contredisent, en revanche, ne se tranchent pas ici : le
+// premier reste, et le désaccord se signale. Choisir au hasard serait pire que
+// de le dire — c'est aussi ce que « sansMarque » fait de deux fiches que rien
+// ne permet de confondre.
+func fondue(gardee, autre User) (User, bool) {
+	contredit := false
+	if nom := strings.TrimSpace(autre.FullName); nom != "" {
+		switch {
+		case strings.TrimSpace(gardee.FullName) == "":
+			gardee.FullName = nom
+		case !strings.EqualFold(gardee.FullName, nom):
+			contredit = true
+		}
+	}
+	// Le matricule se comble sans jamais s'écraser : c'est la seule chose qui
+	// identifie vraiment quelqu'un.
+	if matricule := strings.TrimSpace(autre.StudentID); matricule != "" &&
+		strings.TrimSpace(gardee.StudentID) == "" {
+		gardee.StudentID = matricule
+	}
+	// Les slugs s'additionnent : chacun rattache des dépôts déjà créés, et en
+	// perdre un les rendrait orphelins.
+	gardee.Slugs = cleanSlugs(append(append([]string(nil), gardee.Slugs...), autre.Slugs...))
+	// Le rôle ne s'oublie pas : un enseignant déclaré sur l'une des deux lignes
+	// le reste.
+	gardee.IsTeacher = gardee.IsTeacher || autre.IsTeacher
+	// La plus ancienne date d'ajout l'emporte : c'est celle qui dit depuis
+	// quand ce compte est connu.
+	if autre.AddedAt != "" && (gardee.AddedAt == "" || autre.AddedAt < gardee.AddedAt) {
+		gardee.AddedAt = autre.AddedAt
+	}
+	return gardee, contredit
 }
 
 // Readme explique le dépôt à qui l'ouvre sur github.com sans savoir ce que
@@ -587,14 +776,23 @@ func Decode(content []byte) (*Set, []string) {
 func Readme(org string) []byte {
 	return []byte(`# Registre de ` + org + `
 
-Ce dépôt appartient à l'extension ` + "`gh cohorte`" + `. Il retient deux choses :
-**le nom complet en face de chaque compte GitHub** des utilisateurs de
-l'organisation, et **le rôle** que chacun y tient — étudiant ou enseignant.
+Ce dépôt appartient à l'extension ` + "`gh cohorte`" + `. Il retient ce que les noms
+de dépôts ne peuvent pas dire, pour tout le monde et depuis n'importe quel poste.
+
+## ` + "`" + UsersFile + "`" + ` — qui est derrière chaque dépôt
 
 Les dépôts d'étudiants sont nommés ` + "`session.cours.groupe.travail.étudiant`" + `,
 et le dernier niveau est le nom slugifié — pas le compte. Rien dans les noms de
-dépôts ne dit donc à qui ils appartiennent : c'est ` + "`" + UsersFile + "`" + ` qui le dit,
-pour tout le monde et depuis n'importe quel poste.
+dépôts ne dit donc à qui ils appartiennent : c'est ce fichier qui le dit, un
+**nom complet en face de chaque compte GitHub**. Il porte aussi **le rôle** que
+chacun tient dans l'organisation — étudiant ou enseignant.
+
+## ` + "`" + AssignmentsFile + "`" + ` — quand chaque travail est attendu
+
+Une **date de remise** par travail, sous son identifiant complet
+(` + "`a26.5n6.01.tp1`" + `). Aucun nom de dépôt ne peut porter une échéance, et la
+retenir sur un poste la rendrait vraie d'une seule machine : votre collègue
+verrait les mêmes travaux sans voir la date.
 
 ## Le rôle ne donne aucun droit
 

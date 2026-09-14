@@ -162,15 +162,16 @@ dernier niveau nomme, et rien n'est déclaré ailleurs.
 se lisent dans le nom des dépôts : un groupe n'a rien à déclarer pour exister.
 
 Le dernier niveau, lui, est un nom slugifié — rien n'y dit à quel compte il
-appartient. C'est ce que retient le **registre** : un fichier unique dans un
-dépôt privé `.cohorte` de l'organisation, un nom complet par compte et le rôle
-tenu — étudiant ou enseignant —, écrit une fois pour tout le monde. Vos
-collègues voient donc les mêmes noms que vous sans rien avoir déclaré, et
-corriger une orthographe ne détache pas les dépôts créés sous l'ancienne. Les
-noms déjà accumulés sur un poste s'y versent en une fois
-(`gh cohorte --publish-registry`). Le fichier local ne garde plus que ce qui n'a
-de sens que sur cette machine : les groupes déclarés ici, les réglages du
-dernier travail.
+appartient. C'est ce que retient le **registre** : un dépôt privé `.cohorte` de
+l'organisation, un nom complet par compte et le rôle tenu — étudiant ou
+enseignant —, écrit une fois pour tout le monde. Vos collègues voient donc les
+mêmes noms que vous sans rien avoir déclaré, et corriger une orthographe ne
+détache pas les dépôts créés sous l'ancienne. Les noms déjà accumulés sur un
+poste s'y versent en une fois (`gh cohorte --publish-registry`). Le registre
+porte aussi la **date de remise** de chaque travail, que rien dans un nom de
+dépôt ne peut dire : une échéance fixée sur un poste vaut pour l'équipe entière.
+Le fichier local ne garde plus que ce qui n'a de sens que sur cette machine :
+les groupes déclarés ici, et les réglages du dernier travail.
 
 **Deux enseignants ne voient pas les étudiants l'un de l'autre.** Un groupe peut
 porter une équipe `a26.5n6.01.enseignants`, qui reçoit ses dépôts : ceux qui n'en

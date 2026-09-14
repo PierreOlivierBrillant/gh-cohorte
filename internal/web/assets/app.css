@@ -334,6 +334,9 @@ main { padding: 1.5rem; max-width: 1100px; }
 /* Invité sans avoir encore accepté : la personne est de l'équipe, elle ne le
    sait pas encore. Le taire ferait croire que rien ne s'est passé. */
 .jeton.attente { color: var(--alerte); border-style: dashed; }
+/* Personne n'a rien remis de sa part. Ce n'est pas une faute — le travail peut
+   n'être pas commencé —, et le jeton se distingue donc du rouge du retard. */
+.jeton.alerte { color: var(--alerte); background: var(--alerte-fond); border-color: transparent; }
 .etiquettes { display: flex; gap: .4rem; flex-wrap: wrap; }
 
 /* ------------------------------------------------------------------- étapes */

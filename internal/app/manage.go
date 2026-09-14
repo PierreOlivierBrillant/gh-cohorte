@@ -19,6 +19,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -33,6 +34,8 @@ var manageMenu = ui.Options(
 	"cloner", "Cloner des dépôts en local",
 	"pull", "Mettre à jour des clones existants",
 	"supprimer", "Supprimer un dépôt",
+	"remises", "Relever les commits et les remises",
+	"echeance", "Fixer la date cible de ce travail",
 	"renommer", "Renommer ce travail",
 	"deplacer", "Déplacer ce travail vers un groupe",
 	"enseignants", "Régler l'équipe enseignante du groupe",
@@ -56,6 +59,11 @@ type manageSession struct {
 	filter   users.Filter
 	sortKey  users.Key
 	sortDesc bool
+	// Les équipes du groupe, lues une fois : elles disent à qui un dépôt
+	// d'équipe est destiné, et la liste s'affiche trop souvent pour les
+	// redemander à chaque fois.
+	equipes     []teams.Team
+	equipesLues bool
 }
 
 func newManageSession(session *Session, initialPrefix string) *manageSession {
@@ -278,11 +286,14 @@ func (m *manageSession) criteria() string {
 	return strings.Join(parts, " · ")
 }
 
-// show affiche le groupe : dépôt, nom complet, visibilité, dernier envoi.
+// show affiche le groupe : dépôt, nom complet, visibilité, dernier envoi. Les
+// commits et l'état des remises s'y ajoutent dès qu'un relevé a eu lieu : deux
+// colonnes de plus n'ont de sens que quand elles ont quelque chose à dire.
 func (m *manageSession) show(group *groups.Group) {
 	console := m.session.Console
 	names := m.names(group)
 	visibles := m.visible(group)
+	bilans := m.bilans(group)
 
 	titre := "Groupe « " + group.Prefix + " » — " + itoa(group.Len()) + " dépôt(s)"
 	if len(visibles) != group.Len() {
@@ -290,6 +301,10 @@ func (m *manageSession) show(group *groups.Group) {
 	}
 	console.Heading(titre)
 
+	entetes := []string{"#", "Dépôt", "Nom complet", "Visibilité", "Dernier envoi"}
+	if len(bilans) > 0 {
+		entetes = append(entetes, "Commits", "Remise")
+	}
 	rows := make([][]string, 0, len(visibles))
 	for index, repo := range visibles {
 		fullName := names[repo.Name]
@@ -300,9 +315,15 @@ func (m *manageSession) show(group *groups.Group) {
 		if pushed == "" {
 			pushed = console.Dim("jamais")
 		}
-		rows = append(rows, []string{itoa(index + 1), repo.Name, fullName, repo.Visibility(), pushed})
+		ligne := []string{itoa(index + 1), repo.Name, fullName, repo.Visibility(), pushed}
+		if len(bilans) > 0 {
+			bilan, connu := bilans[repo.Name]
+			commits, etat := resumeDeRemise(console, bilan, connu)
+			ligne = append(ligne, commits, etat)
+		}
+		rows = append(rows, ligne)
 	}
-	console.Table([]string{"#", "Dépôt", "Nom complet", "Visibilité", "Dernier envoi"}, rows, 40)
+	console.Table(entetes, rows, 40)
 	if len(visibles) == 0 && group.Len() > 0 {
 		console.Warning("Aucun dépôt ne répond aux critères.")
 	}
@@ -1388,6 +1409,26 @@ func (m *manageSession) run() (int, error) {
 			return m.renameTo(group, name)
 		}
 
+		// « --due » et « --handins » font une chose et s'en vont : l'un fixe la
+		// date cible, l'autre relève les historiques. Les deux ensemble se
+		// suivent — fixer une échéance puis voir qui la dépasse est un geste.
+		if m.session.Options.DueSet {
+			m.session.Options.DueSet = false
+			if err := m.dueFromFlag(group); err != nil {
+				return ExitValidation, err
+			}
+			if !m.session.Options.Handins {
+				return ExitOK, nil
+			}
+		}
+		if m.session.Options.Handins {
+			m.session.Options.Handins = false
+			if err := m.remises(group); err != nil {
+				return ExitValidation, err
+			}
+			return ExitOK, nil
+		}
+
 		showList := true
 		for {
 			// La liste n'est redonnée que si elle a changé : sinon elle chasserait
@@ -1452,6 +1493,10 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return m.pullClones(group)
 	case "supprimer":
 		return m.deleteRepo(group)
+	case "remises":
+		return m.remises(group)
+	case "echeance":
+		return m.echeance(group)
 	case "renommer":
 		_, err := m.rename(group)
 		return err

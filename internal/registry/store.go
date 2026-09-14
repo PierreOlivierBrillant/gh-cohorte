@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -85,11 +86,33 @@ type Snapshot struct {
 	Stale bool
 }
 
+// keptSchema est la forme de ce que le cache retient. Elle change dès qu'un
+// champ de « keptSet » change de nom ou de sens.
+//
+// Sans elle, une entrée écrite par une version antérieure se relisait en
+// silence, ses champs inconnus à zéro : un registre vide scellé par le bon
+// commit, donc tenu pour à jour, et pour trois mois. Les noms que le fichier
+// local ne redit plus — il les retire dès que le registre les porte —
+// disparaissaient alors de l'écran ; et un compte sans nom ne peut plus être
+// rattaché à ses dépôts, dont le dernier niveau est ce nom slugifié.
+//
+// C'est arrivé au renommage de « students » en « users ». Une entrée d'une
+// forme qu'on ne reconnaît pas n'est donc plus lue du tout : relire GitHub
+// coûte une requête, se tromper coûtait bien davantage.
+const keptSchema = 2
+
 // keptSet est ce que le cache local retient : le registre, et le commit qui le
 // scelle. Tant que la branche pointe sur ce commit, ce contenu vaut toujours.
+//
+// Les deux sections sont retenues ensemble parce qu'un seul commit les scelle :
+// en garder une seule obligerait à relire l'autre pour rien.
 type keptSet struct {
-	Head  string `json:"head"`
-	Users []User `json:"users"`
+	// Schema dit de quelle forme vient cette entrée. Une entrée sans lui vient
+	// d'avant qu'on les distingue, et ne se relit pas.
+	Schema      int          `json:"schema"`
+	Head        string       `json:"head"`
+	Users       []User       `json:"users"`
+	Assignments []Assignment `json:"assignments,omitempty"`
 }
 
 // Load lit le registre.
@@ -129,16 +152,33 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 		garde.Seeded = true
 		return garde, nil
 	}
-	file, err := s.client.ReadFile(s.org, RepoName, UsersFile, head)
+	// Les deux fichiers sont lus au même commit : ce qu'on apprend des
+	// utilisateurs et ce qu'on apprend des échéances doit décrire le même
+	// instant. Un fichier absent n'est pas une panne — une organisation où
+	// l'on n'a jamais daté de travail n'a pas de « travaux.json ».
+	utilisateurs, err := s.client.ReadFile(s.org, RepoName, UsersFile, head)
 	if err != nil {
 		return Snapshot{}, s.step("lecture du fichier "+UsersFile, err)
 	}
-	if file == nil {
-		return Snapshot{Set: Empty(), Head: head}, nil
+	travaux, err := s.client.ReadFile(s.org, RepoName, AssignmentsFile, head)
+	if err != nil {
+		return Snapshot{}, s.step("lecture du fichier "+AssignmentsFile, err)
 	}
-	set, soucis := Decode(file.Content)
+
+	var soucis []string
+	var fiches []User
+	var dates []Assignment
+	if utilisateurs != nil {
+		lu, ennuis := Decode(utilisateurs.Content)
+		fiches, soucis = lu.All(), append(soucis, ennuis...)
+	}
+	if travaux != nil {
+		lues, ennuis := DecodeAssignments(travaux.Content)
+		dates, soucis = lues, append(soucis, ennuis...)
+	}
+	set := newSet(fiches, dates)
 	s.keep(head, set)
-	return Snapshot{Set: set, Head: head, Issues: soucis, Seeded: true}, nil
+	return Snapshot{Set: set, Head: head, Issues: soucis, Seeded: utilisateurs != nil}, nil
 }
 
 // kept relit ce que le disque retient du registre.
@@ -147,10 +187,14 @@ func (s *Store) kept() (Snapshot, bool) {
 		return Snapshot{}, false
 	}
 	var garde keptSet
-	if !s.local.Get(cache.RegistryKey(s.org), cache.RegistryTTL, &garde) || garde.Head == "" {
+	if !s.local.Get(cache.RegistryKey(s.org), cache.RegistryTTL, &garde) ||
+		garde.Head == "" || garde.Schema != keptSchema {
 		return Snapshot{}, false
 	}
-	return Snapshot{Set: newSet(garde.Users), Head: garde.Head}, true
+	return Snapshot{
+		Set:  newSet(garde.Users, garde.Assignments),
+		Head: garde.Head,
+	}, true
 }
 
 // keep scelle sur le disque ce qu'on vient de lire.
@@ -158,7 +202,10 @@ func (s *Store) keep(head string, set *Set) {
 	if s.local == nil || head == "" {
 		return
 	}
-	s.local.Set(cache.RegistryKey(s.org), keptSet{Head: head, Users: set.All()})
+	s.local.Set(cache.RegistryKey(s.org), keptSet{
+		Schema: keptSchema, Head: head,
+		Users: set.All(), Assignments: set.Assignments(),
+	})
 }
 
 // Apply applique un changement et rend le registre tel qu'il devient.
@@ -223,14 +270,49 @@ func (s *Store) today() string { return s.now().Format("2006-01-02") }
 // des commits mais pas encore de registre mérite son explication autant qu'un
 // dépôt neuf.
 func (s *Store) commit(set *Set, snapshot Snapshot, message string) (string, error) {
-	payload, err := set.Encode()
+	fichiers := make([]ghapi.PushFile, 0, 3)
+
+	// Seul ce qui a bougé est réécrit. « PushFilesOnto » superpose sur l'arbre
+	// du parent : un fichier qu'on ne lui donne pas reste tel quel, et
+	// l'historique du registre dit alors ce qui a changé plutôt que ce qui a
+	// été touché — c'est sur github.com qu'on viendra le relire.
+	utilisateurs, err := set.Encode()
 	if err != nil {
 		return "", err
 	}
-	fichiers := []ghapi.PushFile{{Path: UsersFile, Mode: "100644", Content: payload}}
+	precedents, err := snapshot.Set.Encode()
+	if err != nil {
+		return "", err
+	}
+	// Un registre pas encore amorcé reçoit son fichier même vide : c'est lui
+	// qui fait du dépôt un registre, et le README qui l'accompagne l'explique.
+	if !snapshot.Seeded || !bytes.Equal(utilisateurs, precedents) {
+		fichiers = append(fichiers, ghapi.PushFile{
+			Path: UsersFile, Mode: "100644", Content: utilisateurs})
+	}
+
+	travaux, err := encodeAssignments(set.Assignments())
+	if err != nil {
+		return "", err
+	}
+	anciens, err := encodeAssignments(snapshot.Set.Assignments())
+	if err != nil {
+		return "", err
+	}
+	if !bytes.Equal(travaux, anciens) {
+		fichiers = append(fichiers, ghapi.PushFile{
+			Path: AssignmentsFile, Mode: "100644", Content: travaux})
+	}
+
 	if !snapshot.Seeded {
 		fichiers = append(fichiers, ghapi.PushFile{
 			Path: ReadmeFile, Mode: "100644", Content: Readme(s.org)})
+	}
+	// Un changement peut s'annuler lui-même — fixer puis retirer la même date
+	// d'un seul coup. Il n'y a alors rien à écrire, et un commit dont l'arbre
+	// est celui de son parent ne dirait rien à personne.
+	if len(fichiers) == 0 {
+		return snapshot.Head, nil
 	}
 	commit, err := s.client.PushFilesOnto(
 		s.org, RepoName, fichiers, message, Branch, snapshot.Head)

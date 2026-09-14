@@ -177,7 +177,11 @@ func (s *Server) handleClassroom(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	fiche := s.fiche(cours)
-	fiche.Assignments = cours.Assignments(repos, equipes)
+	travaux := cours.Assignments(repos, equipes)
+	// Les pastilles paraissent sans rien redemander à GitHub : ce qu'on a déjà
+	// relevé suffit à les allumer, et ce qu'on ignore se voit à « seen ».
+	fiche.Assignments = cours.WithHandins(travaux, repos, equipes,
+		s.remisesConnues(cours.Org, reposDuGroupe(cours, repos, travaux)))
 	fiche.Teams = len(equipes)
 	fiche.Source = source
 	writeJSON(writer, http.StatusOK, fiche)
@@ -846,6 +850,13 @@ type assignmentRepo struct {
 	Visibility string   `json:"visibility"`
 	URL        string   `json:"url"`
 	PushedAt   string   `json:"pushed_at"`
+	// Ce que l'historique dit du dépôt, quand il a été relevé. « Seen » à faux
+	// veut dire qu'on ne l'a pas encore regardé, et non qu'il est vide.
+	Seen    bool            `json:"seen"`
+	Commits int             `json:"commits"`
+	Last    string          `json:"last,omitempty"`
+	Late    bool            `json:"late"`
+	Silent  []roster.Person `json:"silent,omitempty"`
 }
 
 // assignmentOf résout le groupe et le travail désignés par l'adresse.
@@ -917,6 +928,11 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		users.FromGroup(groups.Group{Prefix: cours.ShortName(id), Repos: trouves}, noms),
 		filtre, tri, decroissant)
 
+	// Les historiques déjà relevés sont versés ici : la page les montre sans
+	// attendre, et le bouton « Remises » va chercher ce qui manque.
+	remises := s.remisesConnues(cours.Org, tous)
+	echeance, _ := valid.ParseDue(cours.DueOf(id))
+
 	lignes := make([]assignmentRepo, 0, len(retenues))
 	for _, retenue := range retenues {
 		repo := parNom[retenue.Repos[0].Name]
@@ -924,6 +940,11 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 			Name: repo.Name, Student: repo.Suffix, Private: repo.Private,
 			Visibility: repo.Visibility(), URL: s.urlOf(cours.Org, repo),
 			PushedAt: repo.PushedAt,
+		}
+		if remise, releve := remises[repo.Name]; releve {
+			bilan := cours.Review(repo.Name, remise, echeance, equipes)
+			ligne.Seen, ligne.Commits = true, bilan.Commits
+			ligne.Last, ligne.Late, ligne.Silent = bilan.Last, bilan.Late, bilan.Silent
 		}
 		if equipe, appartient := cours.TeamOf(repo.Name, equipes); appartient {
 			ligne.FullName, ligne.Team = equipe.Label(), equipe.Short
@@ -942,6 +963,7 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"id": id, "name": cours.ShortName(id), "repos": lignes, "kind": nature,
+		"due": cours.DueOf(id),
 		// Le total dit combien le filtre a écarté ; « names » nomme tous les
 		// dépôts du travail, filtrés compris — ce qu'on cache à l'écran ne sort
 		// pas du travail pour autant.
@@ -984,6 +1006,9 @@ func (s *Server) handleAssignmentAccess(writer http.ResponseWriter, request *htt
 type assignmentInput struct {
 	Name     string             `json:"name"`
 	Settings classroom.Defaults `json:"settings"`
+	// Due est la date cible du travail, fixée dès la distribution. Elle
+	// n'entre dans aucun dépôt : c'est le groupe qui la retient.
+	Due string `json:"due"`
 	// Usernames restreint la distribution ; vide, tout le groupe est servi.
 	Usernames []string `json:"usernames"`
 	// Teams demande un travail d'équipe : un dépôt par équipe, nommé d'après
@@ -1010,6 +1035,9 @@ type distribution struct {
 	// Skipped nomme ce qui a déjà un dépôt pour ce travail.
 	SkippedPeople []roster.Person
 	SkippedTeams  []teams.Team
+	// Due est l'échéance à porter au registre, quand on en a fixé une. Elle
+	// n'entre dans aucun dépôt : c'est l'organisation qui la retient.
+	Due []classroom.Deadline
 }
 
 // Count dit combien de dépôts la distribution créerait.
@@ -1058,6 +1086,15 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (distribut
 		return vide, err
 	}
 	cours.Defaults = s.defaultsOr(body.Settings)
+	// Une date cible vide ne retire rien : distribuer à un retardataire repasse
+	// par ici sans la redire, et le travail garde l'échéance qu'il avait. La
+	// retirer se demande explicitement, par sa propre route.
+	var echeance []classroom.Deadline
+	if strings.TrimSpace(body.Due) != "" {
+		if echeance, err = cours.SetDue(nom, body.Due); err != nil {
+			return vide, err
+		}
+	}
 	settings, err := normalize(cours.Settings(nom))
 	if err != nil {
 		return vide, err
@@ -1068,7 +1105,9 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (distribut
 	}
 	cours = s.enrichi(cours, repos)
 	if body.Teams {
-		return s.prepareTeams(cours, settings, body, repos)
+		equipes, err := s.prepareTeams(cours, settings, body, repos)
+		equipes.Due = echeance
+		return equipes, err
 	}
 
 	// Le nom du dépôt contient le nom de l'étudiant : sans lui, il n'y a pas de
@@ -1095,7 +1134,7 @@ func (s *Server) prepare(request *http.Request, body assignmentInput) (distribut
 
 	// La distribution va aux personnes, non aux comptes : deux comptes d'un
 	// même nom n'ont qu'un dépôt, et cocher l'un revient à cocher la personne.
-	partage := distribution{Cours: cours, Settings: settings}
+	partage := distribution{Cours: cours, Settings: settings, Due: echeance}
 	for _, identite := range cours.Identities() {
 		if restreint && !voulue(identite, voulus) {
 			continue
@@ -1232,6 +1271,15 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 	if _, err := s.classrooms.Save(cours); err != nil {
 		fail(writer, err)
 		return
+	}
+	// L'échéance monte au registre avant le premier dépôt, comme les noms : une
+	// date qui n'y serait pas arrivée ne vaudrait que pour cette machine, et
+	// c'est précisément ce qu'on veut cesser. Une simulation n'écrit rien.
+	if len(partage.Due) > 0 && !body.DryRun {
+		if _, err := s.registryOf(cours.Org).Apply(echeances(partage.Due)); err != nil {
+			fail(writer, err)
+			return
+		}
 	}
 
 	quoi := " étudiant(s)"

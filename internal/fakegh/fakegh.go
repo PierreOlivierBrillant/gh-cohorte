@@ -81,8 +81,12 @@ type State struct {
 	Teams        map[string]*TeamState
 	TeamRepos    map[string]map[string]string // « org/équipe » → dépôt → droit
 	DeletedTeams []string
-	// Contributors dit qui a écrit dans un dépôt : « org/depot » → comptes.
+	// Contributors dit qui a écrit dans un dépôt : « org/depot » → comptes, du
+	// plus prolifique au moins. Un compte répété a écrit d'autant de fois.
 	Contributors map[string][]string
+	// Anonymous porte les auteurs qu'aucun compte GitHub ne réclame :
+	// « org/depot » → auteurs. C'est ce que GitHub rend avec « anon=1 ».
+	Anonymous map[string][]AnonymousAuthor
 	// OutsideOrg nomme les comptes qui ne sont pas membres de l'organisation :
 	// les inscrire dans une équipe les invite plutôt que de les y mettre.
 	OutsideOrg map[string]bool
@@ -146,6 +150,7 @@ func NewState() *State {
 		},
 		TeamRepos:      map[string]map[string]string{},
 		Contributors:   map[string][]string{},
+		Anonymous:      map[string][]AnonymousAuthor{},
 		OutsideOrg:     map[string]bool{},
 		Collaborators:  map[string]map[string]string{},
 		Invitations:    map[string][]invitation{},
@@ -595,7 +600,7 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		s.send(writer, 200, s.repoPayload(repo))
 		return
 	}
-	if s.teamsGet(writer, path) {
+	if s.teamsGet(writer, request, path) {
 		return
 	}
 	s.notFound(writer)

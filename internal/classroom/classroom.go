@@ -101,6 +101,10 @@ type Classroom struct {
 	// adopté sous un autre nom. Sans eux, corriger une faute de frappe
 	// détacherait de leur personne tous les dépôts déjà créés.
 	aliases map[string]roster.Person
+	// horaire dit quand les travaux du groupe sont attendus. Il n'est pas
+	// écrit non plus : les dates vivent dans le registre de l'organisation, et
+	// les redire ici en ferait un second exemplaire libre de diverger.
+	horaire Schedule
 }
 
 // Validate met le groupe en forme et refuse ce qui ne peut pas nommer un dépôt.
@@ -468,6 +472,20 @@ type Assignment struct {
 	// du groupe, « individuel » sinon.
 	Kind     string `json:"kind"`
 	PushedAt string `json:"pushed_at"`
+	// Due est la date cible du travail, sous sa forme normale. Vide, le
+	// travail n'a pas d'échéance et rien n'est jamais en retard.
+	Due string `json:"due,omitempty"`
+	// Ce qui suit vient des historiques relevés, et vaut zéro tant qu'ils ne
+	// l'ont pas été. « Seen » dit combien de dépôts ont été regardés : sans
+	// lui, un travail dont rien n'a été lu ne se distinguerait pas d'un
+	// travail que personne n'a commencé.
+	Seen int `json:"seen"`
+	// Commits est le nombre de commits des dépôts relevés.
+	Commits int `json:"commits"`
+	// Late compte les dépôts dont le dernier commit suit la date cible.
+	Late int `json:"late"`
+	// Silent compte les dépôts où quelqu'un de visé n'a rien remis.
+	Silent int `json:"silent"`
 }
 
 // ForTeams dit si le travail est distribué aux équipes.
@@ -497,6 +515,7 @@ func (c Classroom) Assignments(repos []groups.RepoInfo, equipes []teams.Team) []
 			travail = &Assignment{
 				ID:   naming.AssignmentID(c.Session, c.Course, c.Group, parts.Assignment),
 				Name: parts.Assignment, Kind: Individual,
+				Due: c.DueOf(parts.Assignment),
 			}
 			parNom[cle] = travail
 		}

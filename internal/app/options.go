@@ -104,6 +104,16 @@ type Options struct {
 	// la suivent pas d'eux-mêmes : le travail survit à l'équipe qui l'a fait.
 	TeamDeleteRepos bool
 	TeamShare       bool
+	// Due est la date cible du travail : « 2026-10-01 », ou
+	// « 2026-10-01T23:59 » quand l'heure compte. À la distribution, elle est
+	// fixée d'emblée ; avec « --manage », elle change celle du travail géré.
+	// Une valeur vide la retire, ce qui oblige à distinguer le drapeau absent.
+	Due    string
+	DueSet bool
+	// Handins relève les historiques des dépôts du travail géré : le nombre de
+	// commits, les remises postérieures à la date cible, et les personnes dont
+	// aucun commit ne porte la trace.
+	Handins bool
 	// MoveTo déplace le travail ouvert vers une place de la nomenclature
 	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra. Sans
 	// MoveTo, RenameTo renomme le travail là où il est déjà.
@@ -171,6 +181,8 @@ Utilisation :
   gh cohorte --publish-registry --dry-run     ce que publier les noms ferait
   gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
+  gh cohorte --manage a26.5n6.01.tp1 --due 2026-10-01
+  gh cohorte --manage a26.5n6.01.tp1 --handins
   gh cohorte --refresh-token --scopes delete_repo
   gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
   gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
@@ -206,6 +218,9 @@ Drapeaux :
   --named-only             ne reprendre que les dépôts dont l'étudiant est connu
   --roster FICHIER         liste « nom complet, compte GitHub » au format CSV
   --assignment NOM         identifiant du travail (préfixe des dépôts)
+  --due DATE               date cible du travail (AAAA-MM-JJ ou AAAA-MM-JJTHH:MM,
+                           vide pour la retirer)
+  --handins                relever les commits des dépôts du travail géré
   --teams                  travail d'équipe : un dépôt par équipe, partagé avec elle
                            (avec --manage seul : liste les équipes du groupe ;
                             avec --import : le dernier niveau nomme une équipe)
@@ -277,6 +292,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	template := set.String("template", unset, "dépôt modèle")
 	starter := set.String("starter", unset, "dossier de fichiers de départ")
 	delay := set.Float64("delay", -1, "marge entre deux créations")
+	due := set.String("due", unset, "date cible du travail")
 
 	set.StringVar(&options.Org, "org", "", "organisation GitHub cible")
 	set.BoolVar(&options.StudentsRequested, "students", false,
@@ -314,6 +330,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
 	set.BoolVar(&options.Teams, "teams", false, "travail d'équipe")
+	set.BoolVar(&options.Handins, "handins", false,
+		"relever les commits des dépôts du travail")
 	equipe := set.String("team", "", "équipe visée")
 	membres := set.String("team-members", unset, "composition exacte de l'équipe")
 	ajouts := set.String("team-add", "", "comptes à inscrire dans l'équipe")
@@ -420,6 +438,14 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	if *delay >= 0 {
 		options.DelaySet = true
 		options.Delay = *delay
+	}
+	// Une date vide reste une date : « --due "" » retire l'échéance, alors que
+	// le drapeau absent ne demande rien.
+	if *due != unset {
+		options.DueSet = true
+		if options.Due, err = valid.NormalizeDue(*due); err != nil {
+			return nil, err
+		}
 	}
 	// Repartager un travail suppose de savoir lequel : le dire ici évite un
 	// refus surgi du fond de la distribution.

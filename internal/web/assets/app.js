@@ -1260,6 +1260,62 @@ $('nouveau-creer').addEventListener('click', async () => {
 
 // ---------------------------------------------------------------- travaux
 
+// Une date cible se lit à l'écran comme on la dit à une classe : le jour, et
+// l'heure seulement quand elle a été précisée.
+function dateLisible(due) {
+  if (!due) return '';
+  const [jour, heure] = String(due).split('T');
+  return heure ? `${jour} à ${heure}` : jour;
+}
+
+// Un instant relevé dans un historique — le dernier commit — se montre à
+// l'heure de cette machine : c'est dans ce fuseau que l'échéance a été fixée.
+function instantLisible(iso) {
+  if (!iso) return '';
+  const moment = new Date(iso);
+  if (Number.isNaN(moment.getTime())) return iso;
+  const deuxChiffres = (valeur) => String(valeur).padStart(2, '0');
+  return `${moment.getFullYear()}-${deuxChiffres(moment.getMonth() + 1)}-` +
+    `${deuxChiffres(moment.getDate())} à ${deuxChiffres(moment.getHours())}:` +
+    `${deuxChiffres(moment.getMinutes())}`;
+}
+
+// pastillesDeRemise résume un travail en jetons. Rien ne paraît tant qu'aucun
+// historique n'a été relevé : une pastille absente doit vouloir dire « rien à
+// signaler », jamais « on n'a pas regardé ».
+function pastillesDeRemise(travail) {
+  if (!travail.seen) return [];
+  const jetons = [el('span', { classe: 'jeton',
+    texte: `${travail.commits} commit(s)` })];
+  if (travail.late > 0) {
+    jetons.push(el('span', {
+      classe: 'jeton non', title: 'Un commit suit la date cible',
+      texte: `${travail.late} en retard`,
+    }));
+  }
+  if (travail.silent > 0) {
+    jetons.push(el('span', {
+      classe: 'jeton alerte', title: "Personne n'y a commis de leur part",
+      texte: `${travail.silent} sans remise`,
+    }));
+  }
+  return jetons;
+}
+
+// releverLesRemises lit les historiques des dépôts du groupe. C'est deux
+// requêtes par dépôt : le geste est explicite, et son résultat mémorisé.
+async function releverLesRemises(force) {
+  if (!etat.groupe) return;
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/handins` + (force ? '?refresh=1' : '')),
+  'Remises');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (!bilan || !bilan.assignments) return;
+  etat.groupe.assignments = bilan.assignments;
+  dessinerTravaux();
+}
+
 function dessinerTravaux() {
   const groupe = etat.groupe;
   const sesTravaux = groupe.assignments || [];
@@ -1290,6 +1346,12 @@ function dessinerTravaux() {
       ? [`${travail.teams} équipe(s) ont un dépôt`]
       : [`${travail.students} étudiant(s) du groupe sur ${total}`];
     if (travail.others > 0) detail.push(`${travail.others} dépôt(s) hors liste`);
+    if (travail.due) detail.push(`à remettre le ${dateLisible(travail.due)}`);
+    // Un relevé partiel le dit : la moitié des dépôts lus ne permet pas de
+    // conclure sur l'autre moitié.
+    if (travail.seen > 0 && travail.seen < travail.repos) {
+      detail.push(`${travail.seen} dépôt(s) relevé(s) sur ${travail.repos}`);
+    }
     const case_ = el('input', {
       type: 'checkbox', checked: etat.travauxChoisis.has(travail.id),
       'aria-label': `Choisir « ${travail.name} »`,
@@ -1309,6 +1371,7 @@ function dessinerTravaux() {
           el('span', { classe: 'detail', texte: detail.join(' · ') })),
         el('span', { classe: 'espace' }),
         equipe ? el('span', { classe: 'jeton', texte: 'équipe' }) : null,
+        ...pastillesDeRemise(travail),
         el('span', {
           classe: 'jeton ' + (!equipe && total > 0 && travail.students >= total ? 'oui' : ''),
           texte: `${travail.repos} dépôt(s)`,
@@ -1347,6 +1410,8 @@ $('travaux-deplacer').addEventListener('click', () => {
 });
 
 $('travaux-recharger').addEventListener('click', () => ouvrirGroupe(etat.groupe.scope, true));
+
+$('travaux-remises').addEventListener('click', () => releverLesRemises(true));
 
 // ------------------------------------------------------- détail d'un travail
 
@@ -1394,7 +1459,7 @@ async function chargerTravail(travail, force, toutCocher) {
   // pas du travail pour autant.
   etat.travail = {
     id: travail.id, name: travail.name, depots: detail.repos,
-    total: detail.total, noms: detail.names || [],
+    total: detail.total, noms: detail.names || [], due: detail.due || '',
     // La nature vient du serveur, qui la lit dans le nom des dépôts : elle
     // n'est déclarée nulle part, et la fiche du groupe peut être plus vieille.
     kind: detail.kind || travail.kind,
@@ -1454,6 +1519,12 @@ function dessinerTravail() {
       : [`${depots.length} dépôt(s) sur ${etat.travail.total}`,
          `${servis} étudiant(s) du groupe`]);
   if (depots.length - servis > 0) parts.push(`${depots.length - servis} hors liste`);
+  if (etat.travail.due) parts.push(`à remettre le ${dateLisible(etat.travail.due)}`);
+  const releves = depots.filter((repo) => repo.seen);
+  if (releves.length) {
+    const commits = releves.reduce((somme, repo) => somme + repo.commits, 0);
+    parts.push(`${commits} commit(s) dans ${releves.length} dépôt(s) relevé(s)`);
+  }
   $('detail-resume').textContent = parts.join(' · ');
   $('detail-colonne').textContent = equipe ? 'Équipe' : 'Étudiant';
   // Repartager n'a de sens que pour un travail d'équipe : c'est ce qui achève
@@ -1504,6 +1575,9 @@ function dessinerTravail() {
       })),
       el('td', {}, el('span', { classe: 'jeton', texte: repo.visibility })),
       el('td', repo.pushed_at ? { texte: repo.pushed_at } : { classe: 'vide', texte: 'jamais' }),
+      // Une colonne vide dit qu'on n'a pas regardé ; un zéro, qu'il n'y a rien.
+      el('td', repo.seen ? { texte: String(repo.commits) } : { classe: 'vide', texte: '—' }),
+      el('td', {}, ...pastillesDuDepot(repo)),
       el('td', { texte: acces ? resumerAcces(acces) : '—' }),
       el('td', { classe: 'etroit' }, el('span', { classe: 'actions' },
         el('button', {
@@ -1520,6 +1594,34 @@ function dessinerTravail() {
   }
   barreTravail.maj();
   majSelection();
+}
+
+// pastillesDuDepot dit ce que l'historique d'un dépôt a révélé : un retard sur
+// la date cible, et les personnes visées dont rien ne porte la trace.
+function pastillesDuDepot(repo) {
+  if (!repo.seen) return [el('span', { classe: 'vide', texte: '—' })];
+  const jetons = [];
+  if (repo.late) {
+    jetons.push(el('span', {
+      classe: 'jeton non',
+      title: `Dernier commit le ${instantLisible(repo.last)}, après la date cible`,
+      texte: 'en retard',
+    }));
+  }
+  for (const personne of repo.silent || []) {
+    jetons.push(el('span', {
+      classe: 'jeton alerte', title: 'Aucun commit de sa part dans ce dépôt',
+      texte: personne.full_name || '@' + personne.username,
+    }));
+  }
+  if (jetons.length === 0) {
+    // Rien à signaler. Un dépôt qui n'a rien reçu le dit quand même : le cas
+    // n'est pas une faute — personne n'y était attendu —, mais il se voit.
+    jetons.push(repo.commits
+      ? el('span', { classe: 'jeton oui', texte: instantLisible(repo.last) })
+      : el('span', { classe: 'jeton', texte: 'aucun commit' }));
+  }
+  return jetons;
 }
 
 function resumerAcces(acces) {
@@ -1579,6 +1681,87 @@ function commandeDuTravail(bouton, action) {
 // renomme : il n'y a pas à retourner à la liste pour le cocher.
 commandeDuTravail('detail-deplacer', (travail) => deplacerTravaux([travail]));
 commandeDuTravail('detail-renommer', (travail) => renommerTravail(travail));
+
+// Relever les remises du seul travail ouvert : c'est le geste courant — on
+// regarde un travail la veille de sa date cible, pas un groupe entier.
+$('detail-remises').addEventListener('click', async () => {
+  menuTravail.deplier(false);
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/` +
+    `${encode(etat.travail.name)}/handins?refresh=1`), 'Remises');
+  if (!fiche) return;
+  const bilans = await suivre(fiche);
+  if (!Array.isArray(bilans)) return;
+  // Le serveur a confronté chaque dépôt à la date cible et aux personnes qu'il
+  // vise : la page n'a plus qu'à poser le résultat sur ses lignes.
+  const parNom = new Map(bilans.map((bilan) => [bilan.repo, bilan]));
+  for (const repo of etat.travail.depots) {
+    const bilan = parNom.get(repo.name);
+    if (!bilan) continue;
+    repo.seen = true;
+    repo.commits = bilan.commits;
+    repo.last = bilan.last || '';
+    repo.late = !!bilan.late;
+    repo.silent = bilan.silent || [];
+  }
+  dessinerTravail();
+  // La liste des travaux porte les mêmes pastilles : la laisser en arrière
+  // ferait dire deux choses différentes au même écran.
+  await releverLesRemises(false);
+});
+
+// La date cible se change ici, depuis le travail qu'elle concerne. Elle ne
+// s'écrit nulle part sur GitHub : c'est le groupe qui la retient.
+$('detail-echeance').addEventListener('click', async () => {
+  menuTravail.deplier(false);
+  const travail = travailOuvert();
+  if (travail) await fixerEcheance(travail);
+});
+
+async function fixerEcheance(travail) {
+  const champ = el('input', {
+    type: 'datetime-local', classe: 'champ', value: pourChampDate(travail.due),
+  });
+  const retirer = el('input', { type: 'checkbox' });
+
+  const confirme = await demander(`Date cible de « ${travail.name} »`, el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'À remettre avant' }), champ,
+      el('span', { classe: 'aide',
+        texte: 'Un dépôt dont le dernier commit dépasse cette date porte une ' +
+          'pastille rouge. Relevez les remises pour les voir.' })),
+    travail.due
+      ? el('label', { classe: 'case' }, retirer,
+          el('span', { texte: "Retirer la date cible de ce travail" }))
+      : null,
+    el('p', { classe: 'note',
+      texte: "La date est écrite dans le registre de l'organisation, avec les noms " +
+        "des étudiants : vos collègues la voient, et elle vous suit d'un poste à " +
+        "l'autre." })), 'Enregistrer');
+  if (!confirme) return;
+
+  const due = retirer.checked ? '' : champ.value.trim();
+  const fiche = await tenter(() => api('PUT',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/` +
+    `${encode(travail.name)}/deadline`, { due }), 'Date cible');
+  if (!fiche) return;
+  message(fiche.due
+    ? `« ${fiche.name} » est à remettre le ${dateLisible(fiche.due)}.`
+    : `« ${fiche.name} » n'a plus de date cible.`, 'succes');
+  // Le travail rouvert porte sa nouvelle date, et la liste avec lui : les
+  // pastilles de retard en dépendent.
+  await ouvrirGroupe(etat.groupe.scope, false, true);
+  const encore = (etat.groupe.assignments || []).find((item) => item.id === travail.id);
+  if (encore) await ouvrirTravail(encore, false, true);
+}
+
+// Le champ « datetime-local » n'accepte que « AAAA-MM-JJTHH:MM ». Une date
+// seule — celle qu'on a saisie sans heure — vaut la fin de la journée, et c'est
+// ce que le champ doit montrer.
+function pourChampDate(due) {
+  if (!due) return '';
+  return String(due).includes('T') ? due : `${due}T23:59`;
+}
 
 $('detail-acces').addEventListener('click', async () => {
   menuTravail.deplier(false);
@@ -1836,6 +2019,10 @@ async function ouvrirAssistant(nom, titre, etape = 1, nature) {
   etat.reglagesTravail = Object.assign({}, etat.groupe.defaults);
   etat.assistantTitre = titre;
   $('travail-nom').value = nom;
+  // Un travail rouvert pour servir un retardataire montre l'échéance qu'il a
+  // déjà : la retaper serait absurde, et la laisser vide l'effacerait à l'œil.
+  $('travail-echeance').value = pourChampDate(
+    (etat.groupe.assignments || []).find((item) => item.name === nom)?.due || '');
   // Un travail rouvert garde sa nature : on ne redistribue pas en équipe un
   // travail qui a été individuel, et l'inverse encore moins.
   etat.nature = nature || 'individuel';
@@ -2096,6 +2283,9 @@ function corpsDuTravail() {
     name: $('travail-nom').value.trim(),
     settings: lireReglagesTravail(),
     teams: enEquipe(),
+    // Vide, la date cible ne retire rien : distribuer à un retardataire
+    // repasse par ici, et le travail garde l'échéance qu'il avait.
+    due: $('travail-echeance').value.trim(),
   };
   // Un travail d'équipe ne restreint pas par compte mais par équipe : envoyer
   // les deux listes laisserait le serveur choisir, et il ne doit pas avoir à le

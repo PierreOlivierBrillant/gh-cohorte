@@ -120,10 +120,27 @@ func (s *State) TeamMembers(org, slug string) []string {
 }
 
 // AddContributors dit qui a écrit dans un dépôt, du plus prolifique au moins.
+// Un compte répété a écrit d'autant de fois : « alice, alice, bob » donne deux
+// commits à la première et un au second.
 func (s *State) AddContributors(fullName string, logins ...string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.Contributors[fullName] = append(s.Contributors[fullName], logins...)
+}
+
+// AnonymousAuthor est un auteur que l'historique porte sans qu'aucun compte
+// GitHub n'y réponde : l'adresse du commit n'est rattachée à personne.
+type AnonymousAuthor struct {
+	Name    string
+	Email   string
+	Commits int
+}
+
+// AddAnonymous ajoute à un dépôt un auteur sans compte GitHub.
+func (s *State) AddAnonymous(fullName string, auteurs ...AnonymousAuthor) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.Anonymous[fullName] = append(s.Anonymous[fullName], auteurs...)
 }
 
 // ShareRepo partage un dépôt avec une équipe, comme GitHub Classroom le fait.
@@ -162,7 +179,7 @@ var (
 
 // teamsGet répond aux lectures d'équipes ; faux quand la route n'en est pas une.
 // L'état est déjà verrouillé par l'appelant.
-func (s *Server) teamsGet(writer http.ResponseWriter, path string) bool {
+func (s *Server) teamsGet(writer http.ResponseWriter, request *http.Request, path string) bool {
 	state := s.State
 	if match := teamMembersRe.FindStringSubmatch(path); match != nil {
 		equipe, connue := state.Teams[match[1]+"/"+match[2]]
@@ -257,14 +274,38 @@ func (s *Server) teamsGet(writer http.ResponseWriter, path string) bool {
 			return true
 		}
 		auteurs := state.Contributors[full]
-		if len(auteurs) == 0 {
+		anonymes := state.Anonymous[full]
+		if len(auteurs) == 0 && len(anonymes) == 0 {
 			// GitHub répond 204 pour un dépôt sans aucun commit.
 			writer.WriteHeader(204)
 			return true
 		}
-		payload := make([]map[string]any, 0, len(auteurs))
+		// Un compte répété a écrit d'autant de fois : c'est « contributions »
+		// que GitHub rend, pas une ligne par commit. L'ordre de première
+		// apparition est conservé, comme celui de GitHub.
+		commits := map[string]int{}
+		ordre := make([]string, 0, len(auteurs))
 		for _, login := range auteurs {
-			payload = append(payload, map[string]any{"login": login, "type": "User"})
+			if commits[login] == 0 {
+				ordre = append(ordre, login)
+			}
+			commits[login]++
+		}
+		payload := make([]map[string]any, 0, len(ordre)+len(anonymes))
+		for _, login := range ordre {
+			payload = append(payload, map[string]any{
+				"login": login, "type": "User", "contributions": commits[login],
+			})
+		}
+		// Les auteurs sans compte ne paraissent que si on les demande, comme
+		// chez GitHub.
+		if request.URL.Query().Get("anon") != "" {
+			for _, auteur := range anonymes {
+				payload = append(payload, map[string]any{
+					"type": "Anonymous", "name": auteur.Name, "email": auteur.Email,
+					"contributions": auteur.Commits,
+				})
+			}
 		}
 		s.send(writer, 200, payload)
 		return true

@@ -5,9 +5,11 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
@@ -61,8 +63,52 @@ func (s *Session) create() (int, error) {
 		if err := s.apprendre(s.Settings.Org, people); err != nil {
 			return ExitOK, err
 		}
+		if err := s.retenirEcheance(); err != nil {
+			return ExitOK, err
+		}
 	}
 	return s.execute(items)
+}
+
+// retenirEcheance porte au registre de l'organisation la date cible donnée en
+// ligne de commande. Elle n'entre dans aucun dépôt, et la retenir sur ce poste
+// la rendrait vraie d'une seule machine : c'est le registre qui la porte, comme
+// il porte les noms.
+//
+// Un travail dont le nom ne dit pas à quel groupe il appartient — un préfixe
+// hérité — n'a nulle part où la ranger. Le dire vaut mieux que de l'écrire
+// quelque part d'invisible.
+func (s *Session) retenirEcheance() error {
+	if !s.Options.DueSet {
+		return nil
+	}
+	place, nom, reconnu := naming.SplitAssignment(s.Settings.Assignment)
+	if !reconnu {
+		return valid.Errorf(
+			"--due : « %s » ne dit pas à quel groupe il appartient. Une date cible "+
+				"s'attache à un travail d'un groupe, nommé "+
+				"« session%[2]scours%[2]sgroupe%[2]stravail ».",
+			s.Settings.Assignment, naming.Separator)
+	}
+	cours, err := classroom.AtScope(s.Settings.Org, place,
+		classroom.DefaultsFrom(s.Settings))
+	if err != nil {
+		return err
+	}
+	if connu, existe := s.groupStore().Find(cours.Org, cours.Scope()); existe {
+		cours = connu
+	}
+	lignes, err := cours.SetDue(nom, s.Options.Due)
+	if err != nil {
+		return err
+	}
+	if _, err := s.registryOf(cours.Org).Apply(echeances(lignes)); err != nil {
+		return err
+	}
+	if s.Options.Due != "" {
+		s.Console.Note("« %s » est à remettre le %s.", nom, s.Options.Due)
+	}
+	return nil
 }
 
 // collectPeople charge la liste des personnes : fichier CSV ou saisie guidée.
