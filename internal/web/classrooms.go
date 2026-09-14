@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -83,6 +84,10 @@ func (s *Server) handleClassrooms(writer http.ResponseWriter, request *http.Requ
 	infos, _ := s.orgTeams(org, false)
 
 	visibles := s.visibles(org, repos)
+	// Ce qu'on vient d'ouvrir sera regardé : les historiques et les accès des
+	// cours de la session en cours partent les chercher pendant qu'on choisit.
+	s.precharger(org, visibles, repos)
+
 	liste := make([]classroomPayload, 0, len(visibles))
 	courts := make([]string, 0, len(visibles))
 	for _, cours := range visibles {
@@ -857,6 +862,9 @@ type assignmentRepo struct {
 	Last    string          `json:"last,omitempty"`
 	Late    bool            `json:"late"`
 	Silent  []roster.Person `json:"silent,omitempty"`
+	// Access dit qui a accès au dépôt, quand on l'a déjà inspecté. Absent, on
+	// n'a pas encore regardé — ce qui n'est pas la même chose qu'aucun accès.
+	Access *identity.Access `json:"access,omitempty"`
 }
 
 // assignmentOf résout le groupe et le travail désignés par l'adresse.
@@ -929,8 +937,11 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		filtre, tri, decroissant)
 
 	// Les historiques déjà relevés sont versés ici : la page les montre sans
-	// attendre, et le bouton « Remises » va chercher ce qui manque.
+	// attendre, et le bouton « Remises » va chercher ce qui manque. Les accès
+	// suivent le même chemin — c'est ce que le préchargement prépare, et il n'y
+	// a pas de raison de faire cliquer pour montrer ce qu'on sait déjà.
 	remises := s.remisesConnues(cours.Org, tous)
+	acces := s.resolver(cours.Org).Accesses(cours.Org, tous, identity.Cached, nil)
 	echeance, _ := valid.ParseDue(cours.DueOf(id))
 
 	lignes := make([]assignmentRepo, 0, len(retenues))
@@ -945,6 +956,9 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 			bilan := cours.Review(repo.Name, remise, echeance, equipes)
 			ligne.Seen, ligne.Commits = true, bilan.Commits
 			ligne.Last, ligne.Late, ligne.Silent = bilan.Last, bilan.Late, bilan.Silent
+		}
+		if connu, inspecte := acces[repo.Name]; inspecte {
+			ligne.Access = &connu
 		}
 		if equipe, appartient := cours.TeamOf(repo.Name, equipes); appartient {
 			ligne.FullName, ligne.Team = equipe.Label(), equipe.Short
@@ -978,24 +992,36 @@ func (s *Server) handleAssignmentAccess(writer http.ResponseWriter, request *htt
 		fail(writer, err)
 		return
 	}
-	trouves := cours.Repos(id, repos)
+	noms := nomsDeDepots(cours.Repos(id, repos))
+	if len(noms) == 0 {
+		fail(writer, valid.Errorf("Aucun dépôt pour le travail « %s ».", cours.ShortName(id)))
+		return
+	}
 
+	// Le relevé est mené comme celui des remises : mémorisé, demandé en
+	// parallèle, et sans reprendre ce qu'un préchargement a déjà lu.
 	job := s.jobs.Start("acces", "Accès des dépôts de « "+cours.ShortName(id)+" »",
 		func(job *Job) (any, error) {
-			found := make([]accessPayload, 0, len(trouves))
-			for index, repo := range trouves {
-				if job.Canceled() {
-					return found, nil
+			lus := s.resolver(cours.Org).Accesses(cours.Org, noms, jusqua(request),
+				func(done, total int, repo string) {
+					job.Progress(done, total, repo)
+				})
+			trouves := make([]identity.Access, 0, len(lus))
+			for _, nom := range noms {
+				if acces, inspecte := lus[nom]; inspecte {
+					trouves = append(trouves, acces)
 				}
-				payload, err := s.accessOf(cours.Org, repo.Name)
-				if err != nil {
-					return nil, err
-				}
-				found = append(found, payload)
-				job.Progress(index+1, len(trouves), repo.Name)
-				job.Line(repo.Name, payload)
 			}
-			return found, nil
+			if job.Canceled() {
+				return trouves, nil
+			}
+			// Un dépôt illisible — un jeton sans droit dessus — n'est pas
+			// inspecté. Le taire ferait croire que personne n'y a accès.
+			if manquants := len(noms) - len(trouves); manquants > 0 {
+				job.Warn(fmt.Sprintf("%d dépôt(s) n'ont pas pu être lus : leurs accès "+
+					"restent inconnus.", manquants))
+			}
+			return trouves, nil
 		})
 	writeJSON(writer, http.StatusAccepted, job.State())
 }

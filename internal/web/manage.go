@@ -7,21 +7,9 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
-
-// pendingInvitation est une invitation en attente, telle que l'affiche l'interface.
-type pendingInvitation struct {
-	ID    int64  `json:"id"`
-	Login string `json:"login"`
-}
-
-// accessPayload décrit qui a accès à un dépôt.
-type accessPayload struct {
-	Repo          string              `json:"repo"`
-	Collaborators []string            `json:"collaborators"`
-	Invitations   []pendingInvitation `json:"invitations"`
-}
 
 // target résout l'organisation et le dépôt désignés par l'adresse.
 func target(request *http.Request) (string, string, error) {
@@ -36,45 +24,22 @@ func target(request *http.Request) (string, string, error) {
 	return org, repo, nil
 }
 
-// accessOf renvoie les collaborateurs directs et les invitations en attente.
-func (s *Server) accessOf(org, repo string) (accessPayload, error) {
-	payload := accessPayload{Repo: repo, Collaborators: []string{},
-		Invitations: []pendingInvitation{}}
-
-	collaborators, err := s.deps.Client.ListCollaborators(org, repo)
-	if err != nil {
-		return payload, err
-	}
-	for _, item := range collaborators {
-		payload.Collaborators = append(payload.Collaborators, item.Login)
-	}
-	invitations, err := s.deps.Client.ListInvitations(org, repo)
-	if err != nil {
-		return payload, err
-	}
-	for _, item := range invitations {
-		if item.Invitee.Login == "" {
-			continue
-		}
-		payload.Invitations = append(payload.Invitations,
-			pendingInvitation{ID: item.ID, Login: item.Invitee.Login})
-	}
-	return payload, nil
-}
-
-// handleAccess renvoie les accès d'un dépôt.
+// handleAccess renvoie les accès d'un dépôt. Un panneau ouvert sur un dépôt
+// précis relit toujours : c'est là qu'on vient vérifier ce qu'on vient de
+// changer, et une mémoire d'une heure y dirait le contraire de la vérité. Ce
+// qu'il lit est mémorisé pour le reste de l'écran.
 func (s *Server) handleAccess(writer http.ResponseWriter, request *http.Request) {
 	org, repo, err := target(request)
 	if err != nil {
 		fail(writer, err)
 		return
 	}
-	payload, err := s.accessOf(org, repo)
+	acces, err := s.resolver(org).AccessOf(org, repo, identity.Refresh)
 	if err != nil {
 		fail(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, payload)
+	writeJSON(writer, http.StatusOK, acces)
 }
 
 // handleAddCollaborator invite une personne sur un dépôt.
@@ -112,6 +77,9 @@ func (s *Server) handleAddCollaborator(writer http.ResponseWriter, request *http
 		fail(writer, err)
 		return
 	}
+	// Ce qu'on savait des accès de ce dépôt vient de devenir faux.
+	s.resolver(org).ForgetAccess(org, repo)
+
 	label := "accès accordé"
 	if state == ghapi.CollaboratorInvited {
 		label = "invitation envoyée"
@@ -137,6 +105,7 @@ func (s *Server) handleRemoveCollaborator(writer http.ResponseWriter, request *h
 		fail(writer, err)
 		return
 	}
+	s.resolver(org).ForgetAccess(org, repo)
 	writeJSON(writer, http.StatusOK, map[string]string{
 		"message": "@" + login + " n'a plus accès à « " + repo + " ».",
 	})
@@ -158,6 +127,7 @@ func (s *Server) handleCancelInvitation(writer http.ResponseWriter, request *htt
 		fail(writer, err)
 		return
 	}
+	s.resolver(org).ForgetAccess(org, repo)
 	writeJSON(writer, http.StatusOK, map[string]string{"message": "Invitation annulée."})
 }
 

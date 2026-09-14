@@ -155,3 +155,93 @@ func TestOwnersNeRedemandePasCeQuIlSait(t *testing.T) {
 			serveur.State.CallCount("/collaborators"), appels)
 	}
 }
+
+// Les accès se mémorisent comme les historiques : une fois lus, un écran les
+// montre sans rien redemander — c'est ce qui rend le préchargement utile.
+func TestAccesMemorisesSeRelisentSansReseau(t *testing.T) {
+	client, serveur := monter(t)
+	serveur.State.AddRepo("acme", "a26.5n6.01.tp1.jlpicard", true)
+	serveur.State.AddCollaborator("acme/a26.5n6.01.tp1.jlpicard", "jlpicard", "push")
+	serveur.State.Invite("acme/a26.5n6.01.tp1.jlpicard", "ecote", "push")
+	stockage := cache.NewIn(t.TempDir(), true)
+	noms := []string{"a26.5n6.01.tp1.jlpicard"}
+
+	// Avant toute lecture, « Cached » ne prétend rien : un dépôt qu'on n'a pas
+	// regardé n'est pas un dépôt sans accès.
+	if connus := identity.New(client, stockage, 4).
+		Accesses("acme", noms, identity.Cached, nil); len(connus) != 0 {
+		t.Fatalf("accès connus d'avance : %+v", connus)
+	}
+
+	lus := identity.New(client, stockage, 4).Accesses("acme", noms, identity.Fetch, nil)
+	acces, inspecte := lus[noms[0]]
+	if !inspecte || len(acces.Collaborators) != 1 || acces.Collaborators[0] != "jlpicard" {
+		t.Fatalf("collaborateurs = %+v", acces)
+	}
+	if len(acces.Invitations) != 1 || acces.Invitations[0].Login != "ecote" ||
+		acces.Invitations[0].ID == 0 {
+		t.Fatalf("invitations = %+v : l'identifiant sert à l'annuler", acces.Invitations)
+	}
+	appels := serveur.State.CallCount("/collaborators")
+
+	// Un résolveur neuf, mais la même mémoire : plus rien ne part sur le réseau.
+	encore := identity.New(client, stockage, 4).Accesses("acme", noms, identity.Cached, nil)
+	if len(encore) != 1 || len(encore[noms[0]].Invitations) != 1 {
+		t.Fatalf("accès mémorisés = %+v", encore)
+	}
+	if serveur.State.CallCount("/collaborators") != appels {
+		t.Fatalf("appels = %d, attendu %d : la mémoire devait répondre",
+			serveur.State.CallCount("/collaborators"), appels)
+	}
+}
+
+// « Refresh » relit tout : c'est ce que fait le geste explicite, et ce
+// qu'« oublier » impose après un changement d'accès.
+func TestAccesRelusSurDemandeEtApresUnChangement(t *testing.T) {
+	client, serveur := monter(t)
+	serveur.State.AddRepo("acme", "a26.5n6.01.tp1.jlpicard", true)
+	stockage := cache.NewIn(t.TempDir(), true)
+	resolveur := identity.New(client, stockage, 4)
+	noms := []string{"a26.5n6.01.tp1.jlpicard"}
+
+	resolveur.Accesses("acme", noms, identity.Fetch, nil)
+	serveur.State.AddCollaborator("acme/a26.5n6.01.tp1.jlpicard", "jlpicard", "push")
+
+	// La mémoire d'avant le changement ne dit plus la vérité.
+	if lus := resolveur.Accesses("acme", noms, identity.Fetch, nil); len(lus[noms[0]].Collaborators) != 0 {
+		t.Fatalf("« Fetch » a relu ce qu'il savait déjà : %+v", lus)
+	}
+	if lus := resolveur.Accesses("acme", noms, identity.Refresh, nil); len(lus[noms[0]].Collaborators) != 1 {
+		t.Fatalf("« Refresh » n'a pas relu : %+v", lus)
+	}
+
+	serveur.State.AddCollaborator("acme/a26.5n6.01.tp1.jlpicard", "ecote", "push")
+	resolveur.ForgetAccess("acme", noms[0])
+	acces, err := resolveur.AccessOf("acme", noms[0], identity.Fetch)
+	if err != nil {
+		t.Fatalf("lecture : %v", err)
+	}
+	if len(acces.Collaborators) != 2 {
+		t.Fatalf("collaborateurs = %+v : l'oubli devait forcer la relecture", acces)
+	}
+}
+
+// Une mémoire d'une forme antérieure — une simple liste de comptes — ne dit
+// plus ce qu'on lui demande : elle compte pour un dépôt qu'on n'a pas lu.
+func TestUneMemoireDAccesAncienneEstIgnoree(t *testing.T) {
+	client, serveur := monter(t)
+	serveur.State.AddRepo("acme", "a26.5n6.01.tp1.jlpicard", true)
+	serveur.State.AddCollaborator("acme/a26.5n6.01.tp1.jlpicard", "jlpicard", "push")
+	stockage := cache.NewIn(t.TempDir(), true)
+	stockage.Set(cache.AccessKey("acme", "a26.5n6.01.tp1.jlpicard"), []string{"jlpicard"})
+
+	noms := []string{"a26.5n6.01.tp1.jlpicard"}
+	if connus := identity.New(client, stockage, 4).
+		Accesses("acme", noms, identity.Cached, nil); len(connus) != 0 {
+		t.Fatalf("une forme antérieure a été prise pour une réponse : %+v", connus)
+	}
+	lus := identity.New(client, stockage, 4).Accesses("acme", noms, identity.Fetch, nil)
+	if len(lus[noms[0]].Collaborators) != 1 {
+		t.Fatalf("accès relus = %+v", lus)
+	}
+}

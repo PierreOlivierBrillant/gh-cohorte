@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
@@ -338,6 +339,21 @@ func (s *Server) deleted(org, name string) {
 	s.updateInventory(org, func(repos []groups.RepoInfo) []groups.RepoInfo {
 		return groups.WithoutRepo(repos, name)
 	})
+	// Un dépôt recréé sous le même nom n'hériterait pas des accès de l'ancien :
+	// ce qu'on en savait doit partir avec lui.
+	s.resolver(org).ForgetAccess(org, name)
+}
+
+// precharger prépare en arrière-plan les deux lectures chères — les historiques
+// et les accès — pour les dépôts des cours de la session la plus récente.
+//
+// Sans mémoire, il n'y a rien à préparer : un cache désactivé demande
+// précisément que tout soit redemandé au moment où on le regarde.
+func (s *Server) precharger(org string, cours []classroom.Classroom, repos []groups.RepoInfo) {
+	if s.deps.Cache == nil || !s.deps.Cache.Enabled {
+		return
+	}
+	s.warmer.Warm(s.resolver(org), org, cours, repos)
 }
 
 // resolver retrouve, par organisation, le service qui nomme les personnes.
