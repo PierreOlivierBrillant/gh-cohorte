@@ -8,6 +8,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
 
 // La fiche déroule le passage de quelqu'un, de la session la plus récente à la
@@ -258,4 +259,76 @@ func sansService(noms []string) []string {
 		}
 	}
 	return ordinaires
+}
+
+// ---------------------------------------------------------- filtre par rôle
+
+// L'annuaire du terminal montre le rôle et se filtre dessus, comme celui du
+// navigateur : c'est le même paquet qui décide de ce que « enseignant » veut
+// dire.
+func TestLAnnuaireDuTerminalSeFiltreParRole(t *testing.T) {
+	h := college(t)
+	h.Options.StudentsRequested = false
+	h.Options.User = "prof"
+	h.Options.TeacherSet, h.Options.Teacher = true, true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("cooptation : code = %d\n%s", code, h.texte())
+	}
+
+	// Sans filtre : tout le monde, et l'enseignant est de la partie bien qu'il
+	// ne figure sur aucune liste de classe.
+	tous := nouveauDansLeMemeDossier(t, h)
+	tous.Options.User = ""
+	tous.Options.TeacherSet = false
+	tous.Options.StudentsRequested = true
+	if code := tous.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, tous.texte())
+	}
+	tous.contient("@prof", "enseignant", "Émilie Côté")
+
+	// Avec le filtre : les enseignants seulement.
+	profs := nouveauDansLeMemeDossier(t, h)
+	profs.Options.User = ""
+	profs.Options.TeacherSet = false
+	profs.Options.StudentsRequested = true
+	profs.Options.Filter.Role = users.OnlyTeachers
+	if code := profs.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, profs.texte())
+	}
+	profs.contient("@prof", "enseignants seulement")
+	profs.absent("Émilie Côté", "Jean-Luc Picard")
+}
+
+// Un cours donné se marque d'une étoile, et l'étoile s'explique : une marque
+// que rien ne nomme ne dit rien.
+func TestUnCoursDonneSeMarqueDansLAnnuaireDuTerminal(t *testing.T) {
+	h := college(t)
+	h.Options.StudentsRequested = false
+	h.Options.User = "prof"
+	h.Options.TeacherSet, h.Options.Teacher = true, true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("cooptation : code = %d\n%s", code, h.texte())
+	}
+
+	cloisonne := nouveauDansLeMemeDossier(t, h)
+	cloisonne.Options.User = ""
+	cloisonne.Options.TeacherSet = false
+	cloisonne.Options.ManageRequested, cloisonne.Options.Manage = true, "a26.5n6.01"
+	cloisonne.Options.TeachersOn = true
+	cloisonne.Options.Teachers = []string{"prof"}
+	cloisonne.Options.Yes = true
+	if code := cloisonne.muet(); code != app.ExitOK {
+		t.Fatalf("cloisonnement : code = %d\n%s", code, cloisonne.texte())
+	}
+
+	liste := nouveauDansLeMemeDossier(t, h)
+	liste.Options.User = ""
+	liste.Options.TeacherSet = false
+	liste.Options.ManageRequested, liste.Options.Manage = false, ""
+	liste.Options.TeachersOn = false
+	liste.Options.StudentsRequested = true
+	if code := liste.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, liste.texte())
+	}
+	liste.contient("a26.5n6.01*", "Un « * » marque un cours donné plutôt que suivi.")
 }

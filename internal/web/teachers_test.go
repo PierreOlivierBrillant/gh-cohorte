@@ -319,7 +319,7 @@ func TestNommerDepuisLaFiche(t *testing.T) {
 		t.Fatalf("fiche = %+v", apres.User)
 	}
 	// Le nom vaut partout : l'annuaire le montre sans qu'on ait rien publié.
-	for _, ligne := range h.annuaire("").Students {
+	for _, ligne := range h.annuaire("").Users {
 		if ligne.Username == "aleksilepaj" && ligne.FullName != "Aleksi Lepaj" {
 			t.Errorf("annuaire = %+v", ligne)
 		}
@@ -364,5 +364,80 @@ func TestUnNomVideEstRefuse(t *testing.T) {
 		map[string]any{"full_name": "   "})
 	if reponse.StatusCode == http.StatusOK {
 		t.Fatalf("un nom vide devait être refusé — %s", contenu)
+	}
+}
+
+// ------------------------------------------------------ filtre par rôle
+
+// ligneDe retrouve une personne dans l'annuaire.
+func ligneDe(rendu annuaireRendu, compte string) (annuaireLigne, bool) {
+	for _, ligne := range rendu.Users {
+		if ligne.Username == compte {
+			return ligne, true
+		}
+	}
+	return annuaireLigne{}, false
+}
+
+// Un enseignant figure dans l'annuaire au même titre qu'un étudiant, et le
+// filtre sait ne garder que les uns ou que les autres.
+func TestLAnnuaireSeFiltreParRole(t *testing.T) {
+	h := college(t)
+	h.coopter("prof", true)
+
+	tous := h.annuaire("")
+	prof, present := ligneDe(tous, "prof")
+	if !present {
+		t.Fatalf("l'enseignant est absent de l'annuaire : %s", comptesDe(tous))
+	}
+	if !prof.IsTeacher || prof.Role != "enseignant" {
+		t.Errorf("rôle = %+v", prof)
+	}
+
+	// Le filtre ne garde que les enseignants…
+	profs := h.annuaire("?role=enseignant")
+	if comptesDe(profs) != "prof" {
+		t.Fatalf("enseignants = %s", comptesDe(profs))
+	}
+	// … ou que les étudiants, et l'enseignant n'y est plus.
+	etudiants := h.annuaire("?role=etudiant")
+	if strings.Contains(comptesDe(etudiants), "prof") {
+		t.Fatalf("étudiants = %s", comptesDe(etudiants))
+	}
+	if etudiants.Shown+profs.Shown != tous.Total {
+		t.Errorf("%d + %d ≠ %d", etudiants.Shown, profs.Shown, tous.Total)
+	}
+}
+
+// Un cours donné se distingue d'un cours suivi jusque dans l'annuaire : la
+// même colonne porte les deux.
+func TestLAnnuaireDitCeQuOnAEteDansChaqueCours(t *testing.T) {
+	h := college(t)
+	h.coopter("prof", true)
+	h.travail(http.MethodPost, "/api/classrooms/a26.5n6.01/teachers",
+		map[string]any{"teachers": []string{"prof"}})
+
+	for _, ligne := range h.annuaire("?role=enseignant").Users {
+		if ligne.Username != "prof" {
+			continue
+		}
+		if len(ligne.Enrollments) != 1 {
+			t.Fatalf("inscriptions = %+v", ligne.Enrollments)
+		}
+		if ligne.Enrollments[0].Role != "enseignant" ||
+			ligne.Enrollments[0].Scope != "a26.5n6.01" {
+			t.Errorf("inscription = %+v", ligne.Enrollments[0])
+		}
+		return
+	}
+	t.Fatal("l'enseignant est absent")
+}
+
+// Un rôle inconnu est refusé plutôt que silencieusement ignoré.
+func TestUnRoleInconnuEstRefuse(t *testing.T) {
+	h := college(t)
+	reponse, contenu := h.requete(http.MethodGet, "/api/users?role=popularite", nil)
+	if reponse.StatusCode == http.StatusOK {
+		t.Fatalf("un rôle inconnu devait être refusé — %s", contenu)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
 
@@ -50,7 +51,7 @@ func college() ([]classroom.Classroom, []groups.RepoInfo) {
 
 func annuaire() []users.Row {
 	cours, inventaire := college()
-	return users.Directory(cours, inventaire, nil)
+	return users.Directory(cours, inventaire, nil, nil, nil)
 }
 
 func TestAnnuaireFondUnePersonneVueParPlusieursGroupes(t *testing.T) {
@@ -98,7 +99,7 @@ func TestAnnuaireRecupereUnNomCompletConnuAilleurs(t *testing.T) {
 	cours, inventaire := college()
 	cours[0].Students = append(cours[0].Students,
 		roster.Person{FullName: "Aminata Diallo", Username: "aminata-d"})
-	for _, ligne := range users.Directory(cours, inventaire, nil) {
+	for _, ligne := range users.Directory(cours, inventaire, nil, nil, nil) {
 		if ligne.Username == "aminata-d" && ligne.FullName != "Aminata Diallo" {
 			t.Fatalf("nom complet d'Aminata : %q", ligne.FullName)
 		}
@@ -137,7 +138,7 @@ func TestUneInscriptionSansDepotCompte(t *testing.T) {
 	cours, inventaire := college()
 	cours[1].Students = append(cours[1].Students,
 		roster.Person{FullName: "Jean-Luc Picard", Username: "jlpicard"})
-	lignes := users.Directory(cours, inventaire, nil)
+	lignes := users.Directory(cours, inventaire, nil, nil, nil)
 	retenues := users.Apply(lignes,
 		users.Filter{Session: "a26", Course: "4w6"}, users.ByName, false)
 	if comptes(retenues) != "ecote,jlpicard" {
@@ -189,7 +190,7 @@ func TestLAnnuaireReunitLesComptesDeTousLesGroupes(t *testing.T) {
 	}
 	cours[0].Students[1].Also = []string{"emilie-perso"}
 
-	for _, ligne := range users.Directory(cours, inventaire, nil) {
+	for _, ligne := range users.Directory(cours, inventaire, nil, nil, nil) {
 		if ligne.Username != "ecote" {
 			continue
 		}
@@ -202,4 +203,119 @@ func TestLAnnuaireReunitLesComptesDeTousLesGroupes(t *testing.T) {
 		return
 	}
 	t.Fatal("Émilie est absente de l'annuaire")
+}
+
+// Un enseignant n'est sur aucune liste de classe : sans les équipes
+// enseignantes et le registre, l'annuaire ne le verrait jamais — et « ne
+// montrer que les enseignants » ne montrerait presque personne.
+func TestLAnnuaireFaitEntrerLesEnseignants(t *testing.T) {
+	cours, inventaire := college()
+	infos := []teams.Info{{
+		Slug: "a26-5n6-01-enseignants", Name: "a26.5n6.01.enseignants",
+		Members: []string{"kjaneway"},
+	}}
+	lignes := users.Directory(cours, inventaire, nil, infos, connu())
+
+	var janeway users.Row
+	for _, ligne := range lignes {
+		if ligne.Username == "kjaneway" {
+			janeway = ligne
+		}
+	}
+	if janeway.Username == "" {
+		t.Fatalf("l'enseignante est absente : %s", comptes(lignes))
+	}
+	if !janeway.IsTeacher || janeway.Role() != users.AsTeacher {
+		t.Errorf("rôle = %q", janeway.Role())
+	}
+	if janeway.FullName != "Kathryn Janeway" {
+		t.Errorf("nom = %q", janeway.FullName)
+	}
+	// Le cours qu'elle donne figure comme tel, et ne lui prête aucun dépôt.
+	if len(janeway.Enrollments) != 1 || !janeway.Enrollments[0].Teaching() {
+		t.Fatalf("inscriptions = %+v", janeway.Enrollments)
+	}
+	if len(janeway.Repos) != 0 {
+		t.Errorf("un enseignant ne rend rien : %+v", janeway.Repos)
+	}
+	// Les étudiants restent étudiants.
+	for _, ligne := range lignes {
+		if ligne.Username != "kjaneway" && ligne.IsTeacher {
+			t.Errorf("@%s ne devrait pas être enseignant", ligne.Username)
+		}
+	}
+}
+
+// L'équipe prouve ce que le registre déclare : qui est dans l'équipe
+// enseignante d'un groupe a l'accès à ses dépôts, et le montrer étudiant serait
+// faux — même si personne ne l'a coopté.
+func TestUnMembreDEquipeEnseignanteEstUnEnseignant(t *testing.T) {
+	cours, inventaire := college()
+	infos := []teams.Info{{
+		Slug: "a26-5n6-01-enseignants", Name: "a26.5n6.01.enseignants",
+		// Personne ne l'a déclaré au registre : seule l'équipe le dit.
+		Members: []string{"jlpicard"},
+	}}
+	for _, ligne := range users.Directory(cours, inventaire, nil, infos, connu()) {
+		if ligne.Username != "jlpicard" {
+			continue
+		}
+		if !ligne.IsTeacher {
+			t.Fatal("un membre de l'équipe enseignante est un enseignant")
+		}
+		// Il garde ses propres cours suivis, et gagne celui qu'il donne.
+		suivis, donnes := 0, 0
+		for _, inscription := range ligne.Enrollments {
+			if inscription.Teaching() {
+				donnes++
+			} else {
+				suivis++
+			}
+		}
+		if suivis != 1 || donnes != 1 {
+			t.Fatalf("suivis = %d, donnés = %d", suivis, donnes)
+		}
+		return
+	}
+	t.Fatal("Picard est absent de l'annuaire")
+}
+
+// Le filtre par rôle retient les uns ou les autres, jamais les deux.
+func TestLeFiltreParRole(t *testing.T) {
+	cours, inventaire := college()
+	infos := []teams.Info{{
+		Slug: "a26-5n6-01-enseignants", Name: "a26.5n6.01.enseignants",
+		Members: []string{"kjaneway"},
+	}}
+	lignes := users.Directory(cours, inventaire, nil, infos, connu())
+
+	profs := users.Apply(lignes, users.Filter{Role: users.OnlyTeachers}, users.ByName, false)
+	if comptes(profs) != "kjaneway" {
+		t.Fatalf("enseignants = %s", comptes(profs))
+	}
+	etudiants := users.Apply(lignes, users.Filter{Role: users.OnlyStudents}, users.ByName, false)
+	if comptes(etudiants) != "aminata-d,ecote,jlpicard" {
+		t.Fatalf("étudiants = %s", comptes(etudiants))
+	}
+	// Sans rôle demandé, tout le monde passe.
+	tous := users.Apply(lignes, users.Filter{}, users.ByName, false)
+	if len(tous) != len(lignes) {
+		t.Errorf("%d sur %d", len(tous), len(lignes))
+	}
+}
+
+// Le rôle se tape sans accent aussi bien qu'avec : « étudiant » se saisit
+// rarement accentué au terminal.
+func TestLeRoleSeLitAvecOuSansAccent(t *testing.T) {
+	for _, saisie := range []string{"étudiant", "etudiant", "ÉTUDIANT"} {
+		if role, err := users.ParseRole(saisie); err != nil || role != users.OnlyStudents {
+			t.Errorf("« %s » = %q, %v", saisie, role, err)
+		}
+	}
+	if role, err := users.ParseRole(""); err != nil || role != users.AnyRole {
+		t.Errorf("vide = %q, %v", role, err)
+	}
+	if _, err := users.ParseRole("popularite"); err == nil {
+		t.Error("un rôle inconnu doit être refusé")
+	}
 }

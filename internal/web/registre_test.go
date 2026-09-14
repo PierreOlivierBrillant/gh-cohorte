@@ -46,10 +46,10 @@ func TestUnCollegueVoitLesNomsSansRienAvoirDeclare(t *testing.T) {
 	collegue := autreMachine(t, state)
 	annuaire := collegue.annuaire("")
 	if annuaire.Total != 2 {
-		t.Fatalf("%d personne(s) vue(s) par le collègue : %+v", annuaire.Total, annuaire.Students)
+		t.Fatalf("%d personne(s) vue(s) par le collègue : %+v", annuaire.Total, annuaire.Users)
 	}
 	noms := map[string]string{}
-	for _, ligne := range annuaire.Students {
+	for _, ligne := range annuaire.Users {
 		noms[ligne.Username] = ligne.FullName
 	}
 	if noms["emilie-cote"] != "Émilie Côté" || noms["jlpicard"] != "Jean-Luc Picard" {
@@ -203,15 +203,15 @@ func TestUnNomCorrigeVautPourToutLeMondeSansOrphelinerLesDepots(t *testing.T) {
 	collegue := autreMachine(t, state)
 	annuaire := collegue.annuaire("")
 	if annuaire.Total != 1 {
-		t.Fatalf("annuaire = %+v", annuaire.Students)
+		t.Fatalf("annuaire = %+v", annuaire.Users)
 	}
-	if annuaire.Students[0].FullName != "Émilie Côté" {
-		t.Fatalf("nom = %q", annuaire.Students[0].FullName)
+	if annuaire.Users[0].FullName != "Émilie Côté" {
+		t.Fatalf("nom = %q", annuaire.Users[0].FullName)
 	}
 	// Le dépôt porte encore l'ancien slug, et reste pourtant le sien.
-	if annuaire.Students[0].Repos != 1 || annuaire.Unmatched != 0 {
+	if annuaire.Users[0].Repos != 1 || annuaire.Unmatched != 0 {
 		t.Fatalf("le dépôt sous l'ancien slug s'est détaché : %d dépôt(s), %d orphelin(s)",
-			annuaire.Students[0].Repos, annuaire.Unmatched)
+			annuaire.Users[0].Repos, annuaire.Unmatched)
 	}
 }
 

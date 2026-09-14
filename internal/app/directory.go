@@ -51,6 +51,7 @@ func (s *Session) orgRepos(org string, force bool) ([]groups.RepoInfo, error) {
 
 // Menu de l'annuaire.
 var directoryMenu = ui.Options(
+	"role", "Ne garder que les enseignants, ou que les étudiants",
 	"session", "Ne garder qu'une session",
 	"cours", "Ne garder qu'un cours",
 	"chercher", "Chercher un nom ou un compte",
@@ -116,14 +117,15 @@ func (d *directorySession) load(force bool) error {
 	d.avis = avis
 	visibles := store.Visible(d.org, repos,
 		classroom.DefaultsFrom(d.session.Settings), set)
-	// Les équipes disent lesquels des dépôts appartiennent à une équipe plutôt
-	// qu'à personne : sans elles, l'annuaire les compterait orphelins.
+	// Les équipes disent deux choses : lesquels des dépôts appartiennent à une
+	// équipe plutôt qu'à personne, et qui enseigne chaque groupe. Sans elles,
+	// l'annuaire compterait les uns orphelins et ignorerait les autres.
 	infos, _ := d.session.Client.LoadOrgTeams(d.org, d.session.Options.Jobs)
 	equipes := make([]teams.Team, 0, len(infos))
 	for _, cours := range visibles {
 		equipes = append(equipes, cours.Teams(infos)...)
 	}
-	d.rows = users.Directory(visibles, repos, equipes)
+	d.rows = users.Directory(visibles, repos, equipes, infos, set)
 	d.orphelins = users.Unmatched(visibles, repos, equipes)
 	d.loaded = true
 	return nil
@@ -157,12 +159,19 @@ func (d *directorySession) show() {
 		if suivis == "" {
 			suivis = console.Dim("aucun")
 		}
+		// Un étudiant ne porte rien : ils sont la règle, et marquer la règle
+		// noierait l'exception.
+		role := ""
+		if ligne.IsTeacher {
+			role = console.OK("enseignant")
+		}
 		rows = append(rows, []string{
-			itoa(index + 1), nom, "@" + ligne.Username, suivis,
+			itoa(index + 1), nom, "@" + ligne.Username, role, suivis,
 			itoa(len(ligne.Repos)), envoi,
 		})
 	}
-	console.Table([]string{"#", "Nom complet", "Compte", "Cours suivis", "Dépôts", "Dernier envoi"},
+	console.Table(
+		[]string{"#", "Nom complet", "Compte", "Rôle", "Cours", "Dépôts", "Dernier envoi"},
 		rows, 40)
 
 	if len(visibles) == 0 && len(d.rows) > 0 {
@@ -172,6 +181,10 @@ func (d *directorySession) show() {
 		console.Warning("Aucun utilisateur connu dans « %s » : déclarez un groupe et "+
 			"importez sa liste.", d.org)
 	}
+	// L'étoile d'un cours donné n'est lisible que si on la nomme.
+	if strings.Contains(strings.Join(placesDe(visibles), " "), "*") {
+		console.Note("Un « * » marque un cours donné plutôt que suivi.")
+	}
 	// Un dépôt dont le dernier niveau ne désigne personne n'est pas quelqu'un de
 	// plus : le taire ferait lire une liste trouée comme si elle était entière.
 	if d.orphelins > 0 {
@@ -180,12 +193,28 @@ func (d *directorySession) show() {
 	console.Note("%s", d.criteria())
 }
 
+// placesDe rassemble les places montrées, pour savoir s'il faut expliquer la
+// marque des cours donnés.
+func placesDe(lignes []users.Row) []string {
+	places := make([]string, 0, len(lignes))
+	for _, ligne := range lignes {
+		places = append(places, coursSuivis(ligne))
+	}
+	return places
+}
+
 // coursSuivis énumère les places des groupes suivis, de la session la plus
 // récente à la plus ancienne : c'est l'ordre où l'on cherche quelqu'un.
 func coursSuivis(ligne users.Row) string {
 	places := make([]string, 0, len(ligne.Enrollments))
 	for _, inscription := range ligne.Enrollments {
-		places = append(places, inscription.Scope)
+		place := inscription.Scope
+		// La même colonne porte les deux : sans marque, rien ne dirait si la
+		// personne était devant la classe ou dedans.
+		if inscription.Teaching() {
+			place += "*"
+		}
+		places = append(places, place)
 	}
 	return strings.Join(places, "  ")
 }
@@ -194,6 +223,12 @@ func coursSuivis(ligne users.Row) string {
 // voit pas se retourne contre celui qui l'a posé.
 func (d *directorySession) criteria() string {
 	parts := []string{}
+	switch d.filter.Role {
+	case users.OnlyTeachers:
+		parts = append(parts, "enseignants seulement")
+	case users.OnlyStudents:
+		parts = append(parts, "étudiants seulement")
+	}
 	if d.filter.Session != "" {
 		parts = append(parts, "session "+classroom.SessionName(d.filter.Session))
 	}
@@ -240,6 +275,10 @@ func (d *directorySession) menu() (int, error) {
 		case "vider":
 			d.filter = users.Filter{}
 			d.sortKey, d.sortDesc = users.ByName, false
+		case "role":
+			if err := d.askRoleFilter(); err != nil {
+				return ExitOK, err
+			}
 		case "session":
 			if err := d.askSession(); err != nil {
 				return ExitOK, err
@@ -316,6 +355,24 @@ func (d *directorySession) openProfile() error {
 	// La fiche a son écran à elle : l'annuaire le rend et reprend la main.
 	_, err = d.session.showProfile(compte)
 	return err
+}
+
+// askRoleFilter recueille le rôle à retenir.
+func (d *directorySession) askRoleFilter() error {
+	choix, err := d.session.Prompt.Choose("Rôle", ui.Options(
+		"", "Tout le monde",
+		string(users.OnlyTeachers), "Seulement les enseignants",
+		string(users.OnlyStudents), "Seulement les étudiants",
+	), string(d.filter.Role))
+	if err != nil {
+		return err
+	}
+	role, err := users.ParseRole(choix)
+	if err != nil {
+		return err
+	}
+	d.filter.Role = role
+	return nil
 }
 
 // askSession propose les sessions que l'annuaire porte, de la plus récente à

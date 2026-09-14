@@ -160,6 +160,7 @@ Utilisation :
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
   gh cohorte --students --session a26         utilisateurs de la session a26
+  gh cohorte --students --role enseignant     les enseignants de l'organisation
   gh cohorte --user ecote                     la fiche de @ecote et son passage
   gh cohorte --user jdupont --teacher         reconnaître @jdupont comme enseignant
   gh cohorte --user aleksilepaj --full-name "Aleksi Lepaj"
@@ -192,6 +193,7 @@ Drapeaux :
   --prefer-local           en cas de désaccord, garder le nom de ce poste
   --registry-team EQUIPE   donner à une équipe accès au registre
   --forget-registry-history  réécrire le registre sans son historique
+  --role enseignant|étudiant  ne lister que les enseignants, ou que les étudiants
   --session COURT          ne lister que les étudiants d'une session (« a26 »)
   --course SIGLE           ne lister que les étudiants d'un cours (« 5n6 »)
   --filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
@@ -294,6 +296,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"réécrire le registre sans son historique")
 	set.StringVar(&options.RegistryTeam, "registry-team", "",
 		"donner à une équipe accès au registre")
+	role := set.String("role", "", "ne lister qu'un rôle : enseignant ou étudiant")
 	session := set.String("session", "", "ne lister qu'une session")
 	sigle := set.String("course", "", "ne lister qu'un cours")
 	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")
@@ -364,7 +367,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	// arrêter la ligne de commande, pas se perdre en cours de route.
 	options.Filter = users.Filter{
 		Text: *filtre, PushedAfter: *apres, PushedBefore: *avant,
-		Session: *session, Course: *sigle,
+		Session: *session, Course: *sigle, Role: users.Role(*role),
 	}
 	if *muets {
 		options.Filter.Activity = users.Silent

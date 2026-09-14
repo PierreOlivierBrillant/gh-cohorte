@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
@@ -22,6 +23,17 @@ func (r registre) Teaches(username string) bool {
 func (r registre) Knows(username string) bool {
 	_, connu := r.noms[strings.ToLower(username)]
 	return connu
+}
+
+func (r registre) Teachers() []registry.User {
+	fiches := make([]registry.User, 0)
+	for compte, enseigne := range r.enseignent {
+		if enseigne {
+			fiches = append(fiches, registry.User{
+				Username: compte, FullName: r.noms[compte], IsTeacher: true})
+		}
+	}
+	return fiches
 }
 
 func connu() registre {

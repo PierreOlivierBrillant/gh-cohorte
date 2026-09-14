@@ -8,23 +8,32 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 )
 
+// annuaireLigne est une personne de l'annuaire, telle que l'API la rend.
+type annuaireLigne struct {
+	FullName    string                `json:"full_name"`
+	Username    string                `json:"username"`
+	IsTeacher   bool                  `json:"is_teacher"`
+	Role        string                `json:"role"`
+	Repos       int                   `json:"repos"`
+	PushedAt    string                `json:"pushed_at"`
+	Enrollments []annuaireInscription `json:"enrollments"`
+}
+
+// annuaireInscription est un cours qu'elle a suivi, ou donné.
+type annuaireInscription struct {
+	Scope       string `json:"scope"`
+	Session     string `json:"session"`
+	SessionName string `json:"session_name"`
+	Course      string `json:"course"`
+	Role        string `json:"role"`
+	Assignments []struct {
+		Name string `json:"name"`
+	} `json:"assignments"`
+}
+
 // annuaire est ce que l'API rend pour l'organisation entière.
 type annuaireRendu struct {
-	Students []struct {
-		FullName    string `json:"full_name"`
-		Username    string `json:"username"`
-		Repos       int    `json:"repos"`
-		PushedAt    string `json:"pushed_at"`
-		Enrollments []struct {
-			Scope       string `json:"scope"`
-			Session     string `json:"session"`
-			SessionName string `json:"session_name"`
-			Course      string `json:"course"`
-			Assignments []struct {
-				Name string `json:"name"`
-			} `json:"assignments"`
-		} `json:"enrollments"`
-	} `json:"students"`
+	Users    []annuaireLigne `json:"users"`
 	Sessions []struct {
 		Short string `json:"short"`
 		Name  string `json:"name"`
@@ -65,8 +74,8 @@ func (h *harnais) annuaire(requete string) annuaireRendu {
 
 // comptesDe rend les comptes de l'annuaire, dans l'ordre où il les donne.
 func comptesDe(rendu annuaireRendu) string {
-	noms := make([]string, 0, len(rendu.Students))
-	for _, etudiant := range rendu.Students {
+	noms := make([]string, 0, len(rendu.Users))
+	for _, etudiant := range rendu.Users {
 		noms = append(noms, etudiant.Username)
 	}
 	return strings.Join(noms, ",")
@@ -88,7 +97,7 @@ func TestAnnuaireRassembleLesGroupesDeLOrganisation(t *testing.T) {
 		t.Fatalf("dépôts non rattachés : %d", rendu.Unmatched)
 	}
 
-	var emilie = rendu.Students[1]
+	var emilie = rendu.Users[1]
 	if emilie.Username != "emilie-cote" {
 		t.Fatalf("deuxième ligne : %s", emilie.Username)
 	}
@@ -141,7 +150,7 @@ func TestAnnuaireSeFiltreParSessionEtParCours(t *testing.T) {
 		if comptesDe(rendu) != essai.attendus {
 			t.Fatalf("%s : %s (attendu %s)", essai.requete, comptesDe(rendu), essai.attendus)
 		}
-		if rendu.Shown != len(rendu.Students) || rendu.Total != 3 {
+		if rendu.Shown != len(rendu.Users) || rendu.Total != 3 {
 			t.Fatalf("%s : %d affiché(s) sur %d", essai.requete, rendu.Shown, rendu.Total)
 		}
 	}
@@ -167,8 +176,8 @@ func TestAnnuaireSansGroupeDeclare(t *testing.T) {
 	h := nouveau(t, state)
 
 	rendu := h.annuaire("")
-	if rendu.Total != 0 || len(rendu.Students) != 0 {
-		t.Fatalf("annuaire : %+v", rendu.Students)
+	if rendu.Total != 0 || len(rendu.Users) != 0 {
+		t.Fatalf("annuaire : %+v", rendu.Users)
 	}
 	if rendu.Unmatched != 1 {
 		t.Fatalf("dépôts non rattachés : %d", rendu.Unmatched)

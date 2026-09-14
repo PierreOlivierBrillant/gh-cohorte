@@ -335,6 +335,14 @@
             aria-expanded="false" aria-controls="annuaire-filtre-menu">Filtrer</button>
           <div class="menu-flottant" id="annuaire-filtre-menu" hidden>
             <label class="champ-bloc">
+              <span class="etiquette">Rôle</span>
+              <select id="annuaire-role" class="champ">
+                <option value="">tous</option>
+                <option value="enseignant">enseignants</option>
+                <option value="etudiant">étudiants</option>
+              </select>
+            </label>
+            <label class="champ-bloc">
               <span class="etiquette">Session</span>
               <select id="annuaire-session" class="champ"><option value="">toutes</option></select>
             </label>
@@ -370,7 +378,7 @@
         <thead><tr>
           <th data-tri="nom"><button type="button">Utilisateur<span class="fleche"></span></button></th>
           <th data-tri="compte"><button type="button">Compte GitHub<span class="fleche"></span></button></th>
-          <th>Cours suivis</th>
+          <th>Cours</th>
           <th class="etroit">Dépôts</th>
           <th data-tri="envoi"><button type="button">Dernier envoi<span class="fleche"></span></button></th>
         </tr></thead>

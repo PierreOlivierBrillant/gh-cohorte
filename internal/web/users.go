@@ -20,8 +20,11 @@ import (
 
 // directoryRow est un étudiant de l'organisation, avec les cours qu'il a suivis.
 type directoryRow struct {
-	FullName    string                `json:"full_name"`
-	Username    string                `json:"username"`
+	FullName string `json:"full_name"`
+	Username string `json:"username"`
+	// IsTeacher est ce que le registre déclare, Role le mot qui le dit.
+	IsTeacher   bool                  `json:"is_teacher"`
+	Role        string                `json:"role"`
 	Enrollments []directoryEnrollment `json:"enrollments"`
 	// Repos est le nombre de dépôts de la personne, tous groupes confondus.
 	Repos    int    `json:"repos"`
@@ -36,6 +39,7 @@ type directoryEnrollment struct {
 	Course      string              `json:"course,omitempty"`
 	Group       string              `json:"group,omitempty"`
 	Label       string              `json:"label"`
+	Role        string              `json:"role"`
 	Assignments []studentAssignment `json:"assignments"`
 	PushedAt    string              `json:"pushed_at,omitempty"`
 }
@@ -49,6 +53,7 @@ func directoryQuery(request *http.Request) (users.Filter, users.Key, bool, error
 		Text:         valeurs.Get("q"),
 		Session:      valeurs.Get("session"),
 		Course:       valeurs.Get("course"),
+		Role:         users.Role(valeurs.Get("role")),
 		PushedAfter:  valeurs.Get("after"),
 		PushedBefore: valeurs.Get("before"),
 		Activity:     users.Activity(valeurs.Get("activity")),
@@ -79,11 +84,13 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 	}
 
 	visibles := s.visibles(org, repos)
-	// Les équipes disent lesquels des dépôts appartiennent à une équipe plutôt
-	// qu'à personne : sans elles, l'annuaire les compterait orphelins.
+	// Les équipes disent deux choses : lesquels des dépôts appartiennent à une
+	// équipe plutôt qu'à personne, et qui enseigne chaque groupe. Sans elles,
+	// l'annuaire compterait les uns orphelins et ignorerait les autres.
 	infos, _ := s.orgTeams(org, false)
 	equipes := teamsOfAll(visibles, infos)
-	toutes := users.Directory(visibles, repos, equipes)
+	set, avis := s.names(org)
+	toutes := users.Directory(visibles, repos, equipes, infos, set)
 	retenues := users.Apply(toutes, filtre, tri, decroissant)
 
 	lignes := make([]directoryRow, 0, len(retenues))
@@ -95,14 +102,14 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 	// ce qui reste affiché : un filtre ne doit pas retirer de la liste ce qui
 	// permettrait d'en sortir.
 	writeJSON(writer, http.StatusOK, map[string]any{
-		"students": lignes,
+		"users":    lignes,
 		"sessions": users.SessionsIn(toutes),
 		"courses":  users.CoursesIn(toutes, filtre.Session),
 		"total":    len(toutes), "shown": len(lignes),
 		// Les dépôts que personne ne réclame : sans eux, une liste incomplète
 		// se lirait comme si elle était entière.
 		"unmatched": users.Unmatched(visibles, repos, equipes),
-		"org":       org, "source": source,
+		"org":       org, "source": source, "notice": avis,
 	})
 }
 
@@ -128,11 +135,13 @@ func (s *Server) directoryRow(org string, ligne users.Row) directoryRow {
 			Scope: inscription.Scope, Session: inscription.Session,
 			SessionName: inscription.SessionName, Course: inscription.Course,
 			Group: inscription.Group, Label: inscription.Label,
-			Assignments: travaux, PushedAt: inscription.PushedAt,
+			Role: inscription.Role, Assignments: travaux,
+			PushedAt: inscription.PushedAt,
 		})
 	}
 	return directoryRow{
 		FullName: ligne.FullName, Username: ligne.Username,
+		IsTeacher: ligne.IsTeacher, Role: ligne.Role(),
 		Enrollments: inscriptions, Repos: len(ligne.Repos), PushedAt: ligne.PushedAt,
 	}
 }

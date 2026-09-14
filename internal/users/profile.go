@@ -7,6 +7,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 )
 
@@ -104,6 +105,10 @@ type Registry interface {
 	Teaches(username string) bool
 	// Knows dit si le registre connaît le compte.
 	Knows(username string) bool
+	// Teachers énumère ceux qui enseignent. L'annuaire en a besoin : ils ne
+	// figurent sur aucune liste de classe, et rien d'autre ne les y ferait
+	// entrer.
+	Teachers() []registry.User
 }
 
 // ProfileOf dresse la fiche d'un compte.
@@ -135,11 +140,10 @@ func ProfileOf(courses []classroom.Classroom, repos []groups.RepoInfo,
 		}
 	}
 
-	// Les cours suivis viennent de l'annuaire : c'est lui qui réunit les
-	// comptes d'une même personne et rattache ses dépôts, et le refaire ici
-	// ferait deux vérités d'une seule.
-	suivis := map[string]bool{}
-	for _, ligne := range Directory(courses, repos, equipes) {
+	// Tout vient de l'annuaire : c'est lui qui réunit les comptes d'une même
+	// personne, rattache ses dépôts, et sait lire dans les équipes les cours
+	// qu'elle a donnés. Le refaire ici ferait deux vérités d'une seule.
+	for _, ligne := range Directory(courses, repos, equipes, infos, known) {
 		if !owns(ligne, compte) {
 			continue
 		}
@@ -149,29 +153,16 @@ func ProfileOf(courses []classroom.Classroom, repos []groups.RepoInfo,
 		fiche.StudentID = ligne.StudentID
 		fiche.PushedAt = ligne.PushedAt
 		fiche.Repos = len(ligne.Repos)
+		if ligne.IsTeacher {
+			fiche.IsTeacher, fiche.Role = true, AsTeacher
+		}
 		for _, inscription := range ligne.Enrollments {
-			suivis[strings.ToLower(inscription.Scope)] = true
-			fiche.Timeline = append(fiche.Timeline, studied(inscription, ligne.Repos))
+			fiche.Timeline = append(fiche.Timeline, stepOf(inscription, ligne.Repos))
 		}
 		break
 	}
 	if len(fiche.Accounts) == 0 {
 		fiche.Accounts = []string{compte}
-	}
-
-	// Les cours donnés ne sont inscrits nulle part : ils se lisent dans les
-	// équipes enseignantes des groupes. Un groupe où la personne enseigne et
-	// se trouve aussi inscrite garde son inscription — on ne suit pas le cours
-	// qu'on donne, et l'inverse se verrait dans les dépôts.
-	for _, cours := range courses {
-		if suivis[strings.ToLower(cours.Scope())] {
-			continue
-		}
-		equipe, existe := cours.TeacherTeam(infos)
-		if !existe || !equipe.Has(compte) {
-			continue
-		}
-		fiche.Timeline = append(fiche.Timeline, taught(cours))
 	}
 
 	sortSteps(fiche.Timeline)
@@ -185,14 +176,18 @@ func ProfileOf(courses []classroom.Classroom, repos []groups.RepoInfo,
 	return fiche
 }
 
-// studied compose l'étape d'un cours suivi, avec les dépôts qui en viennent.
-func studied(inscription Enrollment, tous []Repo) Step {
+// stepOf compose l'étape d'un cours. Un cours donné ne porte pas de dépôts :
+// un enseignant n'en rend pas, et ceux du groupe sont ceux de ses étudiants.
+func stepOf(inscription Enrollment, tous []Repo) Step {
 	etape := Step{
 		Scope: inscription.Scope, Session: inscription.Session,
 		SessionName: inscription.SessionName, Course: inscription.Course,
 		Group: inscription.Group, Label: inscription.Label,
-		Role: AsStudent, PushedAt: inscription.PushedAt,
+		Role: inscription.Role, PushedAt: inscription.PushedAt,
 		Assignments: []Work{},
+	}
+	if etape.Teaching() {
+		return etape
 	}
 	for _, depot := range tous {
 		if !strings.EqualFold(depot.Scope, inscription.Scope) {
@@ -213,20 +208,6 @@ func studied(inscription Enrollment, tous []Repo) Step {
 	})
 	// Avoir des dépôts et n'avoir rien envoyé n'est pas n'avoir aucun dépôt.
 	etape.Silent = len(etape.Assignments) > 0 && etape.PushedAt == ""
-	return etape
-}
-
-// taught compose l'étape d'un cours donné. Elle ne porte pas de dépôts : un
-// enseignant n'en rend pas, et ceux du groupe sont ceux de ses étudiants.
-func taught(cours classroom.Classroom) Step {
-	etape := Step{
-		Scope: cours.Scope(), Session: cours.Session, Course: cours.Course,
-		Group: cours.Group, Label: cours.Label(), Role: AsTeacher,
-		Assignments: []Work{},
-	}
-	if cours.Session != "" {
-		etape.SessionName = cours.SessionName()
-	}
 	return etape
 }
 

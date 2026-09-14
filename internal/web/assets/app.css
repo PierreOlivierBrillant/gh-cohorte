@@ -681,6 +681,23 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 
 .cours-suivi:hover { border-color: var(--lien); }
 
+/* Un cours donné plutôt que suivi. La même colonne porte les deux : sans
+   marque, « 5N6 » ne dirait pas si la personne y était devant ou dans la
+   salle. */
+.cours-suivi.enseigne {
+  border-color: var(--lien);
+  border-style: dashed;
+}
+
+/* Le nom d'une personne et ce qu'elle est. L'étiquette suit le nom plutôt que
+   d'occuper une colonne : c'est de la personne qu'elle parle. */
+.nom-et-role {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .45rem;
+  flex-wrap: wrap;
+}
+
 /* ------------------------------------------------------------------- avis */
 
 .avis {

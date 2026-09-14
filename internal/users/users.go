@@ -56,12 +56,23 @@ type Row struct {
 	// StudentID est le matricule, quand une liste du collège l'a donné. C'est
 	// lui qui a réuni les comptes de cette ligne.
 	StudentID string
+	// IsTeacher est ce que le registre déclare de cette personne. Il ne se lit
+	// nulle part ailleurs : rien dans un nom de dépôt ne dit qui enseigne.
+	IsTeacher bool
 	Repos     []Repo
 	// Enrollments dit les groupes dont la personne est. La liste d'un groupe
 	// n'en porte qu'un ; l'annuaire de l'organisation les rassemble tous.
 	Enrollments []Enrollment
 	// PushedAt est le plus récent envoi de ses dépôts ; vide s'il n'y en a eu aucun.
 	PushedAt string
+}
+
+// Role nomme ce que la personne est, du mot que les trois interfaces écrivent.
+func (r Row) Role() string {
+	if r.IsTeacher {
+		return AsTeacher
+	}
+	return AsStudent
 }
 
 // Build croise les étudiants du groupe avec les dépôts de l'organisation :
@@ -193,6 +204,9 @@ type Filter struct {
 	// Assignment ne garde que ceux qui ont un dépôt pour ce travail, désigné
 	// par son nom court ou par son identifiant complet.
 	Assignment string
+	// Role ne garde que les enseignants, ou que les étudiants. C'est le
+	// registre qui l'a dit : rien dans un nom de dépôt ne le dirait.
+	Role Role
 	// Session et Course ne gardent que ceux qui ont suivi cette session, ou ce
 	// cours. Ils portent sur l'inscription, non sur les dépôts : quelqu'un
 	// d'inscrit qui n'a rien remis a suivi le cours quand même.
@@ -202,6 +216,33 @@ type Filter struct {
 	PushedAfter  string
 	PushedBefore string
 	Activity     Activity
+}
+
+// Role désigne ce qu'une personne est dans l'organisation.
+type Role string
+
+const (
+	// AnyRole ne retient rien : étudiants et enseignants passent.
+	AnyRole Role = ""
+	// OnlyTeachers ne garde que ceux qui enseignent, OnlyStudents que les autres.
+	OnlyTeachers Role = "enseignant"
+	OnlyStudents Role = "etudiant"
+)
+
+// Roles énumère les valeurs acceptées, dans l'ordre où les proposer.
+var Roles = []Role{AnyRole, OnlyTeachers, OnlyStudents}
+
+// ParseRole valide un rôle saisi. Il se lit accentué comme non accentué :
+// « étudiant » se tape rarement avec son accent au terminal.
+func ParseRole(value string) (Role, error) {
+	role := Role(valid.Slugify(value))
+	for _, candidate := range Roles {
+		if role == Role(valid.Slugify(string(candidate))) {
+			return candidate, nil
+		}
+	}
+	return AnyRole, valid.Errorf(
+		"Rôle : « %s » est inconnu (attendu : enseignant, étudiant, ou rien).", value)
 }
 
 // Validate met le filtre en forme et refuse ce qui ne peut pas être appliqué.
@@ -233,6 +274,11 @@ func (f Filter) Validate() (Filter, error) {
 			"Activité : « %s » est inconnu (attendu : avec, sans, muet, ou rien).", f.Activity)
 	}
 	f.Activity = activite
+	role, err := ParseRole(string(f.Role))
+	if err != nil {
+		return f, err
+	}
+	f.Role = role
 	f.Text = strings.TrimSpace(f.Text)
 	f.Name = strings.TrimSpace(f.Name)
 	f.Username = strings.TrimSpace(f.Username)
@@ -263,7 +309,8 @@ func (f Filter) Keep(row Row) bool {
 		!contains(row.Username, f.Username) {
 		return false
 	}
-	if !f.keepActivity(row) || !f.keepAssignment(row) || !f.keepEnrollment(row) {
+	if !f.keepRole(row) || !f.keepActivity(row) ||
+		!f.keepAssignment(row) || !f.keepEnrollment(row) {
 		return false
 	}
 	// Sans date connue, les bornes ne peuvent rien dire de cette personne.
@@ -272,6 +319,17 @@ func (f Filter) Keep(row Row) bool {
 	}
 	if f.PushedBefore != "" && (row.PushedAt == "" || row.PushedAt > f.PushedBefore) {
 		return false
+	}
+	return true
+}
+
+// keepRole retient une personne selon ce qu'elle est.
+func (f Filter) keepRole(row Row) bool {
+	switch f.Role {
+	case OnlyTeachers:
+		return row.IsTeacher
+	case OnlyStudents:
+		return !row.IsTeacher
 	}
 	return true
 }

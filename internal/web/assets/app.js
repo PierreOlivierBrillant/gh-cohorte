@@ -296,8 +296,8 @@ const etat = {
   annuaire: {
     lignes: [],
     filtre: {
-      texte: '', session: '', cours: '', activite: '', apres: '', avant: '',
-      tri: 'nom', desc: false,
+      texte: '', role: '', session: '', cours: '', activite: '', apres: '',
+      avant: '', tri: 'nom', desc: false,
     },
     deplies: new Set(),
   },
@@ -2709,6 +2709,7 @@ function adresseAnnuaire(force) {
   const filtre = etat.annuaire.filtre;
   const parametres = new URLSearchParams();
   if (filtre.texte) parametres.set('q', filtre.texte);
+  if (filtre.role) parametres.set('role', filtre.role);
   if (filtre.session) parametres.set('session', filtre.session);
   if (filtre.cours) parametres.set('course', filtre.cours);
   if (filtre.activite) parametres.set('activity', filtre.activite);
@@ -2727,7 +2728,7 @@ async function chargerAnnuaire(force) {
     'Chargement des étudiants…');
   const donnees = await tenter(() => api('GET', adresseAnnuaire(force)), 'Étudiants');
   if (!attente.fini(donnees, "L'annuaire n'a pas pu être chargé.")) return;
-  etat.annuaire.lignes = donnees.students || [];
+  etat.annuaire.lignes = donnees.users || [];
   etat.annuaire.deplies = new Set();
 
   // Les sessions de l'annuaire servent aussi à nommer : « a26 » s'y lit
@@ -2756,13 +2757,21 @@ function dessinerAnnuaire() {
 
 function ligneAnnuaire(ligne) {
   return el('tr', {},
-    el('td', {}, lienVersLaFiche(ligne)),
+    // Le rôle se lit à côté du nom : c'est de la personne qu'il parle, pas
+    // d'une de ses colonnes. Un étudiant ne porte rien — ils sont la règle, et
+    // marquer la règle noierait l'exception.
+    el('td', {}, el('span', { classe: 'nom-et-role' },
+      lienVersLaFiche(ligne),
+      ligne.is_teacher
+        ? el('span', { classe: 'jeton enseignant', texte: 'enseignant' })
+        : null)),
     el('td', {}, lienDeProfil(ligne.username)),
     el('td', {}, ligne.enrollments.length === 0
       ? el('span', { classe: 'vide', texte: 'aucun cours' })
       : el('span', { classe: 'etiquettes' },
           ligne.enrollments.map((inscription) => el('button', {
-            classe: 'cours-suivi', type: 'button',
+            classe: 'cours-suivi' + (inscription.role === 'enseignant' ? ' enseigne' : ''),
+            type: 'button',
             texte: jetonDuCours(inscription), title: titreDuCours(inscription),
             onclick: () => ouvrirGroupe(inscription.scope),
           })))),
@@ -2789,9 +2798,10 @@ function jetonDuCours(inscription) {
 }
 
 function titreDuCours(inscription) {
-  if (!inscription.session) return inscription.scope;
+  const role = inscription.role === 'enseignant' ? ' — donné' : '';
+  if (!inscription.session) return inscription.scope + role;
   return `${inscription.session_name || inscription.session} · ${sigle(inscription.course)}` +
-    ` · groupe ${inscription.group}`;
+    ` · groupe ${inscription.group}${role}`;
 }
 
 // depotsAnnuaire déplie les dépôts d'une personne, rangés sous le groupe d'où
@@ -2811,8 +2821,10 @@ function depotsAnnuaire(ligne) {
 
 function resumerAnnuaire(donnees) {
   const parts = [donnees.shown !== donnees.total
-    ? `${donnees.shown} étudiant(s) sur ${donnees.total}`
-    : `${donnees.total} étudiant(s)`];
+    ? `${donnees.shown} utilisateur(s) sur ${donnees.total}`
+    : `${donnees.total} utilisateur(s)`];
+  const profs = etat.annuaire.lignes.filter((ligne) => ligne.is_teacher).length;
+  if (profs) parts.push(`${profs} enseignant(s)`);
   parts.push(`${(donnees.sessions || []).length} session(s)`);
   parts.push(`${(donnees.courses || []).length} cours`);
   // Les dépôts que personne ne réclame ne sont pas des étudiants de plus :
@@ -2821,8 +2833,8 @@ function resumerAnnuaire(donnees) {
   if (donnees.unmatched) parts.push(`${donnees.unmatched} dépôt(s) sans étudiant connu`);
   $('annuaire-resume').textContent = parts.join(' · ');
   $('annuaire-vide').textContent = donnees.total === 0
-    ? "Aucun étudiant connu dans cette organisation. Déclarez un groupe et importez sa liste."
-    : 'Aucun étudiant ne répond à ces critères.';
+    ? "Aucun utilisateur connu dans cette organisation. Déclarez un groupe et importez sa liste."
+    : 'Personne ne répond à ces critères.';
 }
 
 function remplirSessionsDuFiltre(liste) {
@@ -2861,6 +2873,7 @@ const barreAnnuaire = barreDeFiltre({
   menu: 'annuaire-filtre-menu',
   vider: 'annuaire-vider',
   champs: [
+    ['annuaire-role', 'role'],
     ['annuaire-session', 'session'], ['annuaire-cours', 'cours'],
     ['annuaire-activite', 'activite'],
     ['annuaire-apres', 'apres'], ['annuaire-avant', 'avant'],
@@ -2868,8 +2881,8 @@ const barreAnnuaire = barreDeFiltre({
   criteres: () => etat.annuaire.filtre,
   effacer: () => {
     etat.annuaire.filtre = {
-      texte: '', session: '', cours: '', activite: '', apres: '', avant: '',
-      tri: 'nom', desc: false,
+      texte: '', role: '', session: '', cours: '', activite: '', apres: '',
+      avant: '', tri: 'nom', desc: false,
     };
   },
   recharger: () => chargerAnnuaire(),

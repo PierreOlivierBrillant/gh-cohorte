@@ -295,3 +295,23 @@ func TestDrapeauxDImportation(t *testing.T) {
 		}
 	}
 }
+
+// Le rôle se filtre aussi en drapeau : ce que le navigateur pose dans sa barre,
+// un script le pose ici.
+func TestOptionsFiltreParRole(t *testing.T) {
+	if options := analyser(t, "--students", "--role", "enseignant"); options.Filter.Role !=
+		users.OnlyTeachers {
+		t.Fatalf("rôle = %q", options.Filter.Role)
+	}
+	// Sans accent aussi : « étudiant » se tape rarement accentué au terminal.
+	if options := analyser(t, "--students", "--role", "etudiant"); options.Filter.Role !=
+		users.OnlyStudents {
+		t.Fatalf("rôle = %q", options.Filter.Role)
+	}
+	if options := analyser(t, "--students"); options.Filter.Role != users.AnyRole {
+		t.Errorf("sans drapeau, aucun rôle : %q", options.Filter.Role)
+	}
+	if _, err := app.Parse([]string{"--role", "popularite"}, io.Discard); err == nil {
+		t.Error("un rôle inconnu doit être refusé")
+	}
+}
