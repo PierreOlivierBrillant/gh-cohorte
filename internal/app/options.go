@@ -24,9 +24,23 @@ type Options struct {
 	Org             string
 	Manage          string // vide = choisir le groupe dans la liste
 	ManageRequested bool
-	// StudentsRequested ouvre l'annuaire : les étudiants de l'organisation
+	// StudentsRequested ouvre l'annuaire : les utilisateurs de l'organisation
 	// entière, avec les cours que chacun a suivis.
 	StudentsRequested bool
+	// User ouvre la fiche d'un compte : son rôle, ses comptes, et la
+	// chronologie de son passage — cours suivis et cours donnés mêlés.
+	User string
+	// Teacher reconnaît le compte visé comme enseignant, ou l'en défait.
+	// TeacherSet distingue « drapeau absent » de « --teacher=false » : sans
+	// lui, la fiche se contente de s'afficher.
+	Teacher    bool
+	TeacherSet bool
+	// Teachers est la composition exacte de l'équipe enseignante du groupe
+	// géré, comptes séparés par des virgules. TeachersOn distingue le drapeau
+	// absent — qui ne fait qu'afficher le cloisonnement — d'une liste vide,
+	// qui retire tout le monde.
+	Teachers   []string
+	TeachersOn bool
 	// Import reprend des dépôts nommés autrement — « travail-compte », ce que
 	// GitHub Classroom produit — et les fait entrer dans la nomenclature. Sans
 	// valeur, il montre les travaux que ces dépôts dessinent.
@@ -141,7 +155,10 @@ Utilisation :
   gh cohorte                                  interface graphique dans le navigateur
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
-  gh cohorte --students --session a26         étudiants de la session a26
+  gh cohorte --students --session a26         utilisateurs de la session a26
+  gh cohorte --user ecote                     la fiche de @ecote et son passage
+  gh cohorte --user jdupont --teacher         reconnaître @jdupont comme enseignant
+  gh cohorte --manage a26.5n6.01 --teachers "prof,jdupont" -y
   gh cohorte --import                         reprendre des dépôts nommés autrement
   gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
   gh cohorte --import projet --teams --into a26.5n6.01 -y
@@ -158,7 +175,11 @@ Utilisation :
 Drapeaux :
   --org ORG                organisation GitHub cible
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
-  --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
+  --students               lister les utilisateurs de l'organisation et ce qu'ils ont suivi
+  --user COMPTE            fiche d'un utilisateur : son rôle, ses comptes, son passage
+  --teacher[=false]        reconnaître le compte de --user comme enseignant, ou l'en défaire
+  --teachers COMPTES       composition de l'équipe enseignante du groupe de --manage ;
+                           elle reçoit ses dépôts, et elle seule les voit
   --import [TRAVAIL]       reprendre des dépôts « travail-compte » ; vide, les lister
   --into PLACE             place d'arrivée d'une importation (« a26.5n6.1030 »)
   --publish-registry       verser au registre de l'organisation les noms de ce poste
@@ -251,7 +272,12 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 
 	set.StringVar(&options.Org, "org", "", "organisation GitHub cible")
 	set.BoolVar(&options.StudentsRequested, "students", false,
-		"lister les étudiants de l'organisation")
+		"lister les utilisateurs de l'organisation")
+	set.StringVar(&options.User, "user", "", "ouvrir la fiche d'un compte")
+	enseignant := set.String("teacher", unset,
+		"reconnaître le compte visé comme enseignant (--teacher=false le retire)")
+	enseignants := set.String("teachers", unset,
+		"composition de l'équipe enseignante du groupe, séparée par des virgules")
 	set.BoolVar(&options.PublishRegistry, "publish-registry", false,
 		"verser au registre les noms de ce poste")
 	set.BoolVar(&options.PreferLocal, "prefer-local", false,
@@ -353,6 +379,16 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.TeamMembersOn = true
 		options.TeamMembers = splitList(*membres)
 	}
+	// « --teacher » sans valeur vaut « oui » : c'est la forme d'un booléen au
+	// terminal, et c'est le geste courant. « --teacher=false » retire le rôle.
+	if *enseignant != unset {
+		options.TeacherSet = true
+		options.Teacher = *enseignant == "" || strings.EqualFold(*enseignant, "true")
+	}
+	if *enseignants != unset {
+		options.TeachersOn = true
+		options.Teachers = splitList(*enseignants)
+	}
 
 	if *manage != unset {
 		options.ManageRequested = true
@@ -428,9 +464,14 @@ func translateFlagError(err error) error {
 // normalizeArgs permet d'écrire « --manage tp1 » comme « --manage=tp1 », et
 // « --manage » seul comme « --manage= ». Le paquet flag ne sait pas gérer seul
 // un drapeau dont la valeur est facultative.
+//
+// « --teacher » en relève aussi : c'est un booléen à trois états — absent, oui,
+// non — et « --teacher » seul doit valoir oui, comme n'importe quel booléen au
+// terminal, sans qu'on perde la possibilité d'écrire « --teacher=false ».
 func normalizeArgs(args []string) []string {
 	optional := map[string]bool{
 		"-manage": true, "--manage": true, "-import": true, "--import": true,
+		"-teacher": true, "--teacher": true,
 	}
 	normalized := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {

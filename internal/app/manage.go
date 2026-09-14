@@ -35,6 +35,7 @@ var manageMenu = ui.Options(
 	"supprimer", "Supprimer un dépôt",
 	"renommer", "Renommer ce travail",
 	"deplacer", "Déplacer ce travail vers un groupe",
+	"enseignants", "Régler l'équipe enseignante du groupe",
 	"filtrer", "Filtrer ou trier la liste",
 	"rafraichir", "Recharger la liste",
 	"changer", "Changer de groupe",
@@ -1456,6 +1457,11 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return err
 	case "deplacer":
 		_, err := m.relocate(group)
+		return err
+	case "enseignants":
+		// Le groupe géré se désigne par son préfixe, et l'équipe enseignante
+		// appartient à ce groupe-là.
+		_, err := m.session.teachingMode(group.Prefix)
 		return err
 	case "filtrer":
 		return m.filtrer(group)

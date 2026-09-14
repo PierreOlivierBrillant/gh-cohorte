@@ -66,7 +66,7 @@ func TestAnnuaireDuTerminal(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	h.contient("Étudiants de « acme » — 3 personne(s)",
+	h.contient("Utilisateurs de « acme » — 3 personne(s)",
 		"Émilie Côté", "Jean-Luc Picard", "Aminata Diallo",
 		// Une même personne porte ses trois places sur une seule ligne, de la
 		// session la plus récente à la plus ancienne.

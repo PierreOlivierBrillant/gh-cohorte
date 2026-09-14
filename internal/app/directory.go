@@ -54,6 +54,7 @@ var directoryMenu = ui.Options(
 	"session", "Ne garder qu'une session",
 	"cours", "Ne garder qu'un cours",
 	"chercher", "Chercher un nom ou un compte",
+	"fiche", "Ouvrir la fiche de quelqu'un",
 	"apres", "Ne garder que les envois postérieurs à une date",
 	"avant", "Ne garder que les envois antérieurs à une date",
 	"muets", "N'afficher que ceux qui n'ont jamais rien envoyé",
@@ -133,7 +134,7 @@ func (d *directorySession) show() {
 	console := d.session.Console
 	visibles := users.Apply(d.rows, d.filter, d.sortKey, d.sortDesc)
 
-	titre := "Étudiants de « " + d.org + " » — " + itoa(len(d.rows)) + " personne(s)"
+	titre := "Utilisateurs de « " + d.org + " » — " + itoa(len(d.rows)) + " personne(s)"
 	if len(visibles) != len(d.rows) {
 		titre += ", " + itoa(len(visibles)) + " affichée(s)"
 	}
@@ -168,7 +169,7 @@ func (d *directorySession) show() {
 		console.Warning("Personne ne répond aux critères.")
 	}
 	if len(d.rows) == 0 {
-		console.Warning("Aucun étudiant connu dans « %s » : déclarez un groupe et "+
+		console.Warning("Aucun utilisateur connu dans « %s » : déclarez un groupe et "+
 			"importez sa liste.", d.org)
 	}
 	// Un dépôt dont le dernier niveau ne désigne personne n'est pas quelqu'un de
@@ -269,6 +270,10 @@ func (d *directorySession) menu() (int, error) {
 			} else {
 				d.filter.Activity = users.Silent
 			}
+		case "fiche":
+			if err := d.openProfile(); err != nil {
+				return ExitOK, err
+			}
 		case "tri":
 			if err := d.askSort(); err != nil {
 				return ExitOK, err
@@ -285,6 +290,32 @@ func (d *directorySession) menu() (int, error) {
 		}
 		d.show()
 	}
+}
+
+// openProfile ouvre la fiche de quelqu'un depuis l'annuaire. C'est le chemin du
+// terminal vers ce que le navigateur atteint en cliquant sur un nom.
+func (d *directorySession) openProfile() error {
+	visibles := users.Apply(d.rows, d.filter, d.sortKey, d.sortDesc)
+	if len(visibles) == 0 {
+		d.session.Console.Warning("Personne à ouvrir.")
+		return nil
+	}
+	options := make([]ui.Option, 0, len(visibles))
+	for _, ligne := range visibles {
+		nom := ligne.FullName
+		if nom == "" {
+			nom = ligne.Username
+		}
+		options = append(options, ui.Option{
+			Value: ligne.Username, Label: nom + "  (@" + ligne.Username + ")"})
+	}
+	compte, err := d.session.Prompt.Choose("Quelle fiche ?", options, options[0].Value)
+	if err != nil {
+		return err
+	}
+	// La fiche a son écran à elle : l'annuaire le rend et reprend la main.
+	_, err = d.session.showProfile(compte)
+	return err
 }
 
 // askSession propose les sessions que l'annuaire porte, de la plus récente à

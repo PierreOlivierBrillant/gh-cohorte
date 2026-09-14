@@ -228,6 +228,15 @@ func (s *Session) run() (int, error) {
 	if mode == "etudiants" {
 		return newDirectorySession(s).run()
 	}
+	if mode == "fiche" {
+		return s.showProfile(s.Options.User)
+	}
+	// L'équipe enseignante d'un groupe n'est pas une de ses équipes : on ne
+	// lui distribue rien, elle reçoit l'accès aux dépôts. Elle a donc son
+	// propre chemin.
+	if mode == "cloisonner" {
+		return s.teachingMode(s.Options.Manage)
+	}
 	// Les équipes appartiennent à un groupe, pas à un préfixe : quand les
 	// drapeaux en parlent, « --manage » ne désigne plus un lot de dépôts mais
 	// la place du groupe — « a26.5n6.01 ».
@@ -259,8 +268,16 @@ func (s *Session) chooseMode() (string, error) {
 		s.Options.RegistryTeam != "" {
 		return "registre", nil
 	}
+	// La fiche d'un compte prime sur l'annuaire : « --students --user X » veut
+	// dire « cet utilisateur-là », et non « la liste, plus lui ».
+	if strings.TrimSpace(s.Options.User) != "" {
+		return "fiche", nil
+	}
 	if s.Options.StudentsRequested {
 		return "etudiants", nil
+	}
+	if s.Options.TeachersOn {
+		return "cloisonner", nil
 	}
 	if s.Options.ManageRequested {
 		return "gerer", nil

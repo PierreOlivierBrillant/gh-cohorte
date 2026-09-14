@@ -195,6 +195,53 @@ func TestOptionsAnnuaire(t *testing.T) {
 	}
 }
 
+// La fiche d'un utilisateur et son rôle se demandent en drapeaux, comme tout le
+// reste : ce que la page propose au clic, un script le pose ici.
+func TestOptionsFicheEtRole(t *testing.T) {
+	options := analyser(t, "--user", "ecote")
+	if options.User != "ecote" {
+		t.Fatalf("compte = %q", options.User)
+	}
+	// Sans « --teacher », la fiche se contente de s'afficher : elle ne doit
+	// surtout pas changer un rôle qu'on n'a pas demandé de changer.
+	if options.TeacherSet {
+		t.Error("« --user » seul ne touche pas au rôle")
+	}
+
+	// Un booléen sans valeur vaut « oui » : c'est la forme courante.
+	if options := analyser(t, "--user", "ecote", "--teacher"); !options.TeacherSet ||
+		!options.Teacher {
+		t.Errorf("« --teacher » = %v, %v", options.TeacherSet, options.Teacher)
+	}
+	if options := analyser(t, "--user", "ecote", "--teacher=false"); !options.TeacherSet ||
+		options.Teacher {
+		t.Errorf("« --teacher=false » = %v, %v", options.TeacherSet, options.Teacher)
+	}
+}
+
+// La composition de l'équipe enseignante distingue le drapeau absent — qui ne
+// fait qu'afficher — d'une liste vide, qui retire tout le monde.
+func TestOptionsEquipeEnseignante(t *testing.T) {
+	options := analyser(t, "--manage", "a26.5n6.01")
+	if options.TeachersOn {
+		t.Error("« --manage » seul ne règle aucune équipe enseignante")
+	}
+
+	options = analyser(t, "--manage", "a26.5n6.01", "--teachers", "prof, jdupont")
+	if !options.TeachersOn || len(options.Teachers) != 2 {
+		t.Fatalf("enseignants = %v (posé : %v)", options.Teachers, options.TeachersOn)
+	}
+	if options.Teachers[0] != "prof" || options.Teachers[1] != "jdupont" {
+		t.Errorf("enseignants = %v", options.Teachers)
+	}
+
+	// Une liste vide est une composition : elle vide l'équipe.
+	if options := analyser(t, "--manage", "a26.5n6.01", "--teachers", ""); !options.TeachersOn ||
+		len(options.Teachers) != 0 {
+		t.Errorf("« --teachers \"\" » = %v, %v", options.TeachersOn, options.Teachers)
+	}
+}
+
 func TestParseRenouvellementDuJeton(t *testing.T) {
 	options := analyser(t, "--refresh-token", "--scopes", "workflow,delete_repo")
 	if !options.RefreshToken || options.Scopes != "workflow,delete_repo" {
