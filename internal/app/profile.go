@@ -5,6 +5,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
@@ -23,6 +24,13 @@ func (s *Session) showProfile(account string) (int, error) {
 		return ExitValidation, err
 	}
 	org := s.Settings.Org
+	// Nommer avant de montrer : la fiche dira alors le nom qu'on vient de
+	// donner, plutôt que d'afficher « nom inconnu » juste au-dessus.
+	if voulu := strings.TrimSpace(s.Options.FullName); voulu != "" {
+		if code, err := s.nameUser(org, compte, voulu); err != nil {
+			return code, err
+		}
+	}
 	fiche, set, err := s.profileOf(org, compte)
 	if err != nil {
 		return ExitFailure, err
@@ -37,7 +45,77 @@ func (s *Session) showProfile(account string) (int, error) {
 	if !s.Interactive() {
 		return ExitOK, nil
 	}
+	// Un nom manquant se règle d'abord : sans lui, aucun travail ne peut être
+	// distribué à cette personne, et c'est plus urgent qu'un rôle.
+	if fiche.FullName == "" {
+		if code, err := s.askName(org, fiche); err != nil || code != ExitOK {
+			return code, err
+		}
+		if fiche, set, err = s.profileOf(org, compte); err != nil {
+			return ExitFailure, err
+		}
+	}
 	return s.askRole(org, set, fiche)
+}
+
+// askName propose de nommer quelqu'un qui n'a pas de nom complet.
+func (s *Session) askName(org string, fiche users.Profile) (int, error) {
+	s.Console.Warning("@%s n'a pas de nom complet : c'est lui qui nomme ses "+
+		"dépôts, et sans lui aucun travail ne peut lui être distribué.", fiche.Username)
+	voulu, err := s.Prompt.Ask(ui.Question{
+		Title:      "Nom complet (vide pour laisser ainsi)",
+		AllowEmpty: true,
+	})
+	if err != nil || strings.TrimSpace(voulu) == "" {
+		return ExitOK, err
+	}
+	return s.nameUser(org, fiche.Username, voulu)
+}
+
+// nameUser écrit le nom complet d'un compte au registre.
+//
+// Le nom vit au registre, pas dans un groupe : c'est une propriété de la
+// personne, et vaut donc pour tous ses cours. Aucun dépôt n'est renommé — le
+// slug que le nouveau nom produit s'ajoute à ceux que la personne portait, et
+// les dépôts créés sous l'ancien restent les siens.
+func (s *Session) nameUser(org, account, wanted string) (int, error) {
+	nom, err := valid.FullName(wanted)
+	if err != nil {
+		return ExitValidation, err
+	}
+	set, _ := s.names(org)
+	// Un compte que rien ne connaît — ni le registre, ni aucune liste de ce
+	// poste — est vérifié sur GitHub avant d'entrer au registre : une faute de
+	// frappe y laisserait sinon une fiche que rien ne désigne.
+	if _, connu := set.Find(account); !connu && !s.declared(org, account) {
+		profil, err := s.Client.GetUser(account)
+		if err != nil {
+			return ExitFailure, err
+		}
+		if profil == nil {
+			return ExitValidation, valid.Errorf(
+				"Le compte @%s n'existe pas sur %s.", account, s.host())
+		}
+	}
+
+	if _, err := s.registryOf(org).Apply(registry.Change{
+		Learn:  []registry.User{registry.From(roster.Person{FullName: nom, Username: account})},
+		Reason: "Nomme @" + account + " : " + nom,
+	}); err != nil {
+		return ExitFailure, err
+	}
+	s.Console.Success("@%s s'appelle « %s ».", account, nom)
+	return ExitOK, nil
+}
+
+// declared dit qu'une liste de groupe de ce poste connaît déjà ce compte.
+func (s *Session) declared(org, account string) bool {
+	for _, personne := range s.groupStore().People(org) {
+		if personne.Owns(account) {
+			return true
+		}
+	}
+	return false
 }
 
 // profileOf dresse la fiche d'un compte, avec le registre qui l'a nommée.

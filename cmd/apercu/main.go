@@ -27,6 +27,7 @@ func main() {
 		"a26.5n6.01.tp2.emilie-cote":     "",
 		"a26.4w6.01.projet.emilie-cote":  "2026-11-05T10:00:00Z",
 		"h27.5n6.02.tp1.emilie-cote":     "2027-02-10T10:00:00Z",
+		"h27.5n6.02.tp1.aleksilepaj":     "2027-02-11T10:00:00Z",
 	} {
 		state.AddRepo("acme", nom, true).PushedAt = envoi
 	}
@@ -61,6 +62,8 @@ func main() {
 		{Org: "acme", Session: "h27", Course: "5n6", Group: "02", Students: []roster.Person{
 			{FullName: "Émilie Côté", Username: "emilie-cote", StudentID: "2100123"},
 			{FullName: "Aminata Diallo", Username: "aminata-d"},
+			// Un compte repris de dépôts hérités : personne ne l'a jamais nommé.
+			{Username: "aleksilepaj"},
 		}},
 	} {
 		valide, err := cours.Validate()

@@ -30,6 +30,10 @@ type Options struct {
 	// User ouvre la fiche d'un compte : son rôle, ses comptes, et la
 	// chronologie de son passage — cours suivis et cours donnés mêlés.
 	User string
+	// FullName donne son nom complet au compte visé par User. Il ne renomme
+	// aucun dépôt : le slug qu'il produit s'ajoute à ceux que la personne
+	// portait déjà, et ce qui existe reste à elle.
+	FullName string
 	// Teacher reconnaît le compte visé comme enseignant, ou l'en défait.
 	// TeacherSet distingue « drapeau absent » de « --teacher=false » : sans
 	// lui, la fiche se contente de s'afficher.
@@ -158,6 +162,7 @@ Utilisation :
   gh cohorte --students --session a26         utilisateurs de la session a26
   gh cohorte --user ecote                     la fiche de @ecote et son passage
   gh cohorte --user jdupont --teacher         reconnaître @jdupont comme enseignant
+  gh cohorte --user aleksilepaj --full-name "Aleksi Lepaj"
   gh cohorte --manage a26.5n6.01 --teachers "prof,jdupont" -y
   gh cohorte --import                         reprendre des dépôts nommés autrement
   gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
@@ -177,6 +182,7 @@ Drapeaux :
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
   --students               lister les utilisateurs de l'organisation et ce qu'ils ont suivi
   --user COMPTE            fiche d'un utilisateur : son rôle, ses comptes, son passage
+  --full-name NOM          donner son nom complet au compte de --user (ne renomme aucun dépôt)
   --teacher[=false]        reconnaître le compte de --user comme enseignant, ou l'en défaire
   --teachers COMPTES       composition de l'équipe enseignante du groupe de --manage ;
                            elle reçoit ses dépôts, et elle seule les voit
@@ -274,6 +280,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.BoolVar(&options.StudentsRequested, "students", false,
 		"lister les utilisateurs de l'organisation")
 	set.StringVar(&options.User, "user", "", "ouvrir la fiche d'un compte")
+	set.StringVar(&options.FullName, "full-name", "",
+		"donner son nom complet au compte de --user")
 	enseignant := set.String("teacher", unset,
 		"reconnaître le compte visé comme enseignant (--teacher=false le retire)")
 	enseignants := set.String("teachers", unset,

@@ -290,3 +290,79 @@ func TestUnCoursDonneFigureDansLaFiche(t *testing.T) {
 		t.Error("celui qui regarde enseigne : la page doit le savoir")
 	}
 }
+
+// ------------------------------------------------------------- nommer
+
+// Le nom vit au registre, pas dans un groupe : le donner depuis la fiche vaut
+// pour tous les cours de la personne.
+func TestNommerDepuisLaFiche(t *testing.T) {
+	h := college(t)
+	h.sansNoms("h27", "5n6", "02", "aleksilepaj")
+
+	avant := h.fiche("aleksilepaj")
+	if avant.User.FullName != "" {
+		t.Fatalf("nom = %q", avant.User.FullName)
+	}
+
+	var rendu struct {
+		Username string `json:"username"`
+		FullName string `json:"full_name"`
+	}
+	h.json(http.MethodPut, "/api/users/aleksilepaj/name",
+		map[string]any{"full_name": "Aleksi Lepaj"}, &rendu)
+	if rendu.FullName != "Aleksi Lepaj" {
+		t.Fatalf("réponse = %+v", rendu)
+	}
+
+	apres := h.fiche("aleksilepaj")
+	if apres.User.FullName != "Aleksi Lepaj" || !apres.User.Known {
+		t.Fatalf("fiche = %+v", apres.User)
+	}
+	// Le nom vaut partout : l'annuaire le montre sans qu'on ait rien publié.
+	for _, ligne := range h.annuaire("").Students {
+		if ligne.Username == "aleksilepaj" && ligne.FullName != "Aleksi Lepaj" {
+			t.Errorf("annuaire = %+v", ligne)
+		}
+	}
+}
+
+// Nommer ne renomme aucun dépôt : le slug du nouveau nom s'ajoute à ceux que
+// la personne portait, et ce qui existe reste à elle.
+func TestNommerNeRenommeAucunDepot(t *testing.T) {
+	h := college(t)
+	h.sansNoms("h27", "5n6", "02", "aleksilepaj")
+	avant := h.depots()
+
+	h.json(http.MethodPut, "/api/users/aleksilepaj/name",
+		map[string]any{"full_name": "Aleksi Lepaj"}, nil)
+
+	if apres := h.depots(); strings.Join(apres, ",") != strings.Join(avant, ",") {
+		t.Fatalf("dépôts :\navant %v\naprès %v", avant, apres)
+	}
+	// Et le dépôt qu'il portait déjà reste le sien.
+	if fiche := h.fiche("aleksilepaj"); fiche.User.Repos != avant0(fiche) {
+		t.Errorf("dépôts de la personne = %d", fiche.User.Repos)
+	}
+}
+
+// avant0 rend le nombre de dépôts que la chronologie montre : il doit coller à
+// celui de la fiche.
+func avant0(fiche ficheRendu) int {
+	total := 0
+	for _, etape := range fiche.User.Timeline {
+		total += len(etape.Assignments)
+	}
+	return total
+}
+
+// Un nom vide ne nomme personne : le refus est dit, pas avalé.
+func TestUnNomVideEstRefuse(t *testing.T) {
+	h := college(t)
+	h.sansNoms("h27", "5n6", "02", "aleksilepaj")
+
+	reponse, contenu := h.requete(http.MethodPut, "/api/users/aleksilepaj/name",
+		map[string]any{"full_name": "   "})
+	if reponse.StatusCode == http.StatusOK {
+		t.Fatalf("un nom vide devait être refusé — %s", contenu)
+	}
+}

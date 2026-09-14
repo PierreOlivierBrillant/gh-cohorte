@@ -1,10 +1,13 @@
 package app_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 )
 
 // La fiche déroule le passage de quelqu'un, de la session la plus récente à la
@@ -182,4 +185,77 @@ func TestUnCoursDonneRemonteDansLaFicheAuTerminal(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, fiche.texte())
 	}
 	fiche.contient("enseignant", "a26.5n6.01", "a donné ce cours")
+}
+
+// Nommer quelqu'un qui n'a pas de nom complet : le nom monte au registre et
+// vaut pour tous ses cours, sans qu'aucun dépôt ne soit renommé.
+func TestNommerUnUtilisateurAuTerminal(t *testing.T) {
+	h := college(t)
+	// Un compte repris de dépôts hérités : personne ne l'a jamais nommé.
+	h.State.AddRepo("acme", "h27.5n6.02.tp1.aleksilepaj", true)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "h27", Course: "5n6", Group: "02",
+		Students: []roster.Person{
+			{FullName: "Émilie Côté", Username: "emilie-cote"},
+			{FullName: "Aminata Diallo", Username: "aminata-d"},
+			{Username: "aleksilepaj"},
+		},
+	})
+	avant := h.State.RepoNames("acme")
+
+	h.Options.StudentsRequested = false
+	h.Options.User = "aleksilepaj"
+	h.Options.FullName = "Aleksi Lepaj"
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("@aleksilepaj s'appelle « Aleksi Lepaj »", "Aleksi Lepaj — @aleksilepaj")
+
+	// Le nom est au registre, et vaut donc pour tout le monde.
+	contenu := h.State.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
+	set, _ := registry.Decode([]byte(contenu))
+	if set.Name("aleksilepaj") != "Aleksi Lepaj" {
+		t.Fatalf("registre = %+v", set.All())
+	}
+	// Et le slug de son nouveau nom s'y ajoute sans détacher ses dépôts.
+	if trouve, connu := set.Lookup("aleksilepaj"); !connu || trouve.FullName != "Aleksi Lepaj" {
+		t.Errorf("son compte doit toujours le désigner : %+v, %v", trouve, connu)
+	}
+	if trouve, connu := set.Lookup("aleksi-lepaj"); !connu ||
+		trouve.Username != "aleksilepaj" {
+		t.Errorf("le slug du nom doit le désigner aussi : %+v, %v", trouve, connu)
+	}
+	// Aucun dépôt d'étudiant n'a bougé. Le dépôt de service « .cohorte », lui,
+	// vient de naître : c'est là que le nom a été écrit.
+	apres := sansService(h.State.RepoNames("acme"))
+	if strings.Join(apres, ",") != strings.Join(sansService(avant), ",") {
+		t.Fatalf("dépôts :\navant %v\naprès %v", avant, apres)
+	}
+}
+
+// Un nom vide ne nomme personne : le refus est dit plutôt qu'avalé.
+func TestUnNomVideEstRefuseAuTerminal(t *testing.T) {
+	h := college(t)
+	h.Options.StudentsRequested = false
+	h.Options.User = "emilie-cote"
+	h.Options.FullName = "   "
+
+	// Un nom fait d'espaces n'est pas une demande : la fiche s'affiche, sans
+	// que rien ne soit écrit.
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.absent("s'appelle")
+}
+
+// sansService écarte les dépôts de service — « .cohorte » et les autres — pour
+// ne comparer que ce qui appartient aux étudiants.
+func sansService(noms []string) []string {
+	ordinaires := make([]string, 0, len(noms))
+	for _, nom := range noms {
+		if !strings.HasPrefix(nom, ".") {
+			ordinaires = append(ordinaires, nom)
+		}
+	}
+	return ordinaires
 }

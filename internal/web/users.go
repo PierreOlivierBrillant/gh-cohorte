@@ -7,6 +7,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -282,6 +283,80 @@ func (s *Server) newcomer(username string) (registry.User, error) {
 		fiche.FullName = nom
 	}
 	return fiche, nil
+}
+
+// handleUserName donne son nom complet à quelqu'un qui n'en a pas.
+//
+// Le nom vit au registre, pas dans un groupe : c'est une propriété de la
+// personne, et la lui donner depuis sa fiche doit valoir partout — y compris
+// pour quelqu'un qu'aucun groupe déclaré ici ne connaît.
+//
+// Cela ne renomme aucun dépôt. Le slug que le nouveau nom produit s'ajoute à
+// ceux que la personne portait déjà, et les dépôts créés sous l'ancien restent
+// les siens : c'est l'invariant du registre, et c'est ce qui rend ce geste sans
+// danger. Renommer les dépôts est une autre opération, offerte là où on les
+// voit — dans la liste du groupe.
+func (s *Server) handleUserName(writer http.ResponseWriter, request *http.Request) {
+	compte, err := valid.Login(request.PathValue("account"), "Compte GitHub")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	var body struct {
+		FullName string `json:"full_name"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	nom, err := valid.FullName(body.FullName)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+
+	org := s.org()
+	set, _ := s.names(org)
+	// Un compte que rien ne connaît est vérifié sur GitHub avant d'entrer au
+	// registre : une faute de frappe y laisserait sinon une fiche que rien ne
+	// désigne.
+	//
+	// « Rien », c'est ni le registre ni aucune liste de groupe. Quelqu'un
+	// qu'une liste déclare est déjà quelqu'un : le renvoyer vers GitHub
+	// n'apprendrait rien, et rendrait le nommage impossible dès que GitHub ne
+	// répond pas — alors que c'est justement une correction qu'on fait hors
+	// ligne, liste en main.
+	if _, connu := set.Find(compte); !connu && !s.declared(org, compte) {
+		if _, err := s.newcomer(compte); err != nil {
+			fail(writer, err)
+			return
+		}
+	}
+
+	publie, err := s.registryOf(org).Apply(registry.Change{
+		Learn:  []registry.User{registry.From(roster.Person{FullName: nom, Username: compte})},
+		Reason: "Nomme @" + compte + " : " + nom,
+	})
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	// Rien à invalider : le magasin du registre rescelle ce qu'il vient
+	// d'écrire, et la prochaine lecture en part.
+	fiche, _ := publie.Find(compte)
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"username": compte, "full_name": fiche.FullName,
+	})
+}
+
+// declared dit qu'une liste de groupe de ce poste connaît déjà ce compte.
+func (s *Server) declared(org, username string) bool {
+	for _, personne := range s.classrooms.People(org) {
+		if personne.Owns(username) {
+			return true
+		}
+	}
+	return false
 }
 
 // anyTeacher dit que l'organisation a déjà au moins un enseignant. Tant qu'elle

@@ -2803,12 +2803,8 @@ function depotsAnnuaire(ligne) {
     .filter((inscription) => inscription.assignments.length > 0)
     .map((inscription) => el('div', { classe: 'depots-du-cours' },
       el('span', { classe: 'etiquette', texte: titreDuCours(inscription) }),
-      el('span', { classe: 'etiquettes' }, inscription.assignments.map((travail) =>
-        el('a', {
-          classe: 'jeton lien', href: travail.url,
-          target: '_blank', rel: 'noreferrer noopener',
-          texte: travail.name, title: travail.repo,
-        })))));
+      el('span', { classe: 'frise-travaux' },
+        inscription.assignments.map(puceDeTravail))));
   return el('tr', { classe: 'ligne-depliee' },
     el('td', {}), el('td', { colspan: '4' }, el('div', { classe: 'depots' }, blocs)));
 }
@@ -2947,6 +2943,13 @@ function dessinerFiche() {
   matricule.hidden = !personne.student_id;
   matricule.textContent = personne.student_id ? 'Matricule ' + personne.student_id : '';
 
+  // Nommer quelqu'un n'est offert qu'à qui n'a pas de nom : corriger un nom
+  // déjà donné touche aux dépôts qui le portent, et cela se fait là où on les
+  // voit — dans la liste du groupe.
+  const sansNom = $('fiche-sans-nom');
+  sansNom.hidden = !!personne.full_name;
+  if (!sansNom.hidden) $('fiche-nommer').onclick = () => nommerUnUtilisateur(personne);
+
   $('fiche-resume').textContent = resumerFiche(personne);
   dessinerAvisDeLaFiche(donnees, personne);
   dessinerCooptation(donnees, personne);
@@ -3050,6 +3053,36 @@ async function coopter(personne, enseignant) {
   chargerFiche();
 }
 
+// nommerUnUtilisateur donne son nom complet à quelqu'un qui n'en a pas.
+//
+// Le nom monte au registre de l'organisation, pas dans un groupe : c'est une
+// propriété de la personne, et le lui donner depuis sa fiche vaut partout —
+// y compris pour quelqu'un qu'aucun groupe déclaré ici ne connaît.
+async function nommerUnUtilisateur(personne) {
+  const champ = el('input', {
+    classe: 'champ', type: 'text', placeholder: 'Prénom Nom' });
+  const corps = el('div', {},
+    el('p', {}, el('code', { texte: '@' + personne.username }),
+      " n'a pas de nom complet."),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Nom complet' }), champ,
+      el('span', { classe: 'aide', texte:
+        "Il monte au registre de l'organisation et vaut pour tous ses groupes. "
+        + "Aucun dépôt n'est renommé : ceux qui existent restent les siens." })));
+
+  if (!await demander('Nommer cette personne', corps, 'Enregistrer',
+    () => champ.focus())) return;
+  const voulu = champ.value.trim();
+  if (!voulu) return;
+
+  const reponse = await tenter(() => api(
+    'PUT', `/api/users/${encode(personne.username)}/name`,
+    { full_name: voulu }), 'Nom complet');
+  if (!reponse) return;
+  message(`@${reponse.username} s'appelle « ${reponse.full_name} ».`);
+  chargerFiche();
+}
+
 // dessinerFrise déroule la chronologie. Chaque étape porte sa session en toutes
 // lettres, son cours, son groupe, et ce qu'il en reste : les dépôts rendus, ou
 // le silence.
@@ -3082,15 +3115,27 @@ function etapeDeLaFrise(etape) {
 
   ligne.append(el('p', { classe: 'frise-detail', texte: detailDeLEtape(etape) }));
   if (etape.assignments.length > 0) {
-    ligne.append(el('div', { classe: 'frise-travaux' }, etape.assignments.map((travail) =>
-      el('a', {
-        classe: 'jeton lien', href: travail.url,
-        target: '_blank', rel: 'noreferrer noopener',
-        texte: travail.name + (travail.team ? ' · ' + travail.team : ''),
-        title: travail.repo + (travail.pushed_at ? ' — dernier envoi ' + travail.pushed_at : ''),
-      }))));
+    ligne.append(el('div', { classe: 'frise-travaux' },
+      etape.assignments.map(puceDeTravail)));
   }
   return ligne;
+}
+
+// puceDeTravail rend un dépôt rendu, cerné. Plusieurs travaux d'un même cours
+// se suivent : sans bordure, « tp1 tp2 tp3 » se lit comme un seul mot, et rien
+// ne dit où l'un finit et où l'autre commence. Sa date y figure pour la même
+// raison — c'est aussi ce qu'on vient comparer entre deux travaux.
+function puceDeTravail(travail) {
+  return el('a', {
+    classe: 'jeton lien travail-puce', href: travail.url,
+    target: '_blank', rel: 'noreferrer noopener',
+    title: travail.repo + (travail.pushed_at
+      ? ' — dernier envoi ' + travail.pushed_at : ' — aucun envoi'),
+  },
+    el('span', { classe: 'travail-nom',
+      texte: travail.name + (travail.team ? ' · ' + travail.team : '') }),
+    el('span', { classe: 'travail-date',
+      texte: travail.pushed_at || 'aucun envoi' }));
 }
 
 // detailDeLEtape dit ce que l'étape a laissé. « Muet » n'est pas « aucun

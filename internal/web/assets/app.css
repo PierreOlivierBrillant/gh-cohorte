@@ -304,7 +304,20 @@ main { padding: 1.5rem; max-width: 1100px; }
 
 .jeton.oui { color: var(--succes); background: var(--succes-fond); border-color: transparent; }
 .jeton.non { color: var(--erreur); background: var(--erreur-fond); border-color: transparent; }
-.jeton.lien { color: var(--lien); }
+/* Un jeton cliquable reste un jeton. « .lien » vient plus bas dans cette
+   feuille et remet à plat bordure, fond, marges et fonte : à égalité de
+   spécificité, c'est lui qui gagnait, et une rangée de jetons retombait en
+   texte nu. « tp1 tp2 tp3 » se lisait alors comme un seul mot — rien ne disait
+   où l'un finissait. Ces deux classes-ci reprennent la main. */
+.jeton.lien {
+  color: var(--lien);
+  padding: 0 .6rem;
+  font-size: .75rem;
+  background: var(--fond-creux);
+  border: 1px solid var(--bord);
+}
+
+.jeton.lien:hover { border-color: var(--lien); }
 /* Le compte d'une personne, à côté de son nom : c'est leur association qu'on
    lit, et le compte se reconnaît à sa fonte. */
 .jeton .compte {
@@ -1121,6 +1134,24 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   gap: .4rem;
   flex-wrap: wrap;
   margin-top: .45rem;
+}
+
+/* Le dépôt d'un travail, avec sa date. Deux travaux d'un même cours se
+   comparent d'abord par là : sans elle, il faudrait survoler chacun. */
+.travail-puce {
+  display: inline-flex;
+  align-items: baseline;
+  gap: .4rem;
+  text-decoration: none;
+}
+
+.travail-puce:hover { text-decoration: none; }
+.travail-puce .travail-nom { font-weight: 600; }
+
+.travail-date {
+  color: var(--texte-doux);
+  font-size: .6875rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Une pile de cases à cocher qui respire, pour composer une équipe. */
