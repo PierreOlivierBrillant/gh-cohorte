@@ -86,12 +86,30 @@ type Snapshot struct {
 	Stale bool
 }
 
+// keptSchema est la forme de ce que le cache retient. Elle change dès qu'un
+// champ de « keptSet » change de nom ou de sens.
+//
+// Sans elle, une entrée écrite par une version antérieure se relisait en
+// silence, ses champs inconnus à zéro : un registre vide scellé par le bon
+// commit, donc tenu pour à jour, et pour trois mois. Les noms que le fichier
+// local ne redit plus — il les retire dès que le registre les porte —
+// disparaissaient alors de l'écran ; et un compte sans nom ne peut plus être
+// rattaché à ses dépôts, dont le dernier niveau est ce nom slugifié.
+//
+// C'est arrivé au renommage de « students » en « users ». Une entrée d'une
+// forme qu'on ne reconnaît pas n'est donc plus lue du tout : relire GitHub
+// coûte une requête, se tromper coûtait bien davantage.
+const keptSchema = 2
+
 // keptSet est ce que le cache local retient : le registre, et le commit qui le
 // scelle. Tant que la branche pointe sur ce commit, ce contenu vaut toujours.
 //
 // Les deux sections sont retenues ensemble parce qu'un seul commit les scelle :
 // en garder une seule obligerait à relire l'autre pour rien.
 type keptSet struct {
+	// Schema dit de quelle forme vient cette entrée. Une entrée sans lui vient
+	// d'avant qu'on les distingue, et ne se relit pas.
+	Schema      int          `json:"schema"`
 	Head        string       `json:"head"`
 	Users       []User       `json:"users"`
 	Assignments []Assignment `json:"assignments,omitempty"`
@@ -169,7 +187,8 @@ func (s *Store) kept() (Snapshot, bool) {
 		return Snapshot{}, false
 	}
 	var garde keptSet
-	if !s.local.Get(cache.RegistryKey(s.org), cache.RegistryTTL, &garde) || garde.Head == "" {
+	if !s.local.Get(cache.RegistryKey(s.org), cache.RegistryTTL, &garde) ||
+		garde.Head == "" || garde.Schema != keptSchema {
 		return Snapshot{}, false
 	}
 	return Snapshot{
@@ -184,7 +203,8 @@ func (s *Store) keep(head string, set *Set) {
 		return
 	}
 	s.local.Set(cache.RegistryKey(s.org), keptSet{
-		Head: head, Users: set.All(), Assignments: set.Assignments(),
+		Schema: keptSchema, Head: head,
+		Users: set.All(), Assignments: set.Assignments(),
 	})
 }
 
