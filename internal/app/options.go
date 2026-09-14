@@ -78,7 +78,10 @@ type Options struct {
 	TeamRemove    []string
 	TeamRename    string
 	TeamAdopt     string
-	TeamDelete    bool
+	// TeamMove est la place du groupe où l'équipe s'en va, avec ses membres et
+	// tout ce qu'ils ont rendu.
+	TeamMove   string
+	TeamDelete bool
 	// TeamDeleteRepos emporte aussi les dépôts que l'équipe a rendus. Ils ne
 	// la suivent pas d'eux-mêmes : le travail survit à l'équipe qui l'a fait.
 	TeamDeleteRepos bool
@@ -182,6 +185,7 @@ Drapeaux :
   --team-add COMPTES       inscrire des comptes dans l'équipe (ils quittent la leur)
   --team-remove COMPTES    retirer des comptes de l'équipe
   --team-rename NOM        renommer l'équipe visée
+  --team-move PLACE        déplacer l'équipe vers un autre groupe
   --team-delete            supprimer l'équipe visée
   --team-delete-repos      supprimer aussi ses dépôts (avec --team-delete)
   --team-adopt EQUIPE      adopter une équipe de l'organisation sous le nom de --team
@@ -279,6 +283,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	retraits := set.String("team-remove", "", "comptes à retirer de l'équipe")
 	set.StringVar(&options.TeamRename, "team-rename", "", "nouveau nom de l'équipe")
 	set.StringVar(&options.TeamAdopt, "team-adopt", "", "équipe existante à adopter")
+	set.StringVar(&options.TeamMove, "team-move", "",
+		"place du groupe où déplacer l'équipe")
 	set.BoolVar(&options.TeamDelete, "team-delete", false, "supprimer l'équipe visée")
 	set.BoolVar(&options.TeamDeleteRepos, "team-delete-repos", false,
 		"supprimer aussi les dépôts de l'équipe")

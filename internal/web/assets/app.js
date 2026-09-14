@@ -2919,6 +2919,9 @@ function dessinerEquipes() {
             () => composerEquipe(equipe)),
           boutonIcone('crayon', 'Renommer', `Renommer ${equipe.short}`,
             () => renommerEquipe(equipe)),
+          boutonIcone('fleche', 'Déplacer…',
+            `Déplacer ${equipe.short} vers un autre groupe`,
+            () => deplacerEquipe(equipe)),
           boutonIcone('corbeille', 'Supprimer', `Supprimer ${equipe.short}`,
             () => supprimerEquipe(equipe), 'rouge'))),
       membres));
@@ -3239,6 +3242,52 @@ async function renommerEquipe(equipe) {
   if (!fiche) return;
   message(`« ${fiche.previous} » devient « ${fiche.team.short} ».`);
   await chargerEquipes(true);
+}
+
+// deplacerEquipe fait passer une équipe dans un autre groupe. Elle appartient à
+// celui qu'elle a — son nom le dit, ses dépôts le portent —, et n'y va donc pas
+// seule : ses membres et tout ce qu'ils ont rendu changent de groupe avec elle.
+async function deplacerEquipe(equipe) {
+  const { bloc, destination, preparer } = await choixDeGroupe();
+  const membres = (equipe.people || []).length + (equipe.strangers || []).length;
+  const depots = (etat.depotsDEquipe || {})[equipe.short] || 0;
+
+  const confirme = await demander(`Déplacer ${equipe.short}`, el('div', {},
+    bloc,
+    el('p', { classe: 'note', texte:
+      `${membres} membre(s) partent avec elle : une équipe appartient à son groupe, ` +
+      'et ses membres en font partie.' }),
+    el('p', { classe: 'note', texte: depots === 0
+      ? "Ses dépôts et ceux de ses membres seront renommés pour porter la place du " +
+        "groupe d'arrivée. GitHub garde une redirection depuis chaque ancien nom."
+      : `Ses ${depots} dépôt(s) et ceux de ses membres seront renommés pour porter la ` +
+        "place du groupe d'arrivée. GitHub garde une redirection depuis chaque " +
+        'ancien nom.' })), 'Déplacer', preparer);
+  if (!confirme) return;
+  const cible = destination();
+  if (!cible) return;
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/teams/${encode(equipe.short)}/move`,
+    cible), 'Déplacement');
+  if (!fiche) return;
+  // Sans dépôt à renommer, le serveur répond directement ; sinon c'est un
+  // travail de fond, avec son journal.
+  const bilan = fiche.id ? await suivre(fiche) : fiche;
+  if (!bilan) return;
+  // L'équipe ne suit que si tous ses dépôts sont arrivés : un déplacement
+  // interrompu n'a rien déplacé, et le journal dit lesquels ont résisté.
+  if (bilan.failed) {
+    message(`« ${equipe.short} » n'a pas bougé · ${bilan.failed} dépôt(s) en échec`,
+      'alerte');
+  } else {
+    message(`« ${equipe.short} » rejoint « ${bilan.target} »` +
+      (bilan.created ? ' · groupe créé' : '') +
+      (bilan.count ? ` · ${bilan.count} étudiant(s)` : '') +
+      (bilan.renamed ? ` · ${bilan.renamed} dépôt(s) renommé(s)` : ''));
+  }
+  await chargerGroupes(true);
+  await rafraichirGroupeEtEquipes();
 }
 
 async function supprimerEquipe(equipe) {

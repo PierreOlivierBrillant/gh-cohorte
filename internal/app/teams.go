@@ -53,6 +53,12 @@ func (s *Session) teamDesk(place string) (*desk, error) {
 	if err != nil {
 		return nil, err
 	}
+	// La liste du groupe vient du fichier local quand il en tient une : sans
+	// elle, un membre d'équipe n'a que son compte, et rien ne pourrait suivre
+	// l'équipe qui change de groupe.
+	if connu, existe := s.groupStore().Find(cours.Org, cours.Scope()); existe {
+		cours = connu
+	}
 	bureau := &desk{session: s, cours: cours}
 	return bureau, bureau.reload()
 }
@@ -225,6 +231,114 @@ func (d *desk) adopt(slug, short string) error {
 	return d.reload()
 }
 
+// groupStore ouvre le fichier des groupes de cette machine.
+func (s *Session) groupStore() *classroom.Store {
+	return classroom.Open(classroom.PathNextTo(s.ConfigFile))
+}
+
+// transfer fait passer une équipe dans un autre groupe : elle, ses membres, et
+// tout ce que les uns comme l'autre ont rendu. Les dépôts sont renommés
+// d'abord ; l'équipe et les listes ne suivent qu'ensuite, parce que c'est
+// GitHub qui dit à quel groupe un dépôt appartient.
+func (d *desk) transfer(short, place string) error {
+	console := d.session.Console
+	equipe, trouvee := teams.Find(d.list, short)
+	if !trouvee {
+		return valid.Errorf("Aucune équipe « %s » dans ce groupe.", short)
+	}
+	arrivee, err := classroom.AtScope(d.cours.Org, place,
+		classroom.DefaultsFrom(d.session.Settings))
+	if err != nil {
+		return err
+	}
+	if connu, existe := d.session.groupStore().Find(arrivee.Org, arrivee.Scope()); existe {
+		arrivee = connu
+	}
+	if classroom.NormalizeScope(arrivee.Scope()) == classroom.NormalizeScope(d.cours.Scope()) {
+		return valid.Errorf("Le groupe d'arrivée est celui de départ.")
+	}
+	// Deux équipes d'un même groupe ne peuvent pas porter le même nom court :
+	// le renommage serait refusé par GitHub, et le dire ici évite d'avoir déjà
+	// renommé des dépôts pour rien.
+	if err := teams.Available(arrivee.Teams(d.infos), equipe.Short); err != nil {
+		return err
+	}
+
+	repos, err := d.session.orgRepos(d.cours.Org, false)
+	if err != nil {
+		return err
+	}
+	membres := d.cours.TeamMovers(equipe)
+	lignes, err := classroom.PlanMoveTeam(d.cours, arrivee, equipe, membres, repos)
+	if err != nil {
+		return err
+	}
+
+	console.Heading("« " + equipe.Label() + " » vers « " + arrivee.Label() + " »")
+	if len(membres) == 0 {
+		console.Note("Aucune fiche à déplacer : la liste du groupe ne connaît " +
+			"aucun de ses membres.")
+	} else {
+		noms := make([]string, 0, len(membres))
+		for _, personne := range membres {
+			noms = append(noms, nommer(personne))
+		}
+		console.Note("Suivent aussi : %s", strings.Join(noms, ", "))
+	}
+	if len(lignes) > 0 {
+		suivis, _, err := d.session.renommerDepots(d.cours.Org, lignes,
+			"%d dépôt(s) déplacé(s) vers « "+arrivee.Scope()+" ».")
+		if err != nil {
+			return err
+		}
+		// L'équipe ne suit que si tous ses dépôts sont arrivés : une simulation,
+		// un refus ou un échec la laisserait à cheval sur deux groupes.
+		if len(suivis) < len(lignes) {
+			console.Warning("L'équipe n'a pas bougé : tous ses dépôts n'ont pas suivi.")
+			return nil
+		}
+	} else if !d.session.Options.Yes {
+		suite, err := d.session.Prompt.Confirm(
+			"Aucun dépôt à renommer. Déplacer « "+equipe.Label()+" » ?", false)
+		if err != nil || !suite {
+			console.Warning("Annulé : l'équipe n'a pas bougé.")
+			return err
+		}
+	}
+
+	nom := arrivee.TeamName(equipe.Short)
+	ui.Await(console, "Déplacement de « "+equipe.Name+" »…", func() {
+		_, err = d.session.Client.UpdateTeam(arrivee.Org, equipe.Slug, nom,
+			teams.Describe(arrivee.Session, arrivee.Course, arrivee.Group, equipe.Short))
+	})
+	if err != nil {
+		return err
+	}
+	if len(membres) > 0 {
+		store := d.session.groupStore()
+		if _, err := store.Save(d.cours.Without(comptesDesMembres(membres)...)); err != nil {
+			return err
+		}
+		if _, err := store.Save(arrivee.With(membres...)); err != nil {
+			return err
+		}
+	}
+	console.Success("« %s » est maintenant « %s », avec %d étudiant(s).",
+		equipe.Name, nom, len(membres))
+	return d.reload()
+}
+
+// comptesDesMembres rend tous les comptes des personnes qui partent : n'en
+// nommer qu'un laisserait dans le groupe de départ la moitié de quelqu'un qui
+// travaille sous deux comptes.
+func comptesDesMembres(membres []roster.Person) []string {
+	liste := make([]string, 0, len(membres))
+	for _, personne := range membres {
+		liste = append(liste, personne.Accounts()...)
+	}
+	return liste
+}
+
 // drop supprime une équipe, et ses dépôts si on le demande. Ils ne la suivent
 // pas d'eux-mêmes : ce sont des dépôts comme les autres, et le travail qu'ils
 // portent survit à l'équipe qui l'a fait.
@@ -393,7 +507,7 @@ func (o *Options) wantsTeams() bool {
 func (s *Session) teamsMode() (int, error) {
 	place := strings.TrimSpace(s.Options.Manage)
 	if place == "" {
-		chosen, err := s.askPlace()
+		chosen, err := s.askPlace("Quel groupe ?")
 		if err != nil {
 			return ExitOK, err
 		}
@@ -402,11 +516,11 @@ func (s *Session) teamsMode() (int, error) {
 	return s.manageTeams(place)
 }
 
-// askPlace fait choisir le groupe dont on veut tenir les équipes, parmi ceux
-// que les dépôts dessinent. Un nom peut toujours être saisi à la place : un
-// groupe sans aucun dépôt n'apparaît nulle part, et c'est souvent celui qu'on
-// prépare.
-func (s *Session) askPlace() (string, error) {
+// askPlace fait choisir un groupe parmi ceux que les dépôts dessinent — celui
+// dont on veut tenir les équipes, ou celui où l'une s'en va. Un nom peut
+// toujours être saisi à la place : un groupe sans aucun dépôt n'apparaît nulle
+// part, et c'est souvent celui qu'on prépare.
+func (s *Session) askPlace(question string) (string, error) {
 	if !s.Interactive() {
 		return s.require("", "--manage a26.5n6.01", "Groupe")
 	}
@@ -426,7 +540,7 @@ func (s *Session) askPlace() (string, error) {
 		choix = append(choix, place, place)
 	}
 	choix = append(choix, libre, "Saisir une autre place…")
-	answer, err := s.Prompt.Choose("Quel groupe ?", ui.Options(choix...), places[0])
+	answer, err := s.Prompt.Choose(question, ui.Options(choix...), places[0])
 	if err != nil {
 		return "", err
 	}
@@ -453,6 +567,14 @@ func (s *Session) manageTeams(place string) (int, error) {
 			return ExitOK, err
 		}
 		if err := bureau.adopt(options.TeamAdopt, short); err != nil {
+			return ExitOK, err
+		}
+	case options.TeamMove != "":
+		short, err := bureau.only()
+		if err != nil {
+			return ExitOK, err
+		}
+		if err := bureau.transfer(short, options.TeamMove); err != nil {
 			return ExitOK, err
 		}
 	case options.TeamDelete:
@@ -511,6 +633,7 @@ var teamMenuOptions = ui.Options(
 	"retirer", "Retirer un étudiant de son équipe",
 	"renommer", "Renommer une équipe",
 	"adopter", "Adopter une équipe existante de l'organisation",
+	"transferer", "Déplacer une équipe vers un autre groupe",
 	"supprimer", "Supprimer une équipe",
 	"recharger", "Recharger la liste",
 	"quitter", "Revenir",
@@ -600,6 +723,16 @@ func (s *Session) dispatchTeam(bureau *desk, action string) error {
 			return err
 		}
 		return bureau.adopt(slug, nom)
+	case "transferer":
+		nom, err := s.pickTeam(bureau, "Quelle équipe déplacer ?")
+		if err != nil {
+			return err
+		}
+		place, err := s.askPlace("Vers quel groupe ?")
+		if err != nil {
+			return err
+		}
+		return bureau.transfer(nom, place)
 	case "supprimer":
 		nom, err := s.pickTeam(bureau, "Quelle équipe supprimer ?")
 		if err != nil {

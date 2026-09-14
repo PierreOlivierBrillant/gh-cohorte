@@ -216,6 +216,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/classrooms/{scope}/teams/{team}", s.handleDeleteTeam)
 	mux.HandleFunc("POST /api/classrooms/{scope}/teams/{team}/members", s.handleComposeTeam)
 	mux.HandleFunc("DELETE /api/classrooms/{scope}/teams/{team}/members/{login}", s.handleLeaveTeam)
+	mux.HandleFunc("POST /api/classrooms/{scope}/teams/{team}/move", s.handleMoveTeam)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments", s.handleCreateAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/preview", s.handlePreviewAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move/preview", s.handleRelocatePreview)

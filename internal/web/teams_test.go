@@ -227,6 +227,76 @@ func TestSupprimerUneEquipeLaisseSesDepots(t *testing.T) {
 	}
 }
 
+// Déplacer une équipe, c'est déplacer les trois : l'équipe, ses membres, et
+// tout ce que les uns comme l'autre ont rendu. Le reste du groupe ne bouge pas.
+func TestDeplacerUneEquipeVersUnAutreGroupe(t *testing.T) {
+	h, place := groupeAvecEquipes(t)
+	h.State.AddRepo("acme", "a26.5n6.01.projet.eq1", true)
+	h.State.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	h.State.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
+	h.State.AddRepo("acme", "a26.5n6.01.tp1.aminata-diallo", true)
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+place+"/teams/eq1/move",
+		map[string]any{"new_group": map[string]string{
+			"session": "a26", "course": "5n6", "group": "02"}})
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat == nil {
+		t.Fatalf("aucun bilan : %v", bilan)
+	}
+	if resultat["failed"] != float64(0) {
+		t.Fatalf("des renommages ont échoué : %v", resultat)
+	}
+
+	// Les dépôts de l'équipe et de ses membres portent la place d'arrivée ;
+	// celui d'Aminata, qui n'en est pas, n'a pas bougé.
+	attendus := []string{
+		"a26.5n6.01.tp1.aminata-diallo",
+		"a26.5n6.02.projet.eq1",
+		"a26.5n6.02.tp1.emilie-cote",
+		"a26.5n6.02.tp1.jean-luc-picard",
+	}
+	if noms := h.depots(); strings.Join(noms, ",") != strings.Join(attendus, ",") {
+		t.Fatalf("dépôts après déplacement : %v", noms)
+	}
+
+	// L'équipe elle-même porte la place de son nouveau groupe : c'est son nom
+	// qui dit à quel groupe elle appartient.
+	var arrivee listeEquipes
+	h.json(http.MethodGet, "/api/classrooms/a26.5n6.02/teams?refresh=1", nil, &arrivee)
+	if len(arrivee.Teams) != 1 || arrivee.Teams[0].Name != "a26.5n6.02.eq1" {
+		t.Fatalf("l'équipe devrait être arrivée : %+v", arrivee.Teams)
+	}
+	comptes := make([]string, 0, 2)
+	for _, personne := range arrivee.Teams[0].People {
+		comptes = append(comptes, personne.Username)
+	}
+	sort.Strings(comptes)
+	if strings.Join(comptes, ",") != "emilie-cote,jlpicard" {
+		t.Fatalf("ses membres devraient l'avoir suivie : %v", comptes)
+	}
+	// Et ils ont quitté le groupe de départ.
+	if len(h.equipes(place).Teams) != 1 {
+		t.Fatalf("le départ ne devrait garder qu'eq2")
+	}
+}
+
+// Une équipe ne peut pas arriver là où son nom court est déjà pris : deux
+// équipes d'un même groupe ne peuvent pas le partager.
+func TestUneEquipeNArrivePasSurUnNomDejaPris(t *testing.T) {
+	h, place := groupeAvecEquipes(t)
+	ailleurs := h.groupe("a26", "5n6", "02", "Karim Bélanger", "kbelanger")
+	h.creerEquipe(ailleurs, "eq1", "kbelanger")
+
+	reponse, contenu := h.requete(http.MethodPost,
+		"/api/classrooms/"+place+"/teams/eq1/move", map[string]any{"target": ailleurs})
+	if reponse.StatusCode < 300 {
+		t.Fatal("un nom déjà pris à l'arrivée doit être refusé")
+	}
+	if !strings.Contains(string(contenu), "existe déjà") {
+		t.Fatalf("le refus devrait le dire : %s", contenu)
+	}
+}
+
 // Le dépôt d'une équipe dit qui la compose, nom et compte, et signale celui
 // qui a été invité sans avoir encore accepté : c'est la même lecture que dans
 // l'onglet des équipes, et c'est là qu'on vient la vérifier.

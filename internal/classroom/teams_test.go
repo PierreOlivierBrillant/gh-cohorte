@@ -1,6 +1,7 @@
 package classroom_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
@@ -100,6 +101,63 @@ func TestTeamOfRattacheUnDepotASonEquipe(t *testing.T) {
 	}
 	if _, appartient := cours.TeamOf("a26.5n6.01.tp1.emilie-cote", equipes); appartient {
 		t.Fatal("un dépôt d'étudiant n'appartient à aucune équipe")
+	}
+}
+
+// Une équipe qui change de groupe emporte ses dépôts et ceux de ses membres,
+// et rien d'autre : ce qui appartient au reste du groupe y reste.
+func TestPlanMoveTeamEmporteLEquipeEtSesMembres(t *testing.T) {
+	cours, inventaire, equipes := avecEquipes()
+	arrivee := classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "02",
+	}
+	membres := cours.TeamMovers(equipes[0])
+	if len(membres) != 2 {
+		t.Fatalf("eq1 emmène deux personnes : %+v", membres)
+	}
+
+	lignes, err := classroom.PlanMoveTeam(cours, arrivee, equipes[0], membres, inventaire)
+	if err != nil {
+		t.Fatalf("PlanMoveTeam : %v", err)
+	}
+	obtenu := map[string]string{}
+	for _, ligne := range lignes {
+		obtenu[ligne.Repo] = ligne.Target
+	}
+	attendu := map[string]string{
+		// Le dépôt de l'équipe garde son nom court et change de place.
+		"a26.5n6.01.projet.eq1": "a26.5n6.02.projet.eq1",
+		// Ceux de ses membres suivent, sous le fragment qui les nomme.
+		"a26.5n6.01.tp1.emilie-cote":     "a26.5n6.02.tp1.emilie-cote",
+		"a26.5n6.01.tp1.jean-luc-picard": "a26.5n6.02.tp1.jean-luc-picard",
+	}
+	if len(obtenu) != len(attendu) {
+		t.Fatalf("%d renommage(s) : %v", len(obtenu), obtenu)
+	}
+	for depot, cible := range attendu {
+		if obtenu[depot] != cible {
+			t.Errorf("« %s » → %q, attendu %q", depot, obtenu[depot], cible)
+		}
+	}
+}
+
+// Un nom qui existe déjà à l'arrivée refuse le plan entier, avant le premier
+// renommage : une collision découverte à mi-chemin laisserait l'équipe à cheval
+// sur deux groupes.
+func TestPlanMoveTeamRefuseUneCollision(t *testing.T) {
+	cours, inventaire, equipes := avecEquipes()
+	arrivee := classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "02",
+	}
+	inventaire = append(inventaire,
+		groups.RepoInfo{Name: "a26.5n6.02.projet.eq1"})
+	_, err := classroom.PlanMoveTeam(cours, arrivee, equipes[0],
+		cours.TeamMovers(equipes[0]), inventaire)
+	if err == nil {
+		t.Fatal("un nom déjà pris à l'arrivée doit être refusé")
+	}
+	if !strings.Contains(err.Error(), "a26.5n6.02.projet.eq1") {
+		t.Errorf("le refus doit nommer le dépôt fautif : %v", err)
 	}
 }
 

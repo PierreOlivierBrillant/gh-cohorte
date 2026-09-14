@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -253,6 +255,139 @@ func (s *Server) handleDeleteTeam(writer http.ResponseWriter, request *http.Requ
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"team": equipe.Short, "repos": supprimes, "message": message,
 	})
+}
+
+// handleMoveTeam fait passer une équipe dans un autre groupe.
+//
+// Une équipe appartient à un groupe : son nom le dit, ses membres en font
+// partie, et ses dépôts portent la place de ce groupe. La déplacer emporte donc
+// les trois — sans quoi il resterait des dépôts d'un groupe rendus par une
+// équipe d'un autre, et plus rien ne se lirait.
+//
+// Les dépôts sont renommés d'abord, l'équipe et les listes ensuite : c'est
+// GitHub qui dit à quel groupe un dépôt appartient, et une liste qui aurait
+// bougé sans lui décrirait un rangement qui n'a pas eu lieu.
+func (s *Server) handleMoveTeam(writer http.ResponseWriter, request *http.Request) {
+	var body moveInput
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	depart, equipes, err := s.squadOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	equipe, trouvee := teams.Find(equipes, request.PathValue("team"))
+	if !trouvee {
+		fail(writer, valid.Errorf("Aucune équipe « %s » dans ce groupe.",
+			strings.TrimSpace(request.PathValue("team"))))
+		return
+	}
+	repos, _, err := s.repos(depart.Org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	depart = s.enrichi(depart, repos)
+
+	arrivee, neuf, err := s.moveTarget(body.Target, body.NewGroup, repos)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if classroom.NormalizeScope(depart.Scope()) == classroom.NormalizeScope(arrivee.Scope()) {
+		fail(writer, valid.Errorf("Le groupe d'arrivée est celui de départ."))
+		return
+	}
+	// L'arrivée doit pouvoir l'accueillir sous son nom : deux équipes d'un même
+	// groupe ne peuvent pas le partager, et le renommage échouerait sur GitHub.
+	deja, err := s.teamsIn(arrivee)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if err := teams.Available(deja, equipe.Short); err != nil {
+		fail(writer, err)
+		return
+	}
+
+	membres := depart.TeamMovers(equipe)
+	renommages, err := classroom.PlanMoveTeam(depart, arrivee, equipe, membres, repos)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+
+	bilan := map[string]any{
+		"team": equipe.Short, "moved": comptes(membres), "count": len(membres),
+		"target": arrivee.Label(), "target_scope": arrivee.Scope(),
+		"created": neuf, "renamed": 0, "failed": 0,
+	}
+
+	// Sans dépôt à renommer, rien ne peut contredire ce qu'on écrit : l'équipe
+	// et les fiches suivent tout de suite.
+	if len(renommages) == 0 {
+		if err := s.equipeSuit(depart, arrivee, equipe, membres); err != nil {
+			fail(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, bilan)
+		return
+	}
+
+	label := "Déplacement de « " + equipe.Label() + " » vers « " + arrivee.Label() + " »"
+	job := s.jobs.Start("deplacement", label, func(job *Job) (any, error) {
+		renommes, echecs := 0, 0
+		var suivis []groups.Renamed
+		for index, ligne := range renommages {
+			if job.Canceled() {
+				break
+			}
+			apres, err := s.deps.Client.RenameRepo(depart.Org, ligne.Repo, ligne.Target)
+			if err != nil {
+				echecs++
+				job.Line(ligne.Repo+" : échec — "+err.Error(),
+					map[string]string{"status": "échec"})
+			} else {
+				renommes++
+				suivis = append(suivis, groups.Renamed{Before: ligne.Repo, After: apres.Info()})
+				job.Line(ligne.Repo+" → "+ligne.Target,
+					map[string]string{"status": "mis à jour"})
+			}
+			job.Progress(index+1, len(renommages), ligne.Repo)
+		}
+		s.renamed(depart.Org, suivis)
+		bilan["renamed"], bilan["failed"] = renommes, echecs
+
+		if echecs > 0 || job.Canceled() {
+			job.Warn("L'équipe n'a pas bougé : tous ses dépôts n'ont pas suivi.")
+			bilan["moved"], bilan["count"] = []string{}, 0
+			return bilan, nil
+		}
+		if err := s.equipeSuit(depart, arrivee, equipe, membres); err != nil {
+			return nil, err
+		}
+		return bilan, nil
+	})
+	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
+// equipeSuit fait suivre l'équipe et ses membres une fois les dépôts arrivés :
+// l'équipe est renommée à la place du groupe d'arrivée, et les fiches changent
+// de liste.
+func (s *Server) equipeSuit(depart, arrivee classroom.Classroom, equipe teams.Team,
+	membres []roster.Person) error {
+	nom := arrivee.TeamName(equipe.Short)
+	if _, err := s.deps.Client.UpdateTeam(arrivee.Org, equipe.Slug, nom,
+		teams.Describe(arrivee.Session, arrivee.Course, arrivee.Group, equipe.Short)); err != nil {
+		return err
+	}
+	s.forgetTeams(depart.Org)
+	if len(membres) == 0 {
+		return nil
+	}
+	return s.suivent(depart, arrivee, membres)
 }
 
 // handleAdoptTeam fait entrer dans le groupe une équipe déjà présente dans

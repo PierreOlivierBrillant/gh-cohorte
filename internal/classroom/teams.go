@@ -30,6 +30,24 @@ func (c Classroom) TeamName(short string) string {
 	return naming.TeamName(c.Session, c.Course, c.Group, strings.TrimSpace(short))
 }
 
+// TeamMovers rassemble les fiches que l'équipe emporte quand elle change de
+// groupe. Un compte que la liste du groupe ne connaît pas n'a pas de fiche à
+// déplacer : l'équipe le garde quand même, puisque c'est elle qui le porte.
+func (c Classroom) TeamMovers(equipe teams.Team) []roster.Person {
+	vus := map[string]bool{}
+	partants := make([]roster.Person, 0, len(equipe.Members))
+	for _, compte := range equipe.Members {
+		personne, inscrit := c.Find(compte)
+		if !inscrit || vus[strings.ToLower(personne.Username)] {
+			continue
+		}
+		vus[strings.ToLower(personne.Username)] = true
+		partants = append(partants, personne)
+	}
+	SortPeople(partants)
+	return partants
+}
+
 // TeamRepos nomme les dépôts que l'équipe a rendus, tous travaux confondus.
 // Ce sont ceux dont le dernier niveau la nomme, et eux seuls : un dépôt qu'elle
 // voit sans le nommer est celui de quelqu'un d'autre, et il lui survit.

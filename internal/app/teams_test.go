@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 )
 
 // Les équipes au terminal. L'assistant travaille par préfixe et ignore la
@@ -104,6 +106,75 @@ func TestTerminalRenommeEtSupprimeUneEquipe(t *testing.T) {
 	if noms := equipesDuGroupe(h, "a26.5n6.01"); len(noms) != 0 {
 		t.Fatalf("l'équipe devrait avoir disparu : %v", noms)
 	}
+}
+
+// Déplacer une équipe au terminal : elle, ses membres, et tout ce que les uns
+// comme l'autre ont rendu. Le reste du groupe ne bouge pas.
+func TestTerminalDeplaceUneEquipeVersUnAutreGroupe(t *testing.T) {
+	h := nouveau(t, nil)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{
+			{FullName: "Émilie Côté", Username: "emilie-cote"},
+			{FullName: "Jean-Luc Picard", Username: "jlpicard"},
+			{FullName: "Aminata Diallo", Username: "aminata-d"},
+		},
+	})
+	h.composer("a26.5n6.01", "eq1", "emilie-cote", "jlpicard")
+	for _, nom := range []string{
+		"a26.5n6.01.projet.eq1",
+		"a26.5n6.01.tp1.emilie-cote",
+		"a26.5n6.01.tp1.jean-luc-picard",
+		"a26.5n6.01.tp1.aminata-diallo",
+	} {
+		h.State.AddRepo("acme", nom, true)
+	}
+
+	h.Options.ManageRequested, h.Options.Manage = true, "a26.5n6.01"
+	h.Options.Team = []string{"eq1"}
+	h.Options.TeamMove = "a26.5n6.02"
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("déplacement : code %d\n%s", code, h.texte())
+	}
+
+	attendus := []string{
+		"a26.5n6.01.tp1.aminata-diallo",
+		"a26.5n6.02.projet.eq1",
+		"a26.5n6.02.tp1.emilie-cote",
+		"a26.5n6.02.tp1.jean-luc-picard",
+	}
+	if noms := h.depots(); strings.Join(noms, ",") != strings.Join(attendus, ",") {
+		t.Fatalf("dépôts après déplacement : %v", noms)
+	}
+	if noms := equipesDuGroupe(h, "a26.5n6.02"); strings.Join(noms, ",") != "a26.5n6.02.eq1" {
+		t.Fatalf("l'équipe devrait être arrivée : %v", noms)
+	}
+	// Les fiches suivent : les deux membres sont dans le groupe d'arrivée, et
+	// Aminata reste dans celui de départ.
+	store := classroom.Open(classroom.PathNextTo(h.Reglages))
+	arrivee, declare := store.Find("acme", "a26.5n6.02")
+	if !declare {
+		t.Fatalf("le groupe d'arrivée devrait être déclaré :\n%s", h.groupesLocaux())
+	}
+	if strings.Join(comptesDe(arrivee), ",") != "emilie-cote,jlpicard" {
+		t.Fatalf("les membres devraient avoir suivi : %v", comptesDe(arrivee))
+	}
+	depart, _ := store.Find("acme", "a26.5n6.01")
+	if strings.Join(comptesDe(depart), ",") != "aminata-d" {
+		t.Fatalf("le départ ne devrait garder qu'Aminata : %v", comptesDe(depart))
+	}
+	h.contient("est maintenant", "a26.5n6.02.eq1")
+}
+
+// comptesDe rend les comptes d'un groupe, triés.
+func comptesDe(cours classroom.Classroom) []string {
+	liste := make([]string, 0, len(cours.Students))
+	for _, personne := range cours.Students {
+		liste = append(liste, personne.Username)
+	}
+	sort.Strings(liste)
+	return liste
 }
 
 // Les dépôts ne suivent l'équipe que si on le demande : « --team-delete » seul

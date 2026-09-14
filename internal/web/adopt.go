@@ -222,11 +222,14 @@ func movers(depart, arrivee classroom.Classroom, body moveInput) ([]roster.Perso
 	return personnes, nil
 }
 
-// comptes rend les comptes GitHub d'une liste de personnes.
+// comptes rend les comptes GitHub d'une liste de personnes, tous ceux d'une
+// même personne compris. Quitter une liste se fait par compte : n'en nommer
+// qu'un laisserait dans le groupe de départ la moitié de quelqu'un qui
+// travaille sous deux comptes.
 func comptes(personnes []roster.Person) []string {
 	liste := make([]string, 0, len(personnes))
 	for _, personne := range personnes {
-		liste = append(liste, personne.Username)
+		liste = append(liste, personne.Accounts()...)
 	}
 	return liste
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -100,6 +101,64 @@ func planRenames(depart, arrivee Classroom, fragments map[string]string,
 				continue
 			}
 			ligne, err := pris.viser(arrivee, nom, repo, fragment, student.Username)
+			if err != nil {
+				return nil, err
+			}
+			if ligne != nil {
+				lignes = append(lignes, *ligne)
+			}
+		}
+	}
+	return lignes, nil
+}
+
+// PlanMoveTeam compose le renommage des dépôts qu'une équipe emporte en
+// changeant de groupe : les siens et ceux de ses membres.
+//
+// Une équipe appartient à un groupe — son nom le dit, et c'est ce qui permet à
+// deux groupes d'avoir chacun leur « eq1 ». La déplacer, c'est donc déplacer
+// les trois choses à la fois : l'équipe, les gens qui la composent, et tout ce
+// que les uns comme l'autre ont rendu. Rien ne resterait cohérent autrement :
+// des dépôts d'un groupe appartenant à une équipe d'un autre.
+//
+// Un dépôt d'équipe garde son nom court à l'arrivée ; celui d'un étudiant garde
+// le fragment qui le nomme, ou celui qu'il porte déjà quand son nom complet
+// manque encore.
+func PlanMoveTeam(depart, arrivee Classroom, equipe teams.Team,
+	membres []roster.Person, repos []groups.RepoInfo) ([]Move, error) {
+	// Une personne est indexée sous tous ses comptes : le dépôt peut être
+	// nommé d'après l'un, et l'équipe la porter sous l'autre.
+	fragments := map[string]string{}
+	for _, personne := range membres {
+		for _, compte := range personne.Accounts() {
+			fragments[strings.ToLower(compte)] = fragmentDe(personne)
+		}
+	}
+	seule := []teams.Team{equipe}
+	pris := nouvellesCibles(repos)
+
+	var lignes []Move
+	for _, travail := range depart.Assignments(repos, seule) {
+		nom, err := naming.Fragment(depart.ShortName(travail.ID), "Travail")
+		if err != nil {
+			continue
+		}
+		for _, repo := range depart.Repos(travail.ID, repos) {
+			fragment, username := "", ""
+			if _, sien := depart.TeamOf(repo.Name, seule); !sien {
+				student, inscrit := depart.StudentOf(repo.Name)
+				if !inscrit {
+					continue
+				}
+				attendu, concerne := fragments[strings.ToLower(student.Username)]
+				if !concerne {
+					continue
+				}
+				fragment, username = attendu, student.Username
+			}
+			// Le dépôt de l'équipe n'a pas de fragment à viser : le sien la
+			// nomme déjà, et « viser » le reprend tel quel.
+			ligne, err := pris.viser(arrivee, nom, repo, fragment, username)
 			if err != nil {
 				return nil, err
 			}
