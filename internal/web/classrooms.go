@@ -470,6 +470,9 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 		noms = append(noms, remise.Name)
 	}
 	label := "Dépôts de @" + personne.Username + " — " + strings.Join(noms, ", ")
+	// Un groupe cloisonné doit le rester : le dépôt qu'on crée va d'emblée à
+	// son équipe enseignante.
+	equipe, droit := s.teacherGrant(cours)
 	job := s.jobs.Start("distribution", label, func(job *Job) (any, error) {
 		crees, existants, echecs := 0, 0, 0
 		for index, remise := range remises {
@@ -478,6 +481,7 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 			}
 			executor := runner.New(s.deps.Client, remise.Settings, remise.Bundle)
 			report, err := executor.Run(remise.Items, runner.Options{
+				TeacherTeam: equipe, TeacherPermission: droit,
 				OnProgress: func(_, _ int, result runner.Result) {
 					job.Line(result.Repo+" : "+result.Status, result)
 				},
@@ -1239,11 +1243,17 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 	if body.DryRun {
 		label = "Simulation de « " + cours.ShortName(settings.Assignment) + " »"
 	}
+	// Un groupe cloisonné doit le rester : chaque dépôt créé va d'emblée à son
+	// équipe enseignante, faute de quoi la distribution suivante décloisonnerait
+	// le groupe sans que personne ne s'en aperçoive.
+	equipe, droit := s.teacherGrant(cours)
 	job := s.jobs.Start("distribution", label, func(job *Job) (any, error) {
 		executor := runner.New(s.deps.Client, settings, bundle)
 		report, err := executor.Run(items, runner.Options{
-			DryRun:       body.DryRun,
-			ForceStarter: body.ForceStarter,
+			DryRun:            body.DryRun,
+			ForceStarter:      body.ForceStarter,
+			TeacherTeam:       equipe,
+			TeacherPermission: droit,
 			OnProgress: func(index, total int, result runner.Result) {
 				job.Progress(index, total, result.Repo)
 				job.Line(result.Repo+" : "+result.Status, result)

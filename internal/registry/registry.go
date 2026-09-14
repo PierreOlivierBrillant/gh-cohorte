@@ -245,6 +245,13 @@ func (s *Set) Teachers() []User {
 	return enseignants
 }
 
+// Knows dit si le registre connaît un compte. Un compte qu'il ignore a pu
+// laisser des dépôts sans que personne ne l'ait jamais nommé.
+func (s *Set) Knows(username string) bool {
+	_, connu := s.Find(username)
+	return connu
+}
+
 // Teaches dit si un compte est déclaré enseignant. Un compte inconnu ne
 // l'est pas : le registre est la liste de ce qu'on sait, et ce qu'il ignore
 // n'enseigne pas.

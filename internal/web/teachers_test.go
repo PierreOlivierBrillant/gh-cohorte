@@ -1,0 +1,292 @@
+package web_test
+
+import (
+	"net/http"
+	"strings"
+	"testing"
+)
+
+// ficheRendu est ce que l'API rend pour une personne.
+type ficheRendu struct {
+	User struct {
+		FullName  string   `json:"full_name"`
+		Username  string   `json:"username"`
+		Accounts  []string `json:"accounts"`
+		IsTeacher bool     `json:"is_teacher"`
+		Role      string   `json:"role"`
+		Known     bool     `json:"known"`
+		Repos     int      `json:"repos"`
+		Courses   int      `json:"courses"`
+		Taught    int      `json:"taught"`
+		PushedAt  string   `json:"pushed_at"`
+		Timeline  []struct {
+			Scope       string `json:"scope"`
+			SessionName string `json:"session_name"`
+			Course      string `json:"course"`
+			Group       string `json:"group"`
+			Role        string `json:"role"`
+			Silent      bool   `json:"silent"`
+			PushedAt    string `json:"pushed_at"`
+			Assignments []struct {
+				Name string `json:"name"`
+				Repo string `json:"repo"`
+				URL  string `json:"url"`
+			} `json:"assignments"`
+		} `json:"timeline"`
+	} `json:"user"`
+	Viewer        string `json:"viewer"`
+	ViewerTeaches bool   `json:"viewer_teaches"`
+	Host          string `json:"host"`
+}
+
+func (h *harnais) fiche(compte string) ficheRendu {
+	h.t.Helper()
+	var rendu ficheRendu
+	h.json(http.MethodGet, "/api/users/"+compte, nil, &rendu)
+	return rendu
+}
+
+// chronologie abrège la lecture d'une fiche.
+func chronologie(rendu ficheRendu) string {
+	etapes := make([]string, 0, len(rendu.User.Timeline))
+	for _, etape := range rendu.User.Timeline {
+		etapes = append(etapes, etape.Scope+":"+etape.Role)
+	}
+	return strings.Join(etapes, ",")
+}
+
+// La fiche déroule le passage d'une personne, de la session la plus récente à
+// la plus ancienne, avec les dépôts de chaque cours.
+func TestLaFicheDerouleLePassageDUnePersonne(t *testing.T) {
+	rendu := college(t).fiche("emilie-cote")
+
+	if rendu.User.FullName != "Émilie Côté" {
+		t.Fatalf("fiche = %+v", rendu.User)
+	}
+	if chronologie(rendu) != "h27.5n6.02:étudiant,a26.4w6.01:étudiant,a26.5n6.01:étudiant" {
+		t.Fatalf("chronologie = %s", chronologie(rendu))
+	}
+	if rendu.User.Courses != 3 || rendu.User.Repos != 3 {
+		t.Errorf("cours = %d, dépôts = %d", rendu.User.Courses, rendu.User.Repos)
+	}
+	// Chaque étape se lit sans traduction, et ses dépôts mènent à GitHub.
+	tete := rendu.User.Timeline[0]
+	if tete.SessionName == "" || tete.Group != "02" {
+		t.Errorf("étape = %+v", tete)
+	}
+	if len(tete.Assignments) != 1 || tete.Assignments[0].Name != "tp1" {
+		t.Fatalf("travaux = %+v", tete.Assignments)
+	}
+	if !strings.Contains(tete.Assignments[0].URL, "h27.5n6.02.tp1.emilie-cote") {
+		t.Errorf("adresse du dépôt = %q", tete.Assignments[0].URL)
+	}
+	// La page compose les adresses de profils : l'hôte lui vient d'ici.
+	if rendu.Host == "" {
+		t.Error("la fiche doit dire l'hôte GitHub")
+	}
+}
+
+// Un compte que rien ne connaît rend une fiche vide plutôt qu'une page absente.
+func TestLaFicheDUnCompteInconnuResteUnePage(t *testing.T) {
+	rendu := college(t).fiche("personne-du-tout")
+	if rendu.User.Known || len(rendu.User.Timeline) != 0 {
+		t.Fatalf("fiche = %+v", rendu.User)
+	}
+	if rendu.User.Username != "personne-du-tout" {
+		t.Errorf("compte = %q", rendu.User.Username)
+	}
+}
+
+// --------------------------------------------------------------- cooptation
+
+// coopter abrège la reconnaissance d'un enseignant.
+func (h *harnais) coopter(compte string, enseignant bool) (*http.Response, []byte) {
+	h.t.Helper()
+	return h.requete(http.MethodPost, "/api/users/"+compte+"/role",
+		map[string]any{"is_teacher": enseignant})
+}
+
+// Tant que l'organisation n'a aucun enseignant, quelqu'un doit pouvoir
+// commencer : celui qui a le droit d'écrire dans « .cohorte » est justement
+// celui à qui ce droit a été donné.
+func TestLePremierEnseignantSeDeclare(t *testing.T) {
+	h := college(t)
+
+	reponse, contenu := h.coopter("emilie-cote", true)
+	if reponse.StatusCode != http.StatusOK {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+	if !strings.Contains(string(contenu), `"is_teacher":true`) {
+		t.Fatalf("réponse = %s", contenu)
+	}
+	if fiche := h.fiche("emilie-cote"); !fiche.User.IsTeacher || fiche.User.Role != "enseignant" {
+		t.Errorf("fiche = %+v", fiche.User)
+	}
+}
+
+// Un étudiant ne coopte pas. Ce n'est pas cette vérification qui protège le
+// registre — GitHub lui refuserait l'écriture bien avant —, mais elle dit le
+// refus dans les mots de l'outil.
+func TestUnEtudiantNeCoopte(t *testing.T) {
+	h := college(t)
+	// « prof » regarde, et l'organisation a déjà un enseignant qui n'est pas lui.
+	if reponse, contenu := h.coopter("emilie-cote", true); reponse.StatusCode != http.StatusOK {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+
+	reponse, contenu := h.coopter("jlpicard", true)
+	if reponse.StatusCode == http.StatusOK {
+		t.Fatal("un compte non enseignant ne doit pas pouvoir coopter")
+	}
+	if !strings.Contains(string(contenu), "Seul un enseignant") {
+		t.Errorf("refus = %s", contenu)
+	}
+}
+
+// Retirer le dernier rôle d'enseignant laisserait l'organisation sans personne
+// pour en reconnaître un autre : plus aucune fiche ne pourrait rendre le sien.
+func TestLeDernierEnseignantNeSeRetirePas(t *testing.T) {
+	h := college(t)
+	h.coopter("prof", true)
+
+	reponse, contenu := h.coopter("prof", false)
+	if reponse.StatusCode == http.StatusOK {
+		t.Fatal("retirer le dernier enseignant doit être refusé")
+	}
+	if !strings.Contains(string(contenu), "seul enseignant") {
+		t.Errorf("refus = %s", contenu)
+	}
+}
+
+// ------------------------------------------------------------ cloisonnement
+
+// cloisonnementRendu est l'état de l'équipe enseignante d'un groupe.
+type cloisonnementRendu struct {
+	Scope string `json:"scope"`
+	State struct {
+		Name     string `json:"name"`
+		Slug     string `json:"slug"`
+		Exists   bool   `json:"exists"`
+		Repos    int    `json:"repos"`
+		Teachers []struct {
+			FullName string `json:"full_name"`
+			Username string `json:"username"`
+		} `json:"teachers"`
+	} `json:"state"`
+	Candidates []struct {
+		Username string `json:"username"`
+		Member   bool   `json:"member"`
+	} `json:"candidates"`
+	Notice string `json:"notice"`
+}
+
+func (h *harnais) cloisonnement(scope string) cloisonnementRendu {
+	h.t.Helper()
+	var rendu cloisonnementRendu
+	h.json(http.MethodGet, "/api/classrooms/"+scope+"/teachers", nil, &rendu)
+	return rendu
+}
+
+// Cloisonner un groupe crée son équipe enseignante et lui donne ses dépôts.
+// Elle n'est pas une équipe du groupe : les équipes d'étudiants l'ignorent.
+func TestCloisonnerUnGroupeLuiDonneSonEquipe(t *testing.T) {
+	h := college(t)
+	h.coopter("prof", true)
+
+	avant := h.cloisonnement("a26.5n6.01")
+	if avant.State.Exists {
+		t.Fatal("le groupe ne doit pas être cloisonné d'avance")
+	}
+	if avant.State.Name != "a26.5n6.01.enseignants" || avant.State.Repos != 2 {
+		t.Fatalf("état = %+v", avant.State)
+	}
+	// L'équipe ouvre un accès sans en fermer aucun : le dire est le minimum.
+	if avant.Notice == "" {
+		t.Error("l'état doit dire ce que l'équipe ne ferme pas")
+	}
+	if len(avant.Candidates) != 1 || avant.Candidates[0].Username != "prof" {
+		t.Fatalf("candidats = %+v", avant.Candidates)
+	}
+
+	etat := h.travail(http.MethodPost, "/api/classrooms/a26.5n6.01/teachers",
+		map[string]any{"teachers": []string{"prof"}})
+	if etat["status"] != "terminé" {
+		t.Fatalf("cloisonnement = %+v", etat)
+	}
+
+	apres := h.cloisonnement("a26.5n6.01")
+	if !apres.State.Exists || len(apres.State.Teachers) != 1 {
+		t.Fatalf("état = %+v", apres.State)
+	}
+	if apres.State.Teachers[0].Username != "prof" {
+		t.Errorf("enseignants = %+v", apres.State.Teachers)
+	}
+	// Les dépôts du groupe sont allés à l'équipe — les siens seulement.
+	partages := h.State.TeamRepos["acme/"+apres.State.Slug]
+	if len(partages) != 2 {
+		t.Fatalf("dépôts partagés = %v", partages)
+	}
+	for nom, droit := range partages {
+		if !strings.HasPrefix(nom, "acme/a26.5n6.01.") {
+			t.Errorf("dépôt hors du groupe : %s", nom)
+		}
+		if droit != "admin" {
+			t.Errorf("%s : droit = %q", nom, droit)
+		}
+	}
+}
+
+// On n'inscrit à l'équipe d'un groupe que quelqu'un que le registre déclare
+// enseignant : « is_teacher » ne donne rien, il autorise à donner.
+func TestOnNeCloisonnePasDerriereUnEtudiant(t *testing.T) {
+	h := college(t)
+	h.coopter("prof", true)
+
+	reponse, contenu := h.requete(http.MethodPost,
+		"/api/classrooms/a26.5n6.01/teachers/preview",
+		map[string]any{"teachers": []string{"prof", "emilie-cote"}})
+	if reponse.StatusCode == http.StatusOK {
+		t.Fatal("inscrire un étudiant à l'équipe enseignante doit être refusé")
+	}
+	if !strings.Contains(string(contenu), "emilie-cote") {
+		t.Errorf("refus = %s", contenu)
+	}
+}
+
+// S'exclure soi-même du groupe qu'on cloisonne ferait perdre l'accès sans
+// aucun chemin pour y revenir.
+func TestOnNeSExclutPasDuGroupeQuOnCloisonne(t *testing.T) {
+	h := college(t)
+	h.coopter("prof", true)
+	h.coopter("emilie-cote", true)
+
+	reponse, contenu := h.requete(http.MethodPost,
+		"/api/classrooms/a26.5n6.01/teachers/preview",
+		map[string]any{"teachers": []string{"emilie-cote"}})
+	if reponse.StatusCode == http.StatusOK {
+		t.Fatal("s'exclure du groupe qu'on cloisonne doit être refusé")
+	}
+	if !strings.Contains(string(contenu), "sans pouvoir y revenir") {
+		t.Errorf("refus = %s", contenu)
+	}
+}
+
+// Un cours donné figure dans la chronologie de celui qui l'a donné : c'est ce
+// qui permet de chercher ce qu'un collègue a déjà enseigné.
+func TestUnCoursDonneFigureDansLaFiche(t *testing.T) {
+	h := college(t)
+	h.coopter("prof", true)
+	h.travail(http.MethodPost, "/api/classrooms/a26.5n6.01/teachers",
+		map[string]any{"teachers": []string{"prof"}})
+
+	fiche := h.fiche("prof")
+	if chronologie(fiche) != "a26.5n6.01:enseignant" {
+		t.Fatalf("chronologie = %s", chronologie(fiche))
+	}
+	if fiche.User.Taught != 1 || fiche.User.Courses != 0 {
+		t.Errorf("donnés = %d, suivis = %d", fiche.User.Taught, fiche.User.Courses)
+	}
+	if !fiche.ViewerTeaches {
+		t.Error("celui qui regarde enseigne : la page doit le savoir")
+	}
+}

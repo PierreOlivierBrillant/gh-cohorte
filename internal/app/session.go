@@ -6,13 +6,16 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -504,4 +507,27 @@ func placeholderHint() string {
 		fields = append(fields, "{"+name+"}")
 	}
 	return strings.Join(fields, ", ")
+}
+
+// teacherGrant rend l'équipe enseignante du groupe d'un travail, sous la forme
+// que le runner attend : le slug, et le droit à lui donner.
+//
+// Un groupe non cloisonné n'en a pas, et rien n'est alors accordé. Une lecture
+// qui échoue ne fait pas échouer la distribution : mieux vaut un dépôt créé
+// sans l'accès de l'équipe — que « --cloisonner » redonnera — qu'aucun dépôt.
+func (s *Session) teacherGrant(org, assignmentID string) (string, string) {
+	scope, _, ok := naming.SplitAssignment(assignmentID)
+	if !ok {
+		return "", ""
+	}
+	niveaux := strings.Split(scope, naming.Separator)
+	infos, err := s.Client.LoadOrgTeams(org, s.Options.Jobs)
+	if err != nil {
+		return "", ""
+	}
+	equipe, existe := teams.TeacherTeam(niveaux[0], niveaux[1], niveaux[2], infos)
+	if !existe {
+		return "", ""
+	}
+	return equipe.Slug, classroom.TeacherPermission
 }

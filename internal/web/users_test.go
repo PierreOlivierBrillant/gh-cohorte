@@ -59,7 +59,7 @@ func college(t *testing.T) *harnais {
 func (h *harnais) annuaire(requete string) annuaireRendu {
 	h.t.Helper()
 	var rendu annuaireRendu
-	h.json(http.MethodGet, "/api/students"+requete, nil, &rendu)
+	h.json(http.MethodGet, "/api/users"+requete, nil, &rendu)
 	return rendu
 }
 
@@ -153,7 +153,7 @@ func TestAnnuaireSeFiltreParSessionEtParCours(t *testing.T) {
 
 	// Un critère que le serveur ne peut pas appliquer est refusé, plutôt que
 	// silencieusement ignoré.
-	reponse, contenu := h.requete(http.MethodGet, "/api/students?after=hier", nil)
+	reponse, contenu := h.requete(http.MethodGet, "/api/users?after=hier", nil)
 	if reponse.StatusCode != http.StatusBadRequest {
 		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
 	}
