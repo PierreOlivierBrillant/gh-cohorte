@@ -101,6 +101,9 @@ func fusionner(gauche, droite Row) Row {
 	if gauche.FullName == "" {
 		gauche.FullName = droite.FullName
 	}
+	if gauche.StudentID == "" {
+		gauche.StudentID = droite.StudentID
+	}
 	gauche.Repos = append(gauche.Repos, droite.Repos...)
 	gauche.Enrollments = append(gauche.Enrollments, droite.Enrollments...)
 	if droite.PushedAt > gauche.PushedAt {

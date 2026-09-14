@@ -53,7 +53,10 @@ type Row struct {
 	// Accounts porte tous les comptes de la personne : elle n'en a qu'un le
 	// plus souvent, et parfois deux — celui du collège et le sien.
 	Accounts []string
-	Repos    []Repo
+	// StudentID est le matricule, quand une liste du collège l'a donné. C'est
+	// lui qui a réuni les comptes de cette ligne.
+	StudentID string
+	Repos     []Repo
 	// Enrollments dit les groupes dont la personne est. La liste d'un groupe
 	// n'en porte qu'un ; l'annuaire de l'organisation les rassemble tous.
 	Enrollments []Enrollment
@@ -117,7 +120,7 @@ func Build(cours classroom.Classroom, repos []groups.RepoInfo,
 			}
 		}
 		ligne := compose(identite.FullName, identite.Username(), depots)
-		ligne.Accounts = identite.Accounts
+		ligne.Accounts, ligne.StudentID = identite.Accounts, identite.StudentID
 		ligne.Enrollments = []Enrollment{enrollmentOf(cours, ligne.Repos)}
 		lignes = append(lignes, ligne)
 	}
