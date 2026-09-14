@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -1069,11 +1068,9 @@ func (c *Client) FirstCommit(owner, repo string) (time.Time, error) {
 func (c *Client) commitPage(address string) (time.Time, string, error) {
 	content, link, err := c.fetchPage(address)
 	if err != nil {
-		var echec *Error
 		// Un dépôt vide, ou dont on ne voit pas l'historique, ne dit rien —
 		// et ne devoir rien dire n'est pas un échec.
-		if errors.As(err, &echec) &&
-			(echec.Status == http.StatusConflict || echec.Status == http.StatusNotFound) {
+		if emptyRepo(err) {
 			return time.Time{}, "", nil
 		}
 		return time.Time{}, "", err

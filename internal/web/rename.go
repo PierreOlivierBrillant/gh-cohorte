@@ -121,6 +121,12 @@ func (s *Server) handleRenameAssignment(writer http.ResponseWriter, request *htt
 		if echecs > 0 || job.Canceled() {
 			job.Warn("Les dépôts restés en arrière portent encore « " + avant +
 				" » : relancez le renommage pour les rattraper.")
+		} else if suivie := cours.RenameDue(avant, apres); len(suivie) > 0 {
+			// La date cible suit le travail : elle est rangée au registre sous
+			// son identifiant, et il vient de changer.
+			if _, err := s.registryOf(cours.Org).Apply(echeances(suivie)); err != nil {
+				job.Warn("Date cible non reportée : " + err.Error())
+			}
 		}
 		return map[string]any{
 			"renamed": renommes, "failed": echecs,

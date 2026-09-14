@@ -38,13 +38,13 @@ func (s *Server) placeAt(scope string) (classroom.Classroom, error) {
 	org := s.org()
 	set, _ := s.names(org)
 	if cours, trouve := s.classrooms.Find(org, scope); trouve {
-		return cours.Enrich(set, nil), nil
+		return cours.Scheduling(set).Enrich(set, nil), nil
 	}
 	cours, err := classroom.AtScope(org, scope, classroom.DefaultsFrom(s.Settings()))
 	if err != nil {
 		return cours, err
 	}
-	return cours.Enrich(set, nil), nil
+	return cours.Scheduling(set).Enrich(set, nil), nil
 }
 
 // enrichi verse dans un groupe ce que le registre de l'organisation sait de ses
@@ -55,7 +55,9 @@ func (s *Server) placeAt(scope string) (classroom.Classroom, error) {
 // l'enregistrement ce qui a été déduit plutôt que déclaré.
 func (s *Server) enrichi(cours classroom.Classroom, repos []groups.RepoInfo) classroom.Classroom {
 	set, _ := s.names(cours.Org)
-	return cours.Enrich(set, repos)
+	// Le registre répond aux deux questions qu'un groupe lui pose : qui se
+	// cache derrière un nom de dépôt, et quand chaque travail est attendu.
+	return cours.Scheduling(set).Enrich(set, repos)
 }
 
 // apprendre confie au registre de l'organisation ce qu'on vient d'apprendre
@@ -86,5 +88,21 @@ func (s *Server) apprendre(org string, people ...roster.Person) error {
 // terminal doit voir les mêmes groupes que le navigateur.
 func (s *Server) visibles(org string, repos []groups.RepoInfo) []classroom.Classroom {
 	set, _ := s.names(org)
-	return s.classrooms.Visible(org, repos, classroom.DefaultsFrom(s.Settings()), set)
+	vus := s.classrooms.Visible(org, repos, classroom.DefaultsFrom(s.Settings()), set)
+	for position, cours := range vus {
+		vus[position] = cours.Scheduling(set)
+	}
+	return vus
+}
+
+// echeances traduit ce que le domaine veut faire des dates de remise en une
+// écriture du registre. C'est le seul endroit où les deux vocabulaires se
+// rencontrent : la notion de groupe décrit ses intentions, le registre les
+// écrit, et ni l'un ni l'autre n'a besoin de connaître l'autre paquet.
+func echeances(lignes []classroom.Deadline) registry.Change {
+	travaux := make([]registry.Assignment, 0, len(lignes))
+	for _, ligne := range lignes {
+		travaux = append(travaux, registry.Assignment{ID: ligne.Assignment, Due: ligne.Due})
+	}
+	return registry.Reschedule(travaux...)
 }

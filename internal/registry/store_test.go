@@ -33,6 +33,20 @@ func magasin(t *testing.T, state *fakegh.State) (*registry.Store, *fakegh.Server
 	return registry.New(client, "acme", nil), serveur
 }
 
+// clientDe monte un second client sur le même faux GitHub : c'est ce qu'il
+// faut pour jouer un autre poste, qui ne partage ni mémoire ni cache.
+func clientDe(t *testing.T, serveur *fakegh.Server) *ghapi.Client {
+	t.Helper()
+	client, err := ghapi.New(ghapi.Options{
+		Host: "127.0.0.1", Token: "jeton-de-test", BaseURL: serveur.URL(),
+		Sleep: func(time.Duration) {},
+	})
+	if err != nil {
+		t.Fatalf("New : %v", err)
+	}
+	return client
+}
+
 // Une organisation où l'on n'a rien écrit n'est pas une panne : elle a
 // simplement un registre vide.
 func TestRegistreAbsentSeLitVide(t *testing.T) {

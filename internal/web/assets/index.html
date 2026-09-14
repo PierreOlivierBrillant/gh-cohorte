@@ -455,6 +455,7 @@
         <p class="note" id="travaux-source"></p>
       </div>
       <div class="actions">
+        <button type="button" id="travaux-remises" class="bouton">Relever les remises</button>
         <button type="button" id="travaux-recharger" class="bouton">Recharger</button>
         <button type="button" id="travaux-nouveau" class="bouton vert">Nouveau travail</button>
       </div>
@@ -487,6 +488,8 @@
             aria-controls="detail-menu">Ce travail</button>
           <div class="menu-flottant menu-liste" id="detail-menu" hidden role="menu">
             <button type="button" id="detail-acces" role="menuitem">Inspecter les accès</button>
+            <button type="button" id="detail-remises" role="menuitem">Relever les remises</button>
+            <button type="button" id="detail-echeance" role="menuitem">Date cible…</button>
             <button type="button" id="detail-partager" role="menuitem" hidden>Partager avec les équipes…</button>
             <button type="button" id="detail-renommer" role="menuitem">Renommer ce travail…</button>
             <button type="button" id="detail-deplacer" role="menuitem">Déplacer ce travail…</button>
@@ -545,6 +548,10 @@
             <th data-tri="compte"><button type="button">Dépôt<span class="fleche"></span></button></th>
             <th>Visibilité</th>
             <th data-tri="envoi"><button type="button">Dernier envoi<span class="fleche"></span></button></th>
+            <!-- Les commits ne se lisent pas dans l'inventaire : la colonne
+                 reste vide tant que les historiques n'ont pas été relevés. -->
+            <th>Commits</th>
+            <th>Remise</th>
             <th>Accès</th>
             <th class="etroit"></th>
           </tr>
@@ -583,6 +590,13 @@
           <span class="aide">Chaque dépôt s'appellera
             <code id="apercu-nom">session.cours.groupe.tp1.prenom-nom</code><span
               id="apercu-suite"> — le nom de l'étudiant, pas son compte GitHub.</span></span>
+        </label>
+        <label class="champ-bloc">
+          <span class="etiquette">Date cible</span>
+          <input type="datetime-local" id="travail-echeance" class="champ">
+          <span class="aide">Facultative. Un dépôt dont le dernier commit la dépasse
+            porte une pastille rouge. Elle est écrite dans le registre de
+            l'organisation et se change ensuite depuis le travail.</span>
         </label>
         <label class="champ-bloc">
           <span class="etiquette">Gabarit de description</span>

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
@@ -112,6 +113,18 @@ func (s *Session) names(org string) (*registry.Set, string) {
 		return snapshot.Set, "Registre des étudiants : " + strings.Join(snapshot.Issues, " ; ")
 	}
 	return snapshot.Set, ""
+}
+
+// echeances traduit ce que le domaine veut faire des dates de remise en une
+// écriture du registre. C'est le seul endroit où les deux vocabulaires se
+// rencontrent : la notion de groupe décrit ses intentions, le registre les
+// écrit, et ni l'un ni l'autre n'a besoin de connaître l'autre paquet.
+func echeances(lignes []classroom.Deadline) registry.Change {
+	travaux := make([]registry.Assignment, 0, len(lignes))
+	for _, ligne := range lignes {
+		travaux = append(travaux, registry.Assignment{ID: ligne.Assignment, Due: ligne.Due})
+	}
+	return registry.Reschedule(travaux...)
 }
 
 // apprendre confie au registre de l'organisation ce qu'on vient d'apprendre des

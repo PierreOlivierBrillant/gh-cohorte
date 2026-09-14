@@ -844,6 +844,11 @@ func (s *Session) createTeams() (int, error) {
 			return ExitAborted, nil
 		}
 	}
+	if !s.Options.DryRun {
+		if err := s.retenirEcheance(); err != nil {
+			return ExitOK, err
+		}
+	}
 	return s.execute(items)
 }
 

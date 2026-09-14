@@ -149,11 +149,19 @@ func (s *Server) handleRelocate(writer http.ResponseWriter, request *http.Reques
 			job.Warn("Les listes n'ont pas bougé : tous les dépôts n'ont pas suivi.")
 			return bilan, nil
 		}
+		// Les dates cibles suivent leurs travaux : ce sont les mêmes travaux,
+		// rangés ailleurs, et leur identifiant au registre vient de changer.
+		if suivies := classroom.MoveDue(
+			plan.depart, plan.arrivee, body.Assignments); len(suivies) > 0 {
+			if _, err := s.registryOf(plan.depart.Org).Apply(echeances(suivies)); err != nil {
+				job.Warn("Dates cibles non reportées : " + err.Error())
+			}
+		}
 		if _, err := s.classrooms.Save(plan.arrivee.With(plan.suivent...)); err != nil {
 			return nil, err
 		}
-		// Le groupe de départ n'est réécrit que s'il perd quelqu'un : sinon
-		// on lui inventerait une liste retenue qu'il n'avait pas.
+		// Le groupe de départ n'est réécrit que s'il perd quelqu'un : sinon on
+		// lui inventerait une liste retenue qu'il n'avait pas.
 		if len(plan.quittent) > 0 {
 			if _, err := s.classrooms.Save(
 				plan.depart.Without(comptes(plan.quittent)...)); err != nil {
