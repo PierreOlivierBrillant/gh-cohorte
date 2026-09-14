@@ -149,3 +149,32 @@ func TestMiseEnFormeDunPrefixeSaisi(t *testing.T) {
 		t.Fatal("un niveau vide aurait dû être refusé")
 	}
 }
+
+// L'équipe enseignante d'un groupe suit la nomenclature des autres équipes :
+// c'est sa place qui la rattache à son groupe, et un mot réservé qui la
+// distingue.
+func TestLEquipeEnseignanteSeLitCommeLesAutres(t *testing.T) {
+	nom := naming.TeacherTeamName("a26", "5n6", "01")
+	if nom != "a26.5n6.01.enseignants" {
+		t.Fatalf("nom = %q", nom)
+	}
+	parts, reconnu := naming.ParseTeam(nom)
+	if !reconnu {
+		t.Fatal("l'équipe enseignante doit se relire comme une équipe")
+	}
+	if !naming.IsTeacherTeam(parts) {
+		t.Error("elle doit se reconnaître comme enseignante")
+	}
+	if !naming.TeamBelongs(parts, "a26", "5n6", "01") {
+		t.Error("elle doit appartenir à son groupe")
+	}
+	// Une équipe d'étudiants, elle, n'en est pas une.
+	autre, _ := naming.ParseTeam("a26.5n6.01.eq1")
+	if naming.IsTeacherTeam(autre) {
+		t.Error("« eq1 » n'est pas l'équipe enseignante")
+	}
+	// Deux groupes ont chacun la leur : c'est la place qui les sépare.
+	if naming.TeacherTeamName("a26", "5n6", "02") == nom {
+		t.Error("deux groupes ne peuvent pas partager une équipe enseignante")
+	}
+}

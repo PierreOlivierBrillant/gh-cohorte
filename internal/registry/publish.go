@@ -40,7 +40,7 @@ type Ambiguity struct {
 // Publication est ce qu'une publication ferait, avant qu'elle ne le fasse.
 type Publication struct {
 	// New sont les personnes que le registre ne connaît pas encore.
-	New []Student `json:"new"`
+	New []User `json:"new"`
 	// Renamed sont celles qu'il connaît sous un autre nom.
 	Renamed []Disagreement `json:"renamed"`
 	// Known compte celles qu'il connaît déjà à l'identique.
@@ -80,7 +80,7 @@ func Plan(set *Set, people []roster.Person) Publication {
 			})
 		}
 
-		fiche := Student{Username: compte, FullName: noms[0], Slugs: slugsOf(noms)}
+		fiche := User{Username: compte, FullName: noms[0], Slugs: slugsOf(noms)}
 		connue, connu := set.Find(compte)
 		switch {
 		case !connu:
@@ -156,7 +156,7 @@ func (p Publication) Apply(local bool) Change {
 	change := Change{Reason: p.message(local)}
 	change.Learn = append(change.Learn, p.New...)
 	for _, desaccord := range p.Renamed {
-		fiche := Student{
+		fiche := User{
 			Username: desaccord.Username,
 			Slugs:    slugsOf([]string{desaccord.Registry, desaccord.Local}),
 		}

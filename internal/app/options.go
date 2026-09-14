@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -24,9 +24,27 @@ type Options struct {
 	Org             string
 	Manage          string // vide = choisir le groupe dans la liste
 	ManageRequested bool
-	// StudentsRequested ouvre l'annuaire : les étudiants de l'organisation
+	// StudentsRequested ouvre l'annuaire : les utilisateurs de l'organisation
 	// entière, avec les cours que chacun a suivis.
 	StudentsRequested bool
+	// User ouvre la fiche d'un compte : son rôle, ses comptes, et la
+	// chronologie de son passage — cours suivis et cours donnés mêlés.
+	User string
+	// FullName donne son nom complet au compte visé par User. Il ne renomme
+	// aucun dépôt : le slug qu'il produit s'ajoute à ceux que la personne
+	// portait déjà, et ce qui existe reste à elle.
+	FullName string
+	// Teacher reconnaît le compte visé comme enseignant, ou l'en défait.
+	// TeacherSet distingue « drapeau absent » de « --teacher=false » : sans
+	// lui, la fiche se contente de s'afficher.
+	Teacher    bool
+	TeacherSet bool
+	// Teachers est la composition exacte de l'équipe enseignante du groupe
+	// géré, comptes séparés par des virgules. TeachersOn distingue le drapeau
+	// absent — qui ne fait qu'afficher le cloisonnement — d'une liste vide,
+	// qui retire tout le monde.
+	Teachers   []string
+	TeachersOn bool
 	// Import reprend des dépôts nommés autrement — « travail-compte », ce que
 	// GitHub Classroom produit — et les fait entrer dans la nomenclature. Sans
 	// valeur, il montre les travaux que ces dépôts dessinent.
@@ -59,8 +77,8 @@ type Options struct {
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
-	Filter     students.Filter
-	Sort       students.Key
+	Filter     users.Filter
+	Sort       users.Key
 	SortDesc   bool
 	Assignment string
 	// Teams dit que le travail se distribue aux équipes : un dépôt par équipe
@@ -151,7 +169,12 @@ Utilisation :
   gh cohorte                                  interface graphique dans le navigateur
   gh cohorte --cli                            assistant interactif au terminal
   gh cohorte --manage tp1                     gérer le groupe « tp1 »
-  gh cohorte --students --session a26         étudiants de la session a26
+  gh cohorte --students --session a26         utilisateurs de la session a26
+  gh cohorte --students --role enseignant     les enseignants de l'organisation
+  gh cohorte --user ecote                     la fiche de @ecote et son passage
+  gh cohorte --user jdupont --teacher         reconnaître @jdupont comme enseignant
+  gh cohorte --user aleksilepaj --full-name "Aleksi Lepaj"
+  gh cohorte --manage a26.5n6.01 --teachers "prof,jdupont" -y
   gh cohorte --import                         reprendre des dépôts nommés autrement
   gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
   gh cohorte --import projet --teams --into a26.5n6.01 -y
@@ -170,13 +193,19 @@ Utilisation :
 Drapeaux :
   --org ORG                organisation GitHub cible
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
-  --students               lister les étudiants de l'organisation et ce qu'ils ont suivi
+  --students               lister les utilisateurs de l'organisation et ce qu'ils ont suivi
+  --user COMPTE            fiche d'un utilisateur : son rôle, ses comptes, son passage
+  --full-name NOM          donner son nom complet au compte de --user (ne renomme aucun dépôt)
+  --teacher[=false]        reconnaître le compte de --user comme enseignant, ou l'en défaire
+  --teachers COMPTES       composition de l'équipe enseignante du groupe de --manage ;
+                           elle reçoit ses dépôts, et elle seule les voit
   --import [TRAVAIL]       reprendre des dépôts « travail-compte » ; vide, les lister
   --into PLACE             place d'arrivée d'une importation (« a26.5n6.1030 »)
   --publish-registry       verser au registre de l'organisation les noms de ce poste
   --prefer-local           en cas de désaccord, garder le nom de ce poste
   --registry-team EQUIPE   donner à une équipe accès au registre
   --forget-registry-history  réécrire le registre sans son historique
+  --role enseignant|étudiant  ne lister que les enseignants, ou que les étudiants
   --session COURT          ne lister que les étudiants d'une session (« a26 »)
   --course SIGLE           ne lister que les étudiants d'un cours (« 5n6 »)
   --filter TEXTE           ne lister que les dépôts dont le nom ou le compte contient TEXTE
@@ -267,7 +296,14 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 
 	set.StringVar(&options.Org, "org", "", "organisation GitHub cible")
 	set.BoolVar(&options.StudentsRequested, "students", false,
-		"lister les étudiants de l'organisation")
+		"lister les utilisateurs de l'organisation")
+	set.StringVar(&options.User, "user", "", "ouvrir la fiche d'un compte")
+	set.StringVar(&options.FullName, "full-name", "",
+		"donner son nom complet au compte de --user")
+	enseignant := set.String("teacher", unset,
+		"reconnaître le compte visé comme enseignant (--teacher=false le retire)")
+	enseignants := set.String("teachers", unset,
+		"composition de l'équipe enseignante du groupe, séparée par des virgules")
 	set.BoolVar(&options.PublishRegistry, "publish-registry", false,
 		"verser au registre les noms de ce poste")
 	set.BoolVar(&options.PreferLocal, "prefer-local", false,
@@ -276,6 +312,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"réécrire le registre sans son historique")
 	set.StringVar(&options.RegistryTeam, "registry-team", "",
 		"donner à une équipe accès au registre")
+	role := set.String("role", "", "ne lister qu'un rôle : enseignant ou étudiant")
 	session := set.String("session", "", "ne lister qu'une session")
 	sigle := set.String("course", "", "ne lister qu'un cours")
 	filtre := set.String("filter", "", "ne lister que les dépôts correspondants")
@@ -346,19 +383,19 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 
 	// Les critères de liste sont validés ici : une date mal écrite doit
 	// arrêter la ligne de commande, pas se perdre en cours de route.
-	options.Filter = students.Filter{
+	options.Filter = users.Filter{
 		Text: *filtre, PushedAfter: *apres, PushedBefore: *avant,
-		Session: *session, Course: *sigle,
+		Session: *session, Course: *sigle, Role: users.Role(*role),
 	}
 	if *muets {
-		options.Filter.Activity = students.Silent
+		options.Filter.Activity = users.Silent
 	}
 	filtreValide, err := options.Filter.Validate()
 	if err != nil {
 		return nil, err
 	}
 	options.Filter = filtreValide
-	if options.Sort, err = students.ParseKey(*tri); err != nil {
+	if options.Sort, err = users.ParseKey(*tri); err != nil {
 		return nil, err
 	}
 
@@ -370,6 +407,16 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	if *membres != unset {
 		options.TeamMembersOn = true
 		options.TeamMembers = splitList(*membres)
+	}
+	// « --teacher » sans valeur vaut « oui » : c'est la forme d'un booléen au
+	// terminal, et c'est le geste courant. « --teacher=false » retire le rôle.
+	if *enseignant != unset {
+		options.TeacherSet = true
+		options.Teacher = *enseignant == "" || strings.EqualFold(*enseignant, "true")
+	}
+	if *enseignants != unset {
+		options.TeachersOn = true
+		options.Teachers = splitList(*enseignants)
 	}
 
 	if *manage != unset {
@@ -454,9 +501,14 @@ func translateFlagError(err error) error {
 // normalizeArgs permet d'écrire « --manage tp1 » comme « --manage=tp1 », et
 // « --manage » seul comme « --manage= ». Le paquet flag ne sait pas gérer seul
 // un drapeau dont la valeur est facultative.
+//
+// « --teacher » en relève aussi : c'est un booléen à trois états — absent, oui,
+// non — et « --teacher » seul doit valoir oui, comme n'importe quel booléen au
+// terminal, sans qu'on perde la possibilité d'écrire « --teacher=false ».
 func normalizeArgs(args []string) []string {
 	optional := map[string]bool{
 		"-manage": true, "--manage": true, "-import": true, "--import": true,
+		"-teacher": true, "--teacher": true,
 	}
 	normalized := make([]string, 0, len(args))
 	for index := 0; index < len(args); index++ {

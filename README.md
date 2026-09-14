@@ -162,16 +162,24 @@ dernier niveau nomme, et rien n'est déclaré ailleurs.
 se lisent dans le nom des dépôts : un groupe n'a rien à déclarer pour exister.
 
 Le dernier niveau, lui, est un nom slugifié — rien n'y dit à quel compte il
-appartient. C'est ce que retient le **registre** : un dépôt privé
-`.cohorte` de l'organisation, un nom complet par compte, écrit une fois pour
-tout le monde. Vos collègues voient donc les mêmes noms que vous sans
-rien avoir déclaré, et corriger une orthographe ne détache pas les dépôts créés
-sous l'ancienne. Les noms déjà accumulés sur un poste s'y versent en une fois
-(`gh cohorte --publish-registry`). Le registre porte aussi la **date de remise**
-de chaque travail, que rien dans un nom de dépôt ne peut dire : une échéance
-fixée sur un poste vaut pour l'équipe entière. Le fichier local ne garde plus
-que ce qui n'a de sens que sur cette machine : les groupes déclarés ici, et les
-réglages du dernier travail.
+appartient. C'est ce que retient le **registre** : un dépôt privé `.cohorte` de
+l'organisation, un nom complet par compte et le rôle tenu — étudiant ou
+enseignant —, écrit une fois pour tout le monde. Vos collègues voient donc les
+mêmes noms que vous sans rien avoir déclaré, et corriger une orthographe ne
+détache pas les dépôts créés sous l'ancienne. Les noms déjà accumulés sur un
+poste s'y versent en une fois (`gh cohorte --publish-registry`). Le registre
+porte aussi la **date de remise** de chaque travail, que rien dans un nom de
+dépôt ne peut dire : une échéance fixée sur un poste vaut pour l'équipe entière.
+Le fichier local ne garde plus que ce qui n'a de sens que sur cette machine :
+les groupes déclarés ici, et les réglages du dernier travail.
+
+**Deux enseignants ne voient pas les étudiants l'un de l'autre.** Un groupe peut
+porter une équipe `a26.5n6.01.enseignants`, qui reçoit ses dépôts : ceux qui n'en
+sont pas ne les voient pas. Le registre dit *qui* enseigne, l'équipe dit *où* —
+et c'est l'équipe, jamais le registre, qui ouvre l'accès. Une équipe ouvre un
+accès sans en fermer aucun : pour que le cloisonnement tienne, les enseignants
+doivent être membres de l'organisation et non propriétaires, et sa permission de
+base doit être `none`.
 
 Un groupe se déplace d'une place à l'autre — une autre session, un autre cours,
 un autre numéro — en renommant ses dépôts, avec un aperçu avant écriture.
@@ -287,8 +295,8 @@ dépôts git locaux (`file://`) : rien ne sort de la machine.
 La logique vit dans les paquets du domaine — `internal/naming` (la
 nomenclature), `internal/classroom` (les groupes), `internal/teams` (les
 équipes), `internal/registry` (le
-registre des étudiants), `internal/plan`, `internal/groups`, `internal/roster`,
-`internal/students`, `internal/runner`, `internal/clone` — et les trois
+registre des utilisateurs), `internal/plan`, `internal/groups`, `internal/roster`,
+`internal/users`, `internal/runner`, `internal/clone` — et les trois
 interfaces (`internal/web`, `internal/app`) n'en sont que des façades. C'est ce
 qui garantit qu'elles ne divergent pas.
 [`CLAUDE.md`](CLAUDE.md) énonce les règles à ne pas perdre de vue.

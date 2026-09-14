@@ -19,9 +19,9 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -38,6 +38,7 @@ var manageMenu = ui.Options(
 	"echeance", "Fixer la date cible de ce travail",
 	"renommer", "Renommer ce travail",
 	"deplacer", "Déplacer ce travail vers un groupe",
+	"enseignants", "Régler l'équipe enseignante du groupe",
 	"filtrer", "Filtrer ou trier la liste",
 	"rafraichir", "Recharger la liste",
 	"changer", "Changer de groupe",
@@ -55,8 +56,8 @@ type manageSession struct {
 	// Ce que la liste montre et dans quel ordre. Les actions, elles,
 	// continuent de travailler sur le groupe entier : filtrer sert à choisir,
 	// pas à faire oublier des dépôts.
-	filter   students.Filter
-	sortKey  students.Key
+	filter   users.Filter
+	sortKey  users.Key
 	sortDesc bool
 	// Les équipes du groupe, lues une fois : elles disent à qui un dépôt
 	// d'équipe est destiné, et la liste s'affiche trop souvent pour les
@@ -240,7 +241,7 @@ func (m *manageSession) visible(group *groups.Group) []groups.Repo {
 	for _, repo := range group.Repos {
 		parNom[repo.Name] = repo
 	}
-	lignes := students.Apply(students.FromGroup(*group, m.names(group)),
+	lignes := users.Apply(users.FromGroup(*group, m.names(group)),
 		m.filter, m.sortKey, m.sortDesc)
 
 	retenus := make([]groups.Repo, 0, len(lignes))
@@ -268,15 +269,15 @@ func (m *manageSession) criteria() string {
 	if m.filter.PushedBefore != "" {
 		parts = append(parts, "envoi avant le "+m.filter.PushedBefore)
 	}
-	if m.filter.Activity == students.Silent {
+	if m.filter.Activity == users.Silent {
 		parts = append(parts, "aucun envoi")
 	}
 	sens := "croissant"
 	if m.sortDesc {
 		sens = "décroissant"
 	}
-	tri := map[students.Key]string{
-		students.ByName: "nom", students.ByUsername: "compte", students.ByPushed: "dernier envoi",
+	tri := map[users.Key]string{
+		users.ByName: "nom", users.ByUsername: "compte", users.ByPushed: "dernier envoi",
 	}[m.sortKey]
 	if tri == "" {
 		tri = "nom"
@@ -397,9 +398,9 @@ var filterMenu = ui.Options(
 
 // Colonnes de tri proposées.
 var sortMenu = ui.Options(
-	string(students.ByName), "Nom complet",
-	string(students.ByUsername), "Compte GitHub",
-	string(students.ByPushed), "Dernier envoi",
+	string(users.ByName), "Nom complet",
+	string(users.ByUsername), "Compte GitHub",
+	string(users.ByPushed), "Dernier envoi",
 )
 
 // filtrer règle ce que la liste montre et comment elle est ordonnée. Ce que
@@ -416,8 +417,8 @@ func (m *manageSession) filtrer(group *groups.Group) error {
 		case "retour":
 			return nil
 		case "vider":
-			m.filter = students.Filter{}
-			m.sortKey, m.sortDesc = students.ByName, false
+			m.filter = users.Filter{}
+			m.sortKey, m.sortDesc = users.ByName, false
 		case "chercher":
 			texte, err := m.session.Prompt.Ask(ui.Question{
 				Title:      "Nom ou compte (vide pour tout afficher)",
@@ -434,10 +435,10 @@ func (m *manageSession) filtrer(group *groups.Group) error {
 			}
 		case "muets":
 			// Un seul état à basculer : ou bien tout, ou bien ce qui n'a rien reçu.
-			if m.filter.Activity == students.Silent {
-				m.filter.Activity = students.AnyActivity
+			if m.filter.Activity == users.Silent {
+				m.filter.Activity = users.AnyActivity
 			} else {
-				m.filter.Activity = students.Silent
+				m.filter.Activity = users.Silent
 			}
 		case "tri":
 			if err := m.askSort(); err != nil {
@@ -462,7 +463,7 @@ func (m *manageSession) askDate(borne string) error {
 	date, err := m.session.Prompt.Ask(ui.Question{
 		Title: titre, Default: courant, AllowEmpty: true,
 		Validate: func(value string) (string, error) {
-			return students.ParseDate(value, "Dernier envoi")
+			return users.ParseDate(value, "Dernier envoi")
 		},
 	})
 	if err != nil {
@@ -482,12 +483,12 @@ func (m *manageSession) askSort() error {
 	if err != nil {
 		return err
 	}
-	key, err := students.ParseKey(choix)
+	key, err := users.ParseKey(choix)
 	if err != nil {
 		return err
 	}
 	decroissant, err := m.session.Prompt.Confirm("Du plus grand au plus petit ?",
-		key == students.ByPushed)
+		key == users.ByPushed)
 	if err != nil {
 		return err
 	}
@@ -1501,6 +1502,11 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return err
 	case "deplacer":
 		_, err := m.relocate(group)
+		return err
+	case "enseignants":
+		// Le groupe géré se désigne par son préfixe, et l'équipe enseignante
+		// appartient à ce groupe-là.
+		_, err := m.session.teachingMode(group.Prefix)
 		return err
 	case "filtrer":
 		return m.filtrer(group)

@@ -13,7 +13,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/students"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
 
 // groupe prépare une organisation contenant un groupe de dépôts déjà créés.
@@ -69,7 +69,7 @@ func TestGestionListeFiltreeEtTriee(t *testing.T) {
 	}
 
 	h := gestion(t, state, "tp1")
-	h.Options.Filter = students.Filter{PushedAfter: "2026-10-01"}
+	h.Options.Filter = users.Filter{PushedAfter: "2026-10-01"}
 	if code, _ := h.script("quitter"); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
@@ -79,7 +79,7 @@ func TestGestionListeFiltreeEtTriee(t *testing.T) {
 	// Les dépôts sans aucun envoi se retrouvent à part : une borne ne les
 	// range ni avant ni après.
 	muet := gestion(t, state, "tp1")
-	muet.Options.Filter = students.Filter{Activity: students.Silent}
+	muet.Options.Filter = users.Filter{Activity: users.Silent}
 	if code, _ := muet.script("quitter"); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, muet.texte())
 	}

@@ -185,10 +185,15 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/orgs", s.handleOrgs)
 	mux.HandleFunc("GET /api/orgs/{org}", s.handleOrg)
 
-	// --- étudiants de l'organisation
+	// --- utilisateurs de l'organisation
 	// L'annuaire traverse les groupes : une personne y a une seule ligne, quels
-	// que soient les cours et les sessions qu'elle a suivis.
-	mux.HandleFunc("GET /api/students", s.handleDirectory)
+	// que soient les cours et les sessions qu'elle a suivis. La fiche, elle,
+	// prend une personne et déroule tout son passage — cours suivis et cours
+	// donnés mêlés.
+	mux.HandleFunc("GET /api/users", s.handleDirectory)
+	mux.HandleFunc("GET /api/users/{account}", s.handleUser)
+	mux.HandleFunc("POST /api/users/{account}/role", s.handleUserRole)
+	mux.HandleFunc("PUT /api/users/{account}/name", s.handleUserName)
 
 	// --- groupes
 	// Un groupe se désigne par sa place — « a26.5n6.1010 » —, celle-là même qui
@@ -217,6 +222,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{scope}/teams/{team}/members", s.handleComposeTeam)
 	mux.HandleFunc("DELETE /api/classrooms/{scope}/teams/{team}/members/{login}", s.handleLeaveTeam)
 	mux.HandleFunc("POST /api/classrooms/{scope}/teams/{team}/move", s.handleMoveTeam)
+	// --- équipe enseignante du groupe
+	// Elle n'est pas une équipe du groupe : on ne lui distribue rien, elle
+	// reçoit l'accès à ses dépôts. C'est elle qui cloisonne.
+	mux.HandleFunc("GET /api/classrooms/{scope}/teachers", s.handleTeaching)
+	mux.HandleFunc("POST /api/classrooms/{scope}/teachers/preview", s.handleTeachingPreview)
+	mux.HandleFunc("POST /api/classrooms/{scope}/teachers", s.handleTeachingApply)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments", s.handleCreateAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/preview", s.handlePreviewAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/move/preview", s.handleRelocatePreview)

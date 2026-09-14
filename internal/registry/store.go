@@ -31,7 +31,7 @@ import (
 const Attempts = 5
 
 // Description est ce que le dépôt du registre annonce sur github.com.
-const Description = "Registre des étudiants — gh cohorte. Privé : contient des renseignements personnels."
+const Description = "Registre des utilisateurs — gh cohorte. Privé : contient des renseignements personnels."
 
 // step nomme l'étape qui a échoué, sans perdre l'erreur d'origine : son statut
 // HTTP et la portée qui lui manque servent encore en aval.
@@ -93,7 +93,7 @@ type Snapshot struct {
 // en garder une seule obligerait à relire l'autre pour rien.
 type keptSet struct {
 	Head        string       `json:"head"`
-	Students    []Student    `json:"students"`
+	Users       []User       `json:"users"`
 	Assignments []Assignment `json:"assignments,omitempty"`
 }
 
@@ -135,12 +135,12 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 		return garde, nil
 	}
 	// Les deux fichiers sont lus au même commit : ce qu'on apprend des
-	// personnes et ce qu'on apprend des échéances doit décrire le même instant.
-	// Un fichier absent n'est pas une panne — une organisation où l'on n'a
-	// jamais daté de travail n'a pas de « travaux.json ».
-	etudiants, err := s.client.ReadFile(s.org, RepoName, StudentsFile, head)
+	// utilisateurs et ce qu'on apprend des échéances doit décrire le même
+	// instant. Un fichier absent n'est pas une panne — une organisation où
+	// l'on n'a jamais daté de travail n'a pas de « travaux.json ».
+	utilisateurs, err := s.client.ReadFile(s.org, RepoName, UsersFile, head)
 	if err != nil {
-		return Snapshot{}, s.step("lecture du fichier "+StudentsFile, err)
+		return Snapshot{}, s.step("lecture du fichier "+UsersFile, err)
 	}
 	travaux, err := s.client.ReadFile(s.org, RepoName, AssignmentsFile, head)
 	if err != nil {
@@ -148,10 +148,10 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 	}
 
 	var soucis []string
-	var fiches []Student
+	var fiches []User
 	var dates []Assignment
-	if etudiants != nil {
-		lu, ennuis := Decode(etudiants.Content)
+	if utilisateurs != nil {
+		lu, ennuis := Decode(utilisateurs.Content)
 		fiches, soucis = lu.All(), append(soucis, ennuis...)
 	}
 	if travaux != nil {
@@ -160,7 +160,7 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 	}
 	set := newSet(fiches, dates)
 	s.keep(head, set)
-	return Snapshot{Set: set, Head: head, Issues: soucis, Seeded: etudiants != nil}, nil
+	return Snapshot{Set: set, Head: head, Issues: soucis, Seeded: utilisateurs != nil}, nil
 }
 
 // kept relit ce que le disque retient du registre.
@@ -173,7 +173,7 @@ func (s *Store) kept() (Snapshot, bool) {
 		return Snapshot{}, false
 	}
 	return Snapshot{
-		Set:  newSet(garde.Students, garde.Assignments),
+		Set:  newSet(garde.Users, garde.Assignments),
 		Head: garde.Head,
 	}, true
 }
@@ -184,7 +184,7 @@ func (s *Store) keep(head string, set *Set) {
 		return
 	}
 	s.local.Set(cache.RegistryKey(s.org), keptSet{
-		Head: head, Students: set.All(), Assignments: set.Assignments(),
+		Head: head, Users: set.All(), Assignments: set.Assignments(),
 	})
 }
 
@@ -256,7 +256,7 @@ func (s *Store) commit(set *Set, snapshot Snapshot, message string) (string, err
 	// du parent : un fichier qu'on ne lui donne pas reste tel quel, et
 	// l'historique du registre dit alors ce qui a changé plutôt que ce qui a
 	// été touché — c'est sur github.com qu'on viendra le relire.
-	etudiants, err := set.Encode()
+	utilisateurs, err := set.Encode()
 	if err != nil {
 		return "", err
 	}
@@ -266,9 +266,9 @@ func (s *Store) commit(set *Set, snapshot Snapshot, message string) (string, err
 	}
 	// Un registre pas encore amorcé reçoit son fichier même vide : c'est lui
 	// qui fait du dépôt un registre, et le README qui l'accompagne l'explique.
-	if !snapshot.Seeded || !bytes.Equal(etudiants, precedents) {
+	if !snapshot.Seeded || !bytes.Equal(utilisateurs, precedents) {
 		fichiers = append(fichiers, ghapi.PushFile{
-			Path: StudentsFile, Mode: "100644", Content: etudiants})
+			Path: UsersFile, Mode: "100644", Content: utilisateurs})
 	}
 
 	travaux, err := encodeAssignments(set.Assignments())

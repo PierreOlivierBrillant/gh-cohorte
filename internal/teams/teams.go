@@ -21,6 +21,13 @@
 // Les étudiants y sont inscrits comme simples membres, jamais comme
 // responsables : un membre ne peut ni renommer son équipe, ni en changer la
 // description, ni en faire sortir quelqu'un.
+//
+// Un groupe porte en plus une équipe d'un autre genre : « a26.5n6.01.enseignants ».
+// Elle ne reçoit pas de travail — elle reçoit l'accès à tous les dépôts du
+// groupe, et c'est elle qui cloisonne. Deux enseignants d'un même cours ont
+// chacun leur groupe et chacun leur équipe ; celui qui n'est pas dans l'équipe
+// de l'autre ne voit pas ses étudiants. Le registre dit qui enseigne, l'équipe
+// dit où : c'est l'équipe qui décide de l'accès, jamais le registre.
 package teams
 
 import (
@@ -28,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
 // Privacy est la visibilité donnée aux équipes créées par l'outil. « closed »
@@ -115,12 +123,18 @@ func Read(info Info) (Team, bool) {
 	}, true
 }
 
-// In retient les équipes d'un groupe, classées par nom court.
+// In retient les équipes d'étudiants d'un groupe, classées par nom court.
+//
+// L'équipe enseignante en est écartée. Elle porte le même genre de nom et vit
+// dans la même organisation, mais elle n'est pas une équipe du groupe au sens
+// où l'entend le reste de l'outil : on ne lui distribue pas de travail, elle
+// ne compte pas dans « combien d'équipes », et personne n'y est placé depuis
+// la liste. « TeacherTeam » est le seul chemin qui y mène.
 func In(session, course, group string, infos []Info) []Team {
 	retenues := make([]Team, 0, len(infos))
 	for _, info := range infos {
 		equipe, reconnue := Read(info)
-		if !reconnue {
+		if !reconnue || equipe.Teaching() {
 			continue
 		}
 		if !naming.TeamBelongs(naming.TeamParts{
@@ -183,10 +197,57 @@ func Names(list []Team) []string {
 	return noms
 }
 
-// ShortName valide le nom court d'une équipe. Il est slugifié comme les autres
-// niveaux du nom : le point y reste réservé à la séparation.
+// ShortName valide le nom court d'une équipe d'étudiants. Il est slugifié
+// comme les autres niveaux du nom : le point y reste réservé à la séparation.
+//
+// « enseignants » est refusé : c'est le nom court de l'équipe enseignante du
+// groupe, et une équipe d'étudiants qui le porterait lui prendrait sa place —
+// l'organisation n'accepte qu'un nom d'équipe donné. Le dire au moment où l'on
+// nomme vaut mieux qu'un échec de GitHub quelques écrans plus loin.
 func ShortName(value string) (string, error) {
-	return naming.Fragment(value, "Nom de l'équipe")
+	short, err := naming.Fragment(value, "Nom de l'équipe")
+	if err != nil {
+		return "", err
+	}
+	if strings.EqualFold(short, naming.TeacherTeam) {
+		return "", valid.Errorf(
+			"Nom de l'équipe : « %s » est réservé à l'équipe enseignante du groupe.",
+			naming.TeacherTeam)
+	}
+	return short, nil
+}
+
+// --------------------------------------------------- équipe enseignante
+
+// Teaching dit que l'équipe est celle qui enseigne le groupe, et non une
+// équipe d'étudiants.
+func (t Team) Teaching() bool {
+	return naming.IsTeacherTeam(naming.TeamParts{Team: t.Short})
+}
+
+// TeacherTeam retrouve l'équipe enseignante d'un groupe parmi celles de
+// l'organisation. Son absence n'est pas une panne : un groupe créé avant que
+// l'outil ne sache les cloisonner n'en a pas, et tout ce qui le concerne
+// continue de fonctionner — sans cloisonnement, simplement.
+func TeacherTeam(session, course, group string, infos []Info) (Team, bool) {
+	for _, info := range infos {
+		equipe, reconnue := Read(info)
+		if !reconnue || !equipe.Teaching() {
+			continue
+		}
+		if naming.TeamBelongs(naming.TeamParts{
+			Session: equipe.Session, Course: equipe.Course, Group: equipe.Group,
+		}, session, course, group) {
+			return equipe, true
+		}
+	}
+	return Team{}, false
+}
+
+// DescribeTeachers compose la description de l'équipe enseignante sur GitHub.
+func DescribeTeachers(session, course, group string) string {
+	return "Enseignants du groupe " + group + ", " + strings.ToUpper(course) +
+		", " + naming.SessionLabel(session) + " — accès à ses dépôts (gh cohorte)"
 }
 
 // Describe compose la description déposée sur GitHub. Elle ne sert qu'à qui lit

@@ -163,7 +163,7 @@ func TestImportationParLInterfaceWeb(t *testing.T) {
 		t.Fatalf("un travail non demandé a bougé : %v", noms)
 	}
 	// Les noms sont montés au registre.
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	if !strings.Contains(contenu, "Laurent Adam-Larocque") {
 		t.Fatalf("registre =\n%s", contenu)
 	}

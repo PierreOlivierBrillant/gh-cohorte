@@ -107,8 +107,8 @@ func TestChaqueSectionAUnFichierEtNeTouchePasLAutre(t *testing.T) {
 	fichiers := serveur.State.Files("acme/"+registry.RepoName, registry.Branch)
 	// Le fichier des étudiants n'a pas bougé, et il est toujours là : « Push
 	// FilesOnto » superpose sur l'arbre du parent.
-	if !strings.Contains(string(fichiers[registry.StudentsFile]), "ecote") {
-		t.Errorf("le nom a disparu en fixant une date :\n%s", fichiers[registry.StudentsFile])
+	if !strings.Contains(string(fichiers[registry.UsersFile]), "ecote") {
+		t.Errorf("le nom a disparu en fixant une date :\n%s", fichiers[registry.UsersFile])
 	}
 	if !strings.Contains(string(fichiers[registry.AssignmentsFile]), "a26.5n6.01.tp1") {
 		t.Errorf("la date n'est pas écrite :\n%s", fichiers[registry.AssignmentsFile])

@@ -46,10 +46,10 @@ func TestUnCollegueVoitLesNomsSansRienAvoirDeclare(t *testing.T) {
 	collegue := autreMachine(t, state)
 	annuaire := collegue.annuaire("")
 	if annuaire.Total != 2 {
-		t.Fatalf("%d personne(s) vue(s) par le collègue : %+v", annuaire.Total, annuaire.Students)
+		t.Fatalf("%d personne(s) vue(s) par le collègue : %+v", annuaire.Total, annuaire.Users)
 	}
 	noms := map[string]string{}
-	for _, ligne := range annuaire.Students {
+	for _, ligne := range annuaire.Users {
 		noms[ligne.Username] = ligne.FullName
 	}
 	if noms["emilie-cote"] != "Émilie Côté" || noms["jlpicard"] != "Jean-Luc Picard" {
@@ -203,15 +203,15 @@ func TestUnNomCorrigeVautPourToutLeMondeSansOrphelinerLesDepots(t *testing.T) {
 	collegue := autreMachine(t, state)
 	annuaire := collegue.annuaire("")
 	if annuaire.Total != 1 {
-		t.Fatalf("annuaire = %+v", annuaire.Students)
+		t.Fatalf("annuaire = %+v", annuaire.Users)
 	}
-	if annuaire.Students[0].FullName != "Émilie Côté" {
-		t.Fatalf("nom = %q", annuaire.Students[0].FullName)
+	if annuaire.Users[0].FullName != "Émilie Côté" {
+		t.Fatalf("nom = %q", annuaire.Users[0].FullName)
 	}
 	// Le dépôt porte encore l'ancien slug, et reste pourtant le sien.
-	if annuaire.Students[0].Repos != 1 || annuaire.Unmatched != 0 {
+	if annuaire.Users[0].Repos != 1 || annuaire.Unmatched != 0 {
 		t.Fatalf("le dépôt sous l'ancien slug s'est détaché : %d dépôt(s), %d orphelin(s)",
-			annuaire.Students[0].Repos, annuaire.Unmatched)
+			annuaire.Users[0].Repos, annuaire.Unmatched)
 	}
 }
 
@@ -278,7 +278,7 @@ func TestPublicationParLInterfaceWeb(t *testing.T) {
 	if vue.Published != 1 || vue.Total != 0 || vue.RegistrySize != 1 {
 		t.Fatalf("publication = %+v", vue)
 	}
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	if !strings.Contains(contenu, "Émilie Côté") {
 		t.Fatalf("registre =\n%s", contenu)
 	}
@@ -304,7 +304,7 @@ func TestLeDesaccordSeTrancheALaDemande(t *testing.T) {
 	state := fakegh.NewState()
 	state.AddRepo("acme", registry.RepoName, true)
 	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
-		registry.StudentsFile: `{"version":1,"students":[` +
+		registry.UsersFile: `{"version":1,"students":[` +
 			`{"username":"emilie-cote","full_name":"Émilie Côté","slugs":["emilie-cote"]}]}`,
 	}, registry.Branch)
 
@@ -317,7 +317,7 @@ func TestLeDesaccordSeTrancheALaDemande(t *testing.T) {
 	}
 
 	h.json(http.MethodPost, "/api/orgs/acme/registry", map[string]any{"prefer_local": true}, nil)
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	if !strings.Contains(contenu, `"Emilie Cote"`) {
 		t.Fatalf("le nom du poste n'a pas été repris :\n%s", contenu)
 	}
@@ -382,7 +382,7 @@ func TestEffacerLHistoriqueGardeLeContenu(t *testing.T) {
 		t.Errorf("message = %q", bilan.Message)
 	}
 
-	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.StudentsFile]
+	contenu := state.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
 	for _, attendu := range []string{"Émilie Côté", "Jean-Luc Picard"} {
 		if !strings.Contains(contenu, attendu) {
 			t.Fatalf("« %s » a disparu du registre :\n%s", attendu, contenu)

@@ -502,3 +502,52 @@ func TestProgressionAppeleeUneFoisParDepot(t *testing.T) {
 		t.Errorf("progression = %v", vus)
 	}
 }
+
+// Un groupe cloisonné doit le rester. Le dépôt qu'on vient de créer est donné
+// à l'équipe enseignante du groupe dans la foulée : sans cela, l'enseignant ne
+// verrait pas les dépôts qu'il vient lui-même de distribuer.
+func TestUnDepotCreeVaALEquipeEnseignante(t *testing.T) {
+	client, serveur := monter(t, nil)
+	settings := reglages()
+	items := construire(t, settings, cohorte)
+
+	// C'est le slug qui désigne l'équipe dans l'API : GitHub y remplace le
+	// point par un tiret, et le nom ne s'y substitue pas.
+	equipe, err := client.CreateTeam("acme", "a26.5n6.01.enseignants", "", "closed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rapport, err := runner.New(client, settings, nil).Run(items, runner.Options{
+		TeacherTeam: equipe.Slug, TeacherPermission: "admin",
+	})
+	if err != nil {
+		t.Fatalf("Run : %v", err)
+	}
+	if len(rapport.Failures()) != 0 {
+		t.Fatalf("échecs = %+v", rapport.Failures())
+	}
+	partages := serveur.State.TeamRepos["acme/"+equipe.Slug]
+	if len(partages) != len(items) {
+		t.Fatalf("dépôts partagés = %v", partages)
+	}
+	for _, item := range items {
+		if droit := partages["acme/"+item.Name]; droit != "admin" {
+			t.Errorf("%s : droit de l'équipe = %q", item.Name, droit)
+		}
+	}
+}
+
+// Sans équipe enseignante, rien n'est accordé : un groupe non cloisonné se
+// comporte exactement comme avant.
+func TestSansEquipeEnseignanteRienNEstAccorde(t *testing.T) {
+	client, serveur := monter(t, nil)
+	settings := reglages()
+	items := construire(t, settings, cohorte)
+
+	if _, err := runner.New(client, settings, nil).Run(items, runner.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(serveur.State.TeamRepos) != 0 {
+		t.Fatalf("partages = %v", serveur.State.TeamRepos)
+	}
+}
