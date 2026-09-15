@@ -111,11 +111,14 @@ func WithoutRepo(repos []RepoInfo, name string) []RepoInfo {
 
 // Repo est un dépôt appartenant à un groupe.
 type Repo struct {
-	Name     string
-	Suffix   string // ce qui suit le préfixe : compte GitHub ou nom slugifié
-	Private  bool
-	URL      string
-	PushedAt string // date seule, « 2026-08-21 »
+	Name    string
+	Suffix  string // ce qui suit le préfixe : compte GitHub ou nom slugifié
+	Private bool
+	URL     string
+	// PushedAt est le dernier envoi, à l'heure de la machine — « 2026-08-21
+	// 14:32 ». Une remise du soir se joue à la minute : la journée seule ne
+	// dirait pas si elle précède l'échéance.
+	PushedAt string
 }
 
 // Visibility décrit la visibilité en français.
@@ -284,10 +287,6 @@ func Build(prefix string, repos []RepoInfo) Group {
 		if !suit(strings.ToLower(raw.Name), wanted) {
 			continue
 		}
-		pushed := raw.PushedAt
-		if len(pushed) > 10 {
-			pushed = pushed[:10]
-		}
 		group.Repos = append(group.Repos, Repo{
 			Name: raw.Name,
 			// Les séparateurs en trop ne sont à personne : « TP3-KickMyB--alice »
@@ -296,7 +295,7 @@ func Build(prefix string, repos []RepoInfo) Group {
 			Suffix:   strings.TrimLeft(raw.Name[len(wanted)+1:], Separators),
 			Private:  raw.Private,
 			URL:      raw.HTMLURL,
-			PushedAt: pushed,
+			PushedAt: valid.Moment(raw.PushedAt),
 		})
 	}
 	sort.Slice(group.Repos, func(i, j int) bool {

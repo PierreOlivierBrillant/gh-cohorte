@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
@@ -50,7 +51,11 @@ func TestGestionAfficheLeGroupe(t *testing.T) {
 		t.Errorf("%d réponse(s) inutilisée(s)", scripte.Remaining())
 	}
 	h.contient("Groupe « tp1 » — 3 dépôt(s)", "tp1-emilie-cote", "Émilie Côté",
-		"Jean-Luc Picard", "privé", "2026-08-21")
+		"Jean-Luc Picard", "privé")
+	// Le dernier envoi porte l'heure, et celle de la machine : une remise du
+	// soir se joue à la minute, et GitHub date tout en UTC.
+	envoi := time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC).Local().Format("2006-01-02 15:04")
+	h.contient(envoi)
 	// Le suffixe tient lieu de nom quand le profil GitHub n'en porte aucun.
 	h.contient("aminata-d")
 }

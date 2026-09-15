@@ -34,7 +34,8 @@ type Repo struct {
 	ID         string
 	Name       string
 	URL        string
-	// PushedAt est la date seule — « 2026-08-21 » —, vide si rien n'y a été envoyé.
+	// PushedAt est le dernier envoi, à l'heure de la machine — « 2026-08-21
+	// 14:32 » —, vide si rien n'y a été envoyé.
 	PushedAt string
 	// Team nomme l'équipe à qui le dépôt appartient ; vide pour un travail
 	// individuel. Un dépôt d'équipe figure chez chacun de ses membres : c'est
@@ -212,7 +213,8 @@ type Filter struct {
 	// d'inscrit qui n'a rien remis a suivi le cours quand même.
 	Session string
 	Course  string
-	// PushedAfter et PushedBefore encadrent le dernier envoi, « 2026-10-01 ».
+	// PushedAfter et PushedBefore encadrent la journée du dernier envoi,
+	// « 2026-10-01 ».
 	PushedAfter  string
 	PushedBefore string
 	Activity     Activity
@@ -313,11 +315,14 @@ func (f Filter) Keep(row Row) bool {
 		!f.keepAssignment(row) || !f.keepEnrollment(row) {
 		return false
 	}
-	// Sans date connue, les bornes ne peuvent rien dire de cette personne.
-	if f.PushedAfter != "" && (row.PushedAt == "" || row.PushedAt < f.PushedAfter) {
+	// Sans date connue, les bornes ne peuvent rien dire de cette personne. Les
+	// bornes portent sur la journée : « avant le 1er octobre » englobe le 1er
+	// octobre entier, quelle que soit l'heure du dernier envoi.
+	jour := valid.Day(row.PushedAt)
+	if f.PushedAfter != "" && (jour == "" || jour < f.PushedAfter) {
 		return false
 	}
-	if f.PushedBefore != "" && (row.PushedAt == "" || row.PushedAt > f.PushedBefore) {
+	if f.PushedBefore != "" && (jour == "" || jour > f.PushedBefore) {
 		return false
 	}
 	return true

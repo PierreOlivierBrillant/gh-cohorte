@@ -118,8 +118,31 @@ func (s *Server) releve(cours classroom.Classroom, titre string, noms []string,
 			job.Warn(fmt.Sprintf("%d dépôt(s) n'ont pas pu être lus : leur historique "+
 				"reste inconnu.", manquants))
 		}
+		s.pourquoiRien(cours, remises, job)
 		return resultat(remises), nil
 	})
+}
+
+// pourquoiRien va chercher les accès des dépôts qui n'ont rien reçu.
+//
+// Un dépôt vide pose une question de plus que les autres : la personne a-t-elle
+// seulement accepté son invitation ? Sans réponse, on lui reprocherait un
+// silence qu'elle n'a pas choisi. Ceux qui ont reçu quelque chose n'en ont pas
+// besoin — la question ne se pose plus — et leurs accès coûteraient deux
+// requêtes pour rien.
+func (s *Server) pourquoiRien(cours classroom.Classroom,
+	remises map[string]groups.Handin, job *Job) {
+	muets := make([]string, 0, len(remises))
+	for repo, remise := range remises {
+		if cours.HandedIn(remise) == "" {
+			muets = append(muets, repo)
+		}
+	}
+	if len(muets) == 0 || job.Canceled() {
+		return
+	}
+	s.resolver(cours.Org).Accesses(cours.Org, muets, identity.Fetch,
+		func(done, total int, repo string) { job.Progress(done, total, repo) })
 }
 
 // handleAssignmentHandins relève les historiques des dépôts d'un travail et

@@ -36,9 +36,10 @@ func (m *manageSession) travail(group *groups.Group) (classroom.Classroom, strin
 		cours = connu
 	}
 	set, _ := m.session.names(cours.Org)
-	// Le registre répond aux deux questions qu'un groupe lui pose : qui se
-	// cache derrière un nom de dépôt, et quand chaque travail est attendu.
-	return cours.Scheduling(set).Enrich(set, m.repos), nom, true
+	// Le registre répond aux trois questions qu'un groupe lui pose : qui se
+	// cache derrière un nom de dépôt, quand chaque travail est attendu, et qui
+	// enseigne — sans quoi un commit d'enseignant daterait la remise.
+	return cours.Scheduling(set).Staffing(set).Enrich(set, m.repos), nom, true
 }
 
 // equipesDe lit les équipes du groupe, une fois pour la séance. Leur absence
@@ -73,10 +74,13 @@ func (m *manageSession) bilans(group *groups.Group) map[string]classroom.Review 
 	trouves := make(map[string]classroom.Review, len(remises))
 	if !reconnu {
 		// Sans place, les commits se comptent mais rien ne se juge : il n'y a
-		// ni date cible ni liste d'étudiants à confronter.
+		// ni date cible ni liste d'étudiants à confronter. La remise se date
+		// quand même hors des commits d'enseignants : le registre de
+		// l'organisation dit qui enseigne, même sous un préfixe hérité.
+		set, _ := m.session.names(m.org)
 		for repo, remise := range remises {
 			trouves[repo] = classroom.Review{
-				Repo: repo, Commits: remise.Commits, Last: remise.Last,
+				Repo: repo, Commits: remise.Commits, Last: remise.LastBut(set.Teaches),
 			}
 		}
 		return trouves
@@ -87,6 +91,36 @@ func (m *manageSession) bilans(group *groups.Group) map[string]classroom.Review 
 		trouves[repo] = cours.Review(repo, remise, due, equipes)
 	}
 	return trouves
+}
+
+// etats dit où en est la remise de chaque dépôt du groupe.
+//
+// Rien n'est demandé à GitHub : les historiques et les accès déjà mémorisés
+// suffisent, et un dépôt qu'on n'a pas relevé le dit — « non relevé » n'est pas
+// « rien remis ». C'est la même règle qu'au navigateur, décidée au même
+// endroit : seule la façon de la montrer change.
+func (m *manageSession) etats(group *groups.Group) map[string]classroom.HandinState {
+	bilans := m.bilans(group)
+	noms := make([]string, 0, group.Len())
+	for _, repo := range group.Repos {
+		noms = append(noms, repo.Name)
+	}
+	acces := m.resolver.Accesses(m.org, noms, identity.Cached, nil)
+	cours, _, reconnu := m.travail(group)
+	var equipes []teams.Team
+	if reconnu {
+		equipes = m.equipesDe(cours)
+	}
+
+	etats := make(map[string]classroom.HandinState, len(noms))
+	for _, nom := range noms {
+		bilan, releve := bilans[nom]
+		// Sans place reconnue, rien ne dit qui le dépôt vise : une invitation
+		// en attente ne s'y rapporte alors à personne.
+		attend := reconnu && cours.Awaiting(nom, equipes, acces[nom].Pending())
+		etats[nom] = classroom.StateOf(bilan, releve, attend)
+	}
+	return etats
 }
 
 // remises relève les historiques des dépôts du groupe, puis remontre la liste.
@@ -117,6 +151,7 @@ func (m *manageSession) remises(group *groups.Group) error {
 		m.show(group)
 		return nil
 	}
+	m.pourquoiRien(cours, remises)
 	if due := cours.DueOf(nom); due != "" {
 		console.Note("Date cible de « %s » : %s.", nom, due)
 	} else {
@@ -124,6 +159,30 @@ func (m *manageSession) remises(group *groups.Group) error {
 	}
 	m.show(group)
 	return nil
+}
+
+// pourquoiRien va chercher les accès des dépôts qui n'ont rien reçu.
+//
+// Un dépôt vide pose une question de plus que les autres : la personne a-t-elle
+// seulement accepté son invitation ? Sans réponse, on lui reprocherait un
+// silence qu'elle n'a pas choisi. Ceux qui ont reçu quelque chose n'en ont pas
+// besoin — la question ne se pose plus — et leurs accès coûteraient deux
+// requêtes pour rien.
+func (m *manageSession) pourquoiRien(cours classroom.Classroom,
+	remises map[string]groups.Handin) {
+	muets := make([]string, 0, len(remises))
+	for repo, remise := range remises {
+		if cours.HandedIn(remise) == "" {
+			muets = append(muets, repo)
+		}
+	}
+	if len(muets) == 0 {
+		return
+	}
+	progression := ui.NewProgress(m.session.Console, "Accès", len(muets))
+	m.resolver.Accesses(m.org, muets, identity.Fetch,
+		func(done, _ int, repo string) { progression.Update(done, repo) })
+	progression.Clear()
 }
 
 // echeance demande la date cible du travail géré et l'enregistre.
@@ -173,28 +232,42 @@ func (m *manageSession) fixerEcheance(cours classroom.Classroom, nom, due string
 }
 
 // resumeDeRemise dit en deux cases ce qu'un dépôt a reçu : combien de commits,
-// et ce qu'il faut en penser — le retard d'abord, les silences ensuite. Un
-// dépôt qu'on n'a pas encore relevé ne prétend rien : ses deux cases sont
-// vides, et ce n'est pas la même chose qu'un dépôt vide.
-func resumeDeRemise(console *ui.Console, bilan classroom.Review, connu bool) (string, string) {
-	if !connu {
+// et où en est la remise. Un dépôt qu'on n'a pas encore relevé ne prétend
+// rien : ses deux cases sont vides, et ce n'est pas la même chose qu'un dépôt
+// vide.
+//
+// L'état vient du domaine, et le mot qu'il porte est celui que le navigateur
+// montre. Ce qui s'y ajoute ici est le détail d'une équipe qui a remis sans que
+// tous ses membres y aient touché : l'état la dit remise, et il l'est.
+func resumeDeRemise(console *ui.Console, bilan classroom.Review,
+	etat classroom.HandinState) (string, string) {
+	if etat == classroom.Unread {
 		return console.Dim("—"), console.Dim("—")
 	}
 	commits := itoa(bilan.Commits)
-	if bilan.Late {
-		return commits, console.Err("en retard")
+	switch etat {
+	case classroom.Overdue:
+		return commits, console.Err(string(classroom.Overdue))
+	case classroom.Unaccepted:
+		return commits, console.Warn(string(classroom.Unaccepted))
+	case classroom.Unsent:
+		// Nommer ceux qui se taisent ne dirait rien de plus que la colonne
+		// d'à côté, qui porte déjà leur nom.
+		if bilan.Commits == 0 && !bilan.Missing() {
+			return commits, console.Dim("aucun commit")
+		}
+		return commits, string(classroom.Unsent)
 	}
 	if bilan.Missing() {
+		// Une équipe où l'un seulement se tait : le dépôt a reçu quelque chose,
+		// et savoir de qui il ne porte rien est tout ce qui compte.
 		noms := make([]string, 0, len(bilan.Silent))
 		for _, personne := range bilan.Silent {
 			noms = append(noms, nommer(personne))
 		}
 		return commits, "rien de " + strings.Join(noms, ", ")
 	}
-	if bilan.Commits == 0 {
-		return commits, console.Dim("aucun commit")
-	}
-	return commits, "à jour"
+	return commits, string(classroom.Delivered)
 }
 
 // dueFromFlag applique la date cible donnée en ligne de commande, sans rien

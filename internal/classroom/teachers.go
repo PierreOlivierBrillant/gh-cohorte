@@ -223,6 +223,18 @@ type Teachers interface {
 	Teaches(username string) bool
 }
 
+// Staffing verse dans le groupe ce que le registre dit de qui enseigne. Comme
+// « Scheduling », il ne retient rien : il branche le groupe sur le registre, et
+// c'est le registre qui reste la source.
+//
+// Sans cela, un dépôt ne saurait pas distinguer ce qu'un étudiant y a remis de
+// ce que son enseignant y a poussé — un gabarit, une correction —, et daterait
+// la remise du jour où l'enseignant y a touché.
+func (c Classroom) Staffing(enseignants Teachers) Classroom {
+	c.enseignants = enseignants
+	return c
+}
+
 // cleanLogins met des comptes en forme, les dédoublonne et les range. Deux fois
 // le même compte n'est pas deux enseignants.
 func cleanLogins(usernames []string) ([]string, error) {

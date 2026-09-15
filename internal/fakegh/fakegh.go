@@ -36,14 +36,32 @@ type RepoState struct {
 	IsTemplate    bool
 	Template      string // « owner/repo » du modèle utilisé à la création
 	PushedAt      string
-	// History porte les dates des commits, du plus récent au plus ancien —
-	// l'ordre dans lequel GitHub les rend.
-	History     []string
+	// History porte les commits, du plus récent au plus ancien — l'ordre dans
+	// lequel GitHub les rend.
+	History     []HistoryEntry
 	URLOverride string // adresse renvoyée à la place de github.com (tests de clonage)
 }
 
 // FullName renvoie « organisation/depot ».
 func (r *RepoState) FullName() string { return r.Org + "/" + r.Name }
+
+// HistoryEntry est un commit de l'historique d'un dépôt : sa date, et le compte
+// GitHub qui l'a fait. Un login vide vaut pour un commit qu'aucune adresse ne
+// rattache à un compte.
+type HistoryEntry struct {
+	At    string
+	Login string
+}
+
+// Commits compose un historique dont les auteurs importent peu : les dates
+// seules, du plus récent au plus ancien.
+func Commits(dates ...string) []HistoryEntry {
+	entrees := make([]HistoryEntry, 0, len(dates))
+	for _, date := range dates {
+		entrees = append(entrees, HistoryEntry{At: date})
+	}
+	return entrees
+}
 
 type commit struct {
 	Tree    string
@@ -1040,7 +1058,8 @@ func (s *Server) sendPaged(writer http.ResponseWriter, request *http.Request,
 // sendHistory rend une page de commits, du plus récent au plus ancien, avec le
 // « Link » qui permet de sauter directement à la dernière — c'est par là qu'on
 // atteint le premier commit sans dérouler tout l'historique.
-func (s *Server) sendHistory(writer http.ResponseWriter, request *http.Request, dates []string) {
+func (s *Server) sendHistory(writer http.ResponseWriter, request *http.Request,
+	commits []HistoryEntry) {
 	perPage, _ := strconv.Atoi(request.URL.Query().Get("per_page"))
 	if perPage <= 0 {
 		perPage = 30
@@ -1049,20 +1068,30 @@ func (s *Server) sendHistory(writer http.ResponseWriter, request *http.Request, 
 	if page <= 0 {
 		page = 1
 	}
-	debut := min((page-1)*perPage, len(dates))
-	fin := min(debut+perPage, len(dates))
+	debut := min((page-1)*perPage, len(commits))
+	fin := min(debut+perPage, len(commits))
 
 	payload := make([]map[string]any, 0, fin-debut)
-	for index, date := range dates[debut:fin] {
-		payload = append(payload, map[string]any{
+	for index, entree := range commits[debut:fin] {
+		item := map[string]any{
 			"sha": fmt.Sprintf("commit%d", debut+index),
 			"commit": map[string]any{
-				"author": map[string]any{"date": date},
+				"author": map[string]any{"date": entree.At},
 			},
-		})
+		}
+		// « author » au premier niveau est le compte GitHub derrière l'adresse
+		// du commit ; GitHub le laisse nul quand elle ne mène à personne.
+		if entree.Login != "" {
+			genre := "User"
+			if strings.Contains(entree.Login, "[bot]") {
+				genre = "Bot"
+			}
+			item["author"] = map[string]any{"login": entree.Login, "type": genre}
+		}
+		payload = append(payload, item)
 	}
-	if fin < len(dates) {
-		dernier := (len(dates) + perPage - 1) / perPage
+	if fin < len(commits) {
+		dernier := (len(commits) + perPage - 1) / perPage
 		writer.Header().Set("Link", strings.Join([]string{
 			fmt.Sprintf("<%s>; rel=\"next\"", s.pageURL(request, page+1, perPage)),
 			fmt.Sprintf("<%s>; rel=\"last\"", s.pageURL(request, dernier, perPage)),

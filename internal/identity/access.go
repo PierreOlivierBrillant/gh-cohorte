@@ -67,6 +67,19 @@ func (a Access) Logins() []string {
 	return comptes
 }
 
+// Pending nomme les comptes invités qui n'ont pas encore accepté. Des accès
+// qu'on n'a pas relevés n'en nomment aucun : ne pas savoir n'est pas savoir que
+// personne n'attend.
+func (a Access) Pending() []string {
+	comptes := make([]string, 0, len(a.Invitations))
+	for _, invitation := range a.Invitations {
+		if login := strings.TrimSpace(invitation.Login); login != "" {
+			comptes = append(comptes, login)
+		}
+	}
+	return comptes
+}
+
 // Owner est ce qu'on a appris d'un dépôt.
 type Owner struct {
 	// Login est le compte de la personne à qui le dépôt appartient. Vide quand

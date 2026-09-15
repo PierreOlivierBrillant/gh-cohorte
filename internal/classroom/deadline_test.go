@@ -270,3 +270,181 @@ func TestUnDepotNonReleveNEstPasUnDepotVide(t *testing.T) {
 		t.Errorf("Due = %q", travaux[0].Due)
 	}
 }
+
+// equipeEnseignante joue le registre de l'organisation : il ne retient des
+// personnes que celles qui enseignent — c'est tout ce qu'un groupe lui demande
+// pour savoir ce qui, dans un dépôt, n'est pas une remise.
+type equipeEnseignante map[string]bool
+
+func (e equipeEnseignante) Teaches(username string) bool {
+	return e[strings.ToLower(strings.TrimSpace(username))]
+}
+
+// remiseSignee compose un historique où l'on sait qui a commis quand.
+func remiseSignee(commits int, parAuteur map[string]string) groups.Handin {
+	dernier := ""
+	auteurs := map[string]int{}
+	for compte, quand := range parAuteur {
+		auteurs[compte] = 1
+		if quand > dernier {
+			dernier = quand
+		}
+	}
+	return groups.Handin{
+		Commits: commits, Last: dernier, LastBy: parAuteur, Authors: auteurs,
+	}
+}
+
+// Une correction poussée après l'échéance est l'œuvre de qui enseigne : la
+// compter mettrait l'étudiante en retard pour ce que son enseignant a fait.
+func TestUnCommitDEnseignantNeDatePasLaRemise(t *testing.T) {
+	cours := groupe("a26", "5n6", "01", personnes("Émilie Côté", "ecote")).
+		Scheduling(calendrier{"a26.5n6.01.tp1": "2026-10-01"}).
+		Staffing(equipeEnseignante{"prof": true})
+	repos := depots("a26.5n6.01.tp1.emilie-cote")
+	remises := map[string]groups.Handin{
+		"a26.5n6.01.tp1.emilie-cote": remiseSignee(4, map[string]string{
+			"ecote": instant("2026-09-30", "20:45"),
+			"prof":  instant("2026-10-03", "16:00"),
+		}),
+	}
+
+	bilans := cours.Reviews("a26.5n6.01.tp1", repos, nil, remises)
+	if len(bilans) != 1 {
+		t.Fatalf("%d bilan(s), attendu 1", len(bilans))
+	}
+	if bilans[0].Last != instant("2026-09-30", "20:45") {
+		t.Errorf("la remise est datée %q, attendu le dernier commit d'Émilie", bilans[0].Last)
+	}
+	if bilans[0].Late {
+		t.Error("l'étudiante est dite en retard pour une correction de son enseignant")
+	}
+}
+
+// Sans registre branché, rien ne dit qui enseigne : le dernier commit est tout
+// ce qu'on sait, et c'est lui qui date la remise.
+func TestSansRegistreLeDernierCommitDateLaRemise(t *testing.T) {
+	cours := groupe("a26", "5n6", "01", personnes("Émilie Côté", "ecote")).
+		Scheduling(calendrier{"a26.5n6.01.tp1": "2026-10-01"})
+	repos := depots("a26.5n6.01.tp1.emilie-cote")
+	remises := map[string]groups.Handin{
+		"a26.5n6.01.tp1.emilie-cote": remiseSignee(4, map[string]string{
+			"ecote": instant("2026-09-30", "20:45"),
+			"prof":  instant("2026-10-03", "16:00"),
+		}),
+	}
+	if bilans := cours.Reviews("a26.5n6.01.tp1", repos, nil, remises); !bilans[0].Late {
+		t.Error("sans savoir qui enseigne, le commit du 3 octobre doit compter")
+	}
+}
+
+// Un dépôt où seul l'enseignant a écrit n'a rien reçu : le gabarit qu'il y a
+// poussé n'est pas une remise, et l'étudiante y est muette.
+func TestUnDepotOuSeulLEnseignantACommisNaPasDeRemise(t *testing.T) {
+	cours := groupe("a26", "5n6", "01", personnes("Émilie Côté", "ecote")).
+		Scheduling(calendrier{"a26.5n6.01.tp1": "2026-10-01"}).
+		Staffing(equipeEnseignante{"prof": true})
+	repos := depots("a26.5n6.01.tp1.emilie-cote")
+	remises := map[string]groups.Handin{
+		"a26.5n6.01.tp1.emilie-cote": remiseSignee(1, map[string]string{
+			"prof": instant("2026-10-03", "16:00"),
+		}),
+	}
+
+	bilans := cours.Reviews("a26.5n6.01.tp1", repos, nil, remises)
+	if bilans[0].Last != "" {
+		t.Errorf("la remise est datée %q alors que personne n'a rien remis", bilans[0].Last)
+	}
+	if bilans[0].Late {
+		t.Error("un dépôt sans remise ne peut pas être en retard")
+	}
+	if !bilans[0].Missing() {
+		t.Error("l'étudiante qui n'a rien commis devrait être dite muette")
+	}
+}
+
+// ------------------------------------------------- où en est une remise
+
+// Un dépôt qu'on n'a pas relevé ne prétend rien : c'est ce qui le distingue
+// d'un dépôt vide, et les trois interfaces doivent pouvoir le dire.
+func TestUnDepotNonReleveNeConclutRien(t *testing.T) {
+	if etat := classroom.StateOf(classroom.Review{}, false, false); etat != classroom.Unread {
+		t.Errorf("StateOf = %q, attendu « non relevé »", etat)
+	}
+	// Même une invitation en attente n'y change rien : on n'a pas regardé.
+	if etat := classroom.StateOf(classroom.Review{}, false, true); etat != classroom.Unread {
+		t.Errorf("StateOf = %q", etat)
+	}
+}
+
+// Une invitation qui n'a pas été acceptée explique l'absence de remise : la
+// personne n'a pas pu remettre, son dépôt ne lui est pas ouvert.
+func TestUneInvitationEnAttenteExpliqueLAbsenceDeRemise(t *testing.T) {
+	vide := classroom.Review{Repo: "a26.5n6.01.tp1.emilie-cote"}
+	if etat := classroom.StateOf(vide, true, true); etat != classroom.Unaccepted {
+		t.Errorf("StateOf = %q, attendu « non accepté »", etat)
+	}
+	if etat := classroom.StateOf(vide, true, false); etat != classroom.Unsent {
+		t.Errorf("StateOf = %q, attendu « non remis »", etat)
+	}
+}
+
+// Une équipe qui a remis a remis, même si l'un de ses membres n'a pas encore
+// cliqué sur le courriel de GitHub : l'attente n'explique qu'une absence.
+func TestUneRemiseFaiteLEmporteSurUneInvitationEnAttente(t *testing.T) {
+	remis := classroom.Review{Last: instant("2026-09-30", "20:45")}
+	if etat := classroom.StateOf(remis, true, true); etat != classroom.Delivered {
+		t.Errorf("StateOf = %q, attendu « remis »", etat)
+	}
+	tard := classroom.Review{Last: instant("2026-10-02", "09:15"), Late: true}
+	if etat := classroom.StateOf(tard, true, true); etat != classroom.Overdue {
+		t.Errorf("StateOf = %q, attendu « en retard »", etat)
+	}
+}
+
+// L'attente se rapporte à quelqu'un que le dépôt vise : une invitation adressée
+// à un autre compte ne dit rien de cette remise-là.
+func TestLAttenteSeRapporteALaPersonneVisee(t *testing.T) {
+	cours := groupe("a26", "5n6", "01", personnes("Émilie Côté", "ecote"))
+	depot := "a26.5n6.01.tp1.emilie-cote"
+
+	if !cours.Awaiting(depot, nil, []string{"ECOTE"}) {
+		t.Error("une invitation à l'étudiante visée n'est pas vue : la casse d'un compte ne compte pas")
+	}
+	if cours.Awaiting(depot, nil, []string{"quelquun-dautre"}) {
+		t.Error("une invitation à quelqu'un d'autre est prise pour la sienne")
+	}
+	if cours.Awaiting(depot, nil, nil) {
+		t.Error("sans invitation relevée, l'attente est affirmée quand même")
+	}
+}
+
+// Un état saisi se lit accentué comme non accentué : « non relevé » se tape
+// rarement avec ses accents au terminal.
+func TestUnEtatDeRemiseSeLitOuSeRefuse(t *testing.T) {
+	for _, saisi := range []string{"non relevé", "non releve", "NON RELEVÉ"} {
+		etat, err := classroom.ParseHandinState(saisi)
+		if err != nil || etat != classroom.Unread {
+			t.Errorf("ParseHandinState(%q) = %q, %v", saisi, etat, err)
+		}
+	}
+	if etat, err := classroom.ParseHandinState(""); err != nil || etat != classroom.AnyHandin {
+		t.Errorf("une valeur vide ne retient rien : %q, %v", etat, err)
+	}
+	if _, err := classroom.ParseHandinState("presque remis"); err == nil {
+		t.Error("un état inconnu est accepté")
+	}
+}
+
+// Un critère vide laisse tout passer ; un critère posé ne garde que son état.
+func TestLeCritereDEtatNeGardeQueLeSien(t *testing.T) {
+	if !classroom.AnyHandin.Keep(classroom.Overdue) {
+		t.Error("un critère vide écarte quelque chose")
+	}
+	if !classroom.Overdue.Keep(classroom.Overdue) {
+		t.Error("un critère écarte son propre état")
+	}
+	if classroom.Overdue.Keep(classroom.Delivered) {
+		t.Error("un critère garde un autre état que le sien")
+	}
+}

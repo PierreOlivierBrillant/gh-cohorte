@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -18,11 +19,11 @@ func groupeAvecHistoriques(t *testing.T) *harnais {
 	state := fakegh.NewState()
 
 	tard := state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
-	tard.History = []string{"2026-10-05T14:00:00Z", "2026-09-30T09:00:00Z"}
+	tard.History = fakegh.Commits("2026-10-05T14:00:00Z", "2026-09-30T09:00:00Z")
 	state.AddContributors("acme/a26.5n6.01.tp1.emilie-cote", "emilie-cote", "emilie-cote")
 
 	muet := state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
-	muet.History = []string{"2026-09-01T08:00:00Z"}
+	muet.History = fakegh.Commits("2026-09-01T08:00:00Z")
 	state.AddContributors("acme/a26.5n6.01.tp1.jean-luc-picard", "prof")
 
 	h := nouveau(t, state)
@@ -141,5 +142,128 @@ func TestLaLigneDeCommandeRefuseUneDateQuiNEnEstPasUne(t *testing.T) {
 	vide, err := app.Parse([]string{"--due", ""}, nil)
 	if err != nil || !vide.DueSet || vide.Due != "" {
 		t.Errorf("« --due \"\" » : DueSet = %v, Due = %q", vide.DueSet, vide.Due)
+	}
+}
+
+// Une correction déposée après l'échéance est l'œuvre de qui enseigne : la
+// compter mettrait l'étudiante en retard pour ce qu'elle n'a pas fait.
+func TestUneCorrectionDEnseignantNeMetPersonneEnRetardAuTerminal(t *testing.T) {
+	state := fakegh.NewState()
+	depot := state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	depot.History = []fakegh.HistoryEntry{
+		{At: "2026-10-03T16:00:00Z", Login: "prof"},
+		{At: "2026-09-30T20:45:00Z", Login: "emilie-cote"},
+	}
+	state.AddContributors("acme/a26.5n6.01.tp1.emilie-cote", "emilie-cote", "prof")
+
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Émilie Côté", Username: "emilie-cote"}},
+	})
+	// Le registre est le seul à dire qui enseigne : rien dans un nom de dépôt
+	// ne le dirait.
+	h.Options.User = "prof"
+	h.Options.TeacherSet, h.Options.Teacher = true, true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("cooptation : code = %d\n%s", code, h.texte())
+	}
+
+	suite := nouveauDansLeMemeDossier(t, h)
+	suite.Options.ManageRequested = true
+	suite.Options.Manage = "a26.5n6.01.tp1"
+	suite.Options.DueSet, suite.Options.Due = true, "2026-10-01"
+	suite.Options.Handins = true
+	if code := suite.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, suite.texte())
+	}
+	if strings.Contains(suite.texte(), "en retard") {
+		t.Errorf("le commit de l'enseignant met l'étudiante en retard :\n%s", suite.texte())
+	}
+	suite.contient("remis")
+}
+
+// Un dépôt qui n'a rien reçu porte déjà le nom de son étudiante dans la colonne
+// d'à côté : le redire à la place du verdict n'apprendrait rien.
+func TestUnDepotSansRemiseLeDitSansNommerPersonne(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{{FullName: "Émilie Côté", Username: "emilie-cote"}},
+	})
+	h.Options.ManageRequested = true
+	h.Options.Manage = "a26.5n6.01.tp1"
+	h.Options.Handins = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("non remis")
+	if strings.Contains(h.texte(), "rien de") {
+		t.Errorf("le verdict nomme l'étudiante que la ligne porte déjà :\n%s", h.texte())
+	}
+}
+
+// groupeAvecInvitation monte un travail de deux dépôts : l'un remis, l'autre
+// dont l'étudiant n'a pas encore accepté son invitation.
+func groupeAvecInvitation(t *testing.T) *harnais {
+	t.Helper()
+	state := fakegh.NewState()
+
+	remis := state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	remis.History = []fakegh.HistoryEntry{{At: "2026-09-30T20:45:00Z", Login: "emilie-cote"}}
+	state.AddContributors("acme/a26.5n6.01.tp1.emilie-cote", "emilie-cote")
+	state.AddCollaborator("acme/a26.5n6.01.tp1.emilie-cote", "emilie-cote", "push")
+
+	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
+	state.Invite("acme/a26.5n6.01.tp1.jean-luc-picard", "jlpicard", "push")
+
+	h := nouveau(t, state)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "a26", Course: "5n6", Group: "01",
+		Students: []roster.Person{
+			{FullName: "Émilie Côté", Username: "emilie-cote"},
+			{FullName: "Jean-Luc Picard", Username: "jlpicard"},
+		},
+	})
+	h.Options.ManageRequested = true
+	h.Options.Manage = "a26.5n6.01.tp1"
+	return h
+}
+
+// Une invitation qu'on n'a pas acceptée n'est pas un silence : la personne n'a
+// pas pu remettre, et le terminal le dit du même mot que le navigateur.
+func TestUneInvitationEnAttenteSeDitAuTerminal(t *testing.T) {
+	h := groupeAvecInvitation(t)
+	h.Options.Handins = true
+
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("non accepté", "remis")
+}
+
+// Le filtre par état se pose aussi au drapeau : les trois interfaces offrent le
+// même choix, et « non accepté » y veut dire la même chose.
+func TestDrapeauHandinNeGardeQuUnEtat(t *testing.T) {
+	h := groupeAvecInvitation(t)
+	h.Options.Handins = true
+	h.Options.Handin = classroom.Unaccepted
+
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("a26.5n6.01.tp1.jean-luc-picard", "1 affiché(s)")
+	if strings.Contains(h.texte(), "a26.5n6.01.tp1.emilie-cote  ") {
+		t.Errorf("le dépôt remis n'a pas été écarté :\n%s", h.texte())
+	}
+}
+
+// Un état inconnu arrête la ligne de commande plutôt que de se perdre.
+func TestDrapeauHandinRefuseUnEtatInconnu(t *testing.T) {
+	if _, err := app.Parse([]string{"--handin", "presque remis"}, &bytes.Buffer{}); err == nil {
+		t.Error("« presque remis » est accepté")
 	}
 }

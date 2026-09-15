@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -77,9 +78,14 @@ type Options struct {
 	// Filter, Sort et SortDesc règlent ce que la liste d'un groupe montre et
 	// dans quel ordre. Ce que ces critères signifient est décidé dans
 	// « students » : les trois interfaces s'y tiennent.
-	Filter     users.Filter
-	Sort       users.Key
-	SortDesc   bool
+	Filter   users.Filter
+	Sort     users.Key
+	SortDesc bool
+	// Handin ne garde que les dépôts dont la remise en est là — « en retard »,
+	// « non accepté »… Il vit à part du filtre des personnes : ce qu'il
+	// regarde n'est pas une ligne d'annuaire, c'est ce que l'historique et les
+	// accès déjà relevés disent d'un dépôt.
+	Handin     classroom.HandinState
 	Assignment string
 	// Teams dit que le travail se distribue aux équipes : un dépôt par équipe
 	// plutôt qu'un dépôt par personne. En mode gestion, sans autre drapeau
@@ -212,6 +218,8 @@ Drapeaux :
   --pushed-after DATE      ne lister que les envois postérieurs à DATE (AAAA-MM-JJ)
   --pushed-before DATE     ne lister que les envois antérieurs à DATE
   --never-pushed           ne lister que les dépôts sans aucun envoi
+  --handin ÉTAT            ne lister qu'un état de remise : remis, en retard,
+                           non remis, non accepté, non relevé
   --sort nom|compte|envoi  colonne de tri de la liste (défaut : nom)
   --sort-desc              trier du plus grand au plus petit
   --repos DEPOTS           ne reprendre que ces dépôts (noms séparés par des virgules)
@@ -319,6 +327,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	apres := set.String("pushed-after", "", "envois postérieurs à cette date")
 	avant := set.String("pushed-before", "", "envois antérieurs à cette date")
 	muets := set.Bool("never-pushed", false, "dépôts sans aucun envoi")
+	remise := set.String("handin", "",
+		"ne lister qu'un état de remise : remis, en retard, non remis, non accepté, non relevé")
 	tri := set.String("sort", "", "colonne de tri de la liste")
 	set.BoolVar(&options.SortDesc, "sort-desc", false, "trier du plus grand au plus petit")
 
@@ -395,6 +405,9 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		return nil, err
 	}
 	options.Filter = filtreValide
+	if options.Handin, err = classroom.ParseHandinState(*remise); err != nil {
+		return nil, err
+	}
 	if options.Sort, err = users.ParseKey(*tri); err != nil {
 		return nil, err
 	}

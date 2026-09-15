@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
@@ -14,12 +15,12 @@ func travailAvecHistoriques(t *testing.T) *harnais {
 	state := fakegh.NewState()
 
 	tard := state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
-	tard.History = []string{"2026-10-05T14:00:00Z", "2026-09-30T09:00:00Z"}
+	tard.History = fakegh.Commits("2026-10-05T14:00:00Z", "2026-09-30T09:00:00Z")
 	state.AddContributors("acme/a26.5n6.01.tp1.emilie-cote", "ecote", "ecote")
 
 	muet := state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
 	// Seuls les fichiers de départ, déposés par qui enseigne.
-	muet.History = []string{"2026-09-01T08:00:00Z"}
+	muet.History = fakegh.Commits("2026-09-01T08:00:00Z")
 	state.AddContributors("acme/a26.5n6.01.tp1.jean-luc-picard", "prof")
 
 	return avantLeRegistre(t, state,
@@ -219,5 +220,113 @@ func TestLaDateCibleSuitLeTravailRenomme(t *testing.T) {
 	}
 	if fiche.Assignments[0].Name != "projet-final" || fiche.Assignments[0].Due != "2026-10-01" {
 		t.Errorf("la date cible n'a pas suivi le renommage : %+v", fiche.Assignments[0])
+	}
+}
+
+// Une correction déposée après l'échéance est l'œuvre de qui enseigne : elle ne
+// doit pas mettre l'étudiante en retard pour ce qu'elle n'a pas fait.
+func TestUneCorrectionDEnseignantNeMetPersonneEnRetard(t *testing.T) {
+	state := fakegh.NewState()
+	depot := state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	depot.History = []fakegh.HistoryEntry{
+		{At: "2026-10-03T16:00:00Z", Login: "prof"},
+		{At: "2026-09-30T20:45:00Z", Login: "ecote"},
+	}
+	state.AddContributors("acme/a26.5n6.01.tp1.emilie-cote", "ecote", "prof")
+
+	h := avantLeRegistre(t, state, cohorte("a26", "5n6", "01", "Émilie Côté", "ecote"))
+	h.coopter("prof", true)
+	h.json(http.MethodPut, "/api/classrooms/a26.5n6.01/assignments/tp1/deadline",
+		map[string]any{"due": "2026-10-01"}, nil)
+
+	etat := h.travail(http.MethodPost,
+		"/api/classrooms/a26.5n6.01/assignments/tp1/handins", nil)
+	bilans, ok := etat["result"].([]any)
+	if !ok || len(bilans) != 1 {
+		t.Fatalf("bilans = %#v", etat["result"])
+	}
+	bilan := bilans[0].(map[string]any)
+	if bilan["late"] == true {
+		t.Errorf("le commit de l'enseignant met l'étudiante en retard : %+v", bilan)
+	}
+	if bilan["last"] != "2026-09-30T20:45:00Z" {
+		t.Errorf("la remise est datée %v, attendu le dernier commit d'Émilie", bilan["last"])
+	}
+}
+
+// travailAvecInvitation monte un travail de deux dépôts : l'un remis, l'autre
+// dont l'étudiant n'a pas encore accepté son invitation — il n'a donc pas pu
+// remettre.
+func travailAvecInvitation(t *testing.T) *harnais {
+	t.Helper()
+	state := fakegh.NewState()
+
+	remis := state.AddRepo("acme", "a26.5n6.01.tp1.emilie-cote", true)
+	remis.History = []fakegh.HistoryEntry{{At: "2026-09-30T20:45:00Z", Login: "ecote"}}
+	state.AddContributors("acme/a26.5n6.01.tp1.emilie-cote", "ecote")
+	state.AddCollaborator("acme/a26.5n6.01.tp1.emilie-cote", "ecote", "push")
+
+	state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
+	state.Invite("acme/a26.5n6.01.tp1.jean-luc-picard", "jlpicard", "push")
+
+	return avantLeRegistre(t, state,
+		cohorte("a26", "5n6", "01", "Émilie Côté", "ecote", "Jean-Luc Picard", "jlpicard"))
+}
+
+// etatsDesDepots rend l'état de la remise de chaque dépôt d'un travail.
+func (h *harnais) etatsDesDepots(adresse string) map[string]string {
+	h.t.Helper()
+	var fiche struct {
+		Repos []struct {
+			Name  string `json:"name"`
+			State string `json:"state"`
+		} `json:"repos"`
+	}
+	h.json(http.MethodGet, adresse, nil, &fiche)
+	etats := map[string]string{}
+	for _, repo := range fiche.Repos {
+		etats[repo.Name] = repo.State
+	}
+	return etats
+}
+
+// Une invitation qu'on n'a pas acceptée n'est pas un silence : la personne n'a
+// pas pu remettre, et l'écran doit le dire autrement.
+func TestUneInvitationEnAttenteSeDistingueDUneRemiseManquante(t *testing.T) {
+	h := travailAvecInvitation(t)
+	// Le relevé des remises va chercher les accès des dépôts qui n'ont rien
+	// reçu : c'est là que la question « a-t-il accepté ? » se pose.
+	h.travail(http.MethodPost, "/api/classrooms/a26.5n6.01/assignments/tp1/handins", nil)
+
+	etats := h.etatsDesDepots("/api/classrooms/a26.5n6.01/assignments/tp1")
+	if etats["a26.5n6.01.tp1.jean-luc-picard"] != "non accepté" {
+		t.Errorf("le dépôt dont l'invitation attend est dit %q",
+			etats["a26.5n6.01.tp1.jean-luc-picard"])
+	}
+	if etats["a26.5n6.01.tp1.emilie-cote"] != "remis" {
+		t.Errorf("le dépôt remis est dit %q", etats["a26.5n6.01.tp1.emilie-cote"])
+	}
+}
+
+// Le filtre par état se pose dans l'adresse, comme les autres critères : c'est
+// ce qui lui fait dire la même chose qu'au terminal.
+func TestLesDepotsSeFiltrentParEtatDeRemise(t *testing.T) {
+	h := travailAvecInvitation(t)
+	h.travail(http.MethodPost, "/api/classrooms/a26.5n6.01/assignments/tp1/handins", nil)
+
+	attendus := h.etatsDesDepots(
+		"/api/classrooms/a26.5n6.01/assignments/tp1?handin=" + url.QueryEscape("non accepté"))
+	if len(attendus) != 1 || attendus["a26.5n6.01.tp1.jean-luc-picard"] != "non accepté" {
+		t.Fatalf("« non accepté » retient %v", attendus)
+	}
+	remis := h.etatsDesDepots("/api/classrooms/a26.5n6.01/assignments/tp1?handin=remis")
+	if len(remis) != 1 || remis["a26.5n6.01.tp1.emilie-cote"] != "remis" {
+		t.Fatalf("« remis » retient %v", remis)
+	}
+	// Un état inconnu s'arrête ici plutôt que de se perdre en cours de route.
+	reponse, contenu := h.requete(http.MethodGet,
+		"/api/classrooms/a26.5n6.01/assignments/tp1?handin=presque", nil)
+	if reponse.StatusCode < 400 {
+		t.Fatalf("statut %d, attendu un refus — %s", reponse.StatusCode, contenu)
 	}
 }

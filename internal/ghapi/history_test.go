@@ -12,11 +12,11 @@ import (
 func TestLePremierCommitEstAuBoutDeLHistorique(t *testing.T) {
 	state := fakegh.NewState()
 	repo := state.AddRepo("acme", "tp1-lyonnais", true)
-	repo.History = []string{
+	repo.History = fakegh.Commits(
 		"2026-11-02T09:15:00Z",
 		"2026-10-18T14:00:00Z",
 		"2026-09-01T12:30:00Z",
-	}
+	)
 	client, faux := client(t, state)
 	defer faux.Close()
 

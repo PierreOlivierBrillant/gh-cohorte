@@ -70,7 +70,7 @@ func TestAnnuaireFondUnePersonneVueParPlusieursGroupes(t *testing.T) {
 		t.Fatalf("Émilie : %d inscription(s), %d dépôt(s)", len(emilie.Enrollments), len(emilie.Repos))
 	}
 	// Le dernier envoi est le plus récent de tous ses groupes.
-	if emilie.PushedAt != "2027-02-10" {
+	if emilie.PushedAt != envoi("2027-02-10T10:00:00Z") {
 		t.Fatalf("dernier envoi d'Émilie : %q", emilie.PushedAt)
 	}
 	// Les cours suivis vont de la session la plus récente à la plus ancienne :

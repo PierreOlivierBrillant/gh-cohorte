@@ -198,7 +198,7 @@ func TestImportCorrigeUnRapprochementALaMain(t *testing.T) {
 func TestImportProposeLaPlaceDArrivee(t *testing.T) {
 	state := classroomOrg(t)
 	// Un travail donné en septembre : c'est la session d'automne.
-	state.Repos["acme/tp1-lyonnais"].History = []string{"2026-09-14T08:00:00Z"}
+	state.Repos["acme/tp1-lyonnais"].History = fakegh.Commits("2026-09-14T08:00:00Z")
 
 	h := nouveau(t, state)
 	h.Options.ImportRequested = true
