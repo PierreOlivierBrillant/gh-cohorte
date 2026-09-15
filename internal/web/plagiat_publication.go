@@ -1,15 +1,11 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -106,13 +102,11 @@ func (s *Server) handlePlagiarismPublish(writer http.ResponseWriter, request *ht
 		org = s.org()
 	}
 
-	ligne, err := teachingOf(report)
+	ligne, err := report.Teaching(s.deps.Viewer, body.Index)
 	if err != nil {
 		fail(writer, err)
 		return
 	}
-	ligne.Teacher = s.deps.Viewer
-	ligne.Indexed = body.Index
 
 	if !body.Index {
 		set, err := s.registryOf(org).Apply(registry.Publish(ligne))
@@ -143,7 +137,7 @@ func (s *Server) handlePlagiarismPublish(writer http.ResponseWriter, request *ht
 	}
 	// La table reste ici, à côté du rapport : c'est elle seule qui dit qui se
 	// cache derrière un jeton, et elle ne monte jamais dans l'organisation.
-	chemin, err := ecrireTable(s.reportDir(), report.Basename(), table)
+	chemin, err := plagiarism.WriteIndexTable(s.reportDir(), report.Basename(), table)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -159,47 +153,4 @@ func (s *Server) handlePlagiarismPublish(writer http.ResponseWriter, request *ht
 		"prints": publie.Prints(), "origin": origine, "indexed": true,
 		"table": chemin, "catalog": len(set.Catalog().Teaching),
 	})
-}
-
-// teachingOf tire du rapport la ligne de catalogue qui lui correspond.
-func teachingOf(report *plagiarism.Report) (exchange.Teaching, error) {
-	scope, nom, ok := naming.SplitAssignment(report.Request.Assignment)
-	if !ok {
-		return exchange.Teaching{}, valid.Errorf(
-			"Publication : « %s » n'est pas un travail de la nomenclature. Seul un "+
-				"travail d'un groupe déclaré se publie.", report.Request.Assignment)
-	}
-	// Le décompte ne porte que sur nos dépôts : les copies reçues d'ailleurs ne
-	// sont pas les nôtres à annoncer.
-	copies, dernier := 0, ""
-	for _, target := range report.Request.Targets {
-		copies++
-		if target.HandedIn > dernier {
-			dernier = target.HandedIn
-		}
-	}
-	if len(dernier) > 10 {
-		dernier = dernier[:10] // le jour suffit : l'heure daterait une personne
-	}
-	return exchange.Teaching{
-		Scope: scope, Assignment: nom, Copies: copies, LastHandin: dernier,
-		UpdatedAt: report.CreatedAt,
-	}, nil
-}
-
-// ecrireTable pose la table de correspondance à côté du rapport.
-func ecrireTable(directory, base string, table anonymize.Table) (string, error) {
-	dossier := filepath.Join(directory, plagiarism.Dir)
-	if err := os.MkdirAll(dossier, 0o700); err != nil {
-		return "", err
-	}
-	chemin := filepath.Join(dossier, base+"-index-correspondance.json")
-	payload, err := json.MarshalIndent(table, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(chemin, append(payload, '\n'), 0o600); err != nil {
-		return "", valid.Errorf("Table « %s » : %v.", chemin, err)
-	}
-	return chemin, nil
 }

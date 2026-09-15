@@ -94,6 +94,15 @@ func (r Request) Validate() error {
 				"(%d dépôt(s), %d archive(s) et %d index fournis).",
 			len(r.Targets), len(r.Archives), len(r.Indexes))
 	}
+	return r.ValidateSettings()
+}
+
+// ValidateSettings vérifie tout sauf le nombre de copies.
+//
+// Un envoi ne compare rien : envoyer une seule copie à un collègue qui la
+// demande est légitime, et la règle des deux copies n'y a pas sa place. Les
+// réglages, eux, doivent tenir dans les deux cas.
+func (r Request) ValidateSettings() error {
 	if err := r.ValidateArchives(); err != nil {
 		return err
 	}
@@ -189,6 +198,22 @@ func (r *Report) Target(id string) (corpus.Target, bool) {
 		}
 	}
 	return corpus.Target{}, false
+}
+
+// Screening dit, pour chaque copie venue d'un index publié, de quel travail
+// elle vient — et par là, à qui la demander.
+//
+// C'est la seule distinction qui compte à la lecture d'un rapport mêlé : une
+// copie qu'on a lue s'ouvre, une copie qu'on a seulement mesurée ne s'ouvre pas.
+// Laisser croire le contraire ferait cliquer dans le vide.
+func (r *Report) Screening() map[string]string {
+	depistees := make(map[string]string, 8)
+	for _, inspected := range r.Inspected {
+		if inspected.Index != "" {
+			depistees[inspected.ID] = inspected.Index
+		}
+	}
+	return depistees
 }
 
 // Analyzed compte les copies réellement comparées.

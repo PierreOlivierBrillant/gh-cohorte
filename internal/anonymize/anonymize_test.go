@@ -410,3 +410,40 @@ func TestUnJetonNePeutPasFormerDeMot(t *testing.T) {
 		}
 	}
 }
+
+// Une copie qui a déjà voyagé sous un jeton doit repartir sous le même :
+// renvoyer la même copie sous un autre obligerait celui qui la reçoit à
+// deviner qu'il s'agit de la même, et il ne le pourrait pas.
+func TestUnJetonPeutEtreImpose(t *testing.T) {
+	impose := "K7DM2X"
+	anonymizer, err := anonymize.New([]anonymize.Identity{{
+		Work: "a26.5n6.01.tp1.emilie-cote", Token: impose,
+		Person: roster.Person{FullName: "Émilie Côté", Username: "ecote"},
+	}}, anonymize.Options{Seed: 3})
+	if err != nil {
+		t.Fatalf("anonymiseur : %v", err)
+	}
+	if jeton(t, anonymizer, "a26.5n6.01.tp1.emilie-cote") != impose {
+		t.Fatalf("jeton imposé non retenu")
+	}
+	anonymise, _ := anonymizer.Scrub("Travail d'Émilie Côté")
+	if !strings.Contains(anonymise, impose[:4]) {
+		t.Fatalf("le jeton imposé doit servir au remplacement : %q", anonymise)
+	}
+
+	// Un jeton qui n'est pas de cet outil est refusé : il porterait des
+	// voyelles, donc pourrait former un mot.
+	_, err = anonymize.New([]anonymize.Identity{
+		{Work: "x", Token: "BONJOUR"},
+	}, anonymize.Options{Seed: 3})
+	if err == nil {
+		t.Fatal("un jeton étranger doit être refusé")
+	}
+	// Et deux copies ne peuvent pas porter le même.
+	_, err = anonymize.New([]anonymize.Identity{
+		{Work: "x", Token: impose}, {Work: "y", Token: impose},
+	}, anonymize.Options{Seed: 3})
+	if err == nil {
+		t.Fatal("un jeton demandé deux fois doit être refusé")
+	}
+}

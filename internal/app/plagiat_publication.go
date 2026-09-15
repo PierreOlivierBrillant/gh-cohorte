@@ -1,15 +1,10 @@
 package app
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
-
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
@@ -92,12 +87,13 @@ func (m *manageSession) publierIndex(group *groups.Group) error {
 	if err := exchange.NewStore(m.session.Client, m.org).Publish(publie); err != nil {
 		return err
 	}
-	chemin, err := ecrireTableDIndex(m.session.Options.ReportDir, rapport.Basename(), table)
+	chemin, err := plagiarism.WriteIndexTable(m.session.Options.ReportDir,
+		rapport.Basename(), table)
 	if err != nil {
 		return err
 	}
 
-	ligne, err := ligneDeCatalogue(rapport, m.session.Viewer, true)
+	ligne, err := rapport.Teaching(m.session.Viewer, true)
 	if err != nil {
 		return err
 	}
@@ -110,50 +106,6 @@ func (m *manageSession) publierIndex(group *groups.Group) error {
 		"« %s » à %d personnes.", ligne.ID(), ligne.Copies)
 	console.Note("Table de correspondance, restée ici : %s", chemin)
 	return nil
-}
-
-// ligneDeCatalogue tire d'un rapport la ligne à publier.
-func ligneDeCatalogue(rapport *plagiarism.Report, teacher string,
-	indexed bool) (exchange.Teaching, error) {
-
-	scope, nom, ok := naming.SplitAssignment(rapport.Request.Assignment)
-	if !ok {
-		return exchange.Teaching{}, valid.Errorf(
-			"Publication : « %s » n'est pas un travail de la nomenclature.",
-			rapport.Request.Assignment)
-	}
-	dernier := ""
-	for _, cible := range rapport.Request.Targets {
-		if cible.HandedIn > dernier {
-			dernier = cible.HandedIn
-		}
-	}
-	if len(dernier) > 10 {
-		// Le jour suffit : l'heure daterait une personne.
-		dernier = dernier[:10]
-	}
-	return exchange.Teaching{
-		Scope: scope, Assignment: nom, Teacher: teacher,
-		Copies: len(rapport.Request.Targets), LastHandin: dernier,
-		Indexed: indexed, UpdatedAt: rapport.CreatedAt,
-	}, nil
-}
-
-// ecrireTableDIndex pose la table de correspondance à côté des rapports.
-func ecrireTableDIndex(directory, base string, table anonymize.Table) (string, error) {
-	dossier := filepath.Join(directory, plagiarism.Dir)
-	if err := os.MkdirAll(dossier, 0o700); err != nil {
-		return "", err
-	}
-	chemin := filepath.Join(dossier, base+"-index-correspondance.json")
-	payload, err := json.MarshalIndent(table, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(chemin, append(payload, '\n'), 0o600); err != nil {
-		return "", valid.Errorf("Table « %s » : %v.", chemin, err)
-	}
-	return chemin, nil
 }
 
 // montrerCatalogue liste les travaux d'un enseignant, tels que le catalogue de

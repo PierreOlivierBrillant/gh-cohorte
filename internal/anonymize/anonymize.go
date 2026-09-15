@@ -60,6 +60,13 @@ type Identity struct {
 	Person   roster.Person
 	Origin   string
 	HandedIn string
+	// Token impose le jeton plutôt que d'en tirer un.
+	//
+	// Il sert quand une copie a déjà voyagé sous un jeton : celui d'un index
+	// publié, par exemple. Renvoyer la même copie sous un autre jeton
+	// obligerait celui qui la reçoit à deviner qu'il s'agit de la même, et il
+	// ne le pourrait pas — c'est tout le propos d'un jeton opaque.
+	Token string
 }
 
 // Token est ce qui remplace une personne.
@@ -134,9 +141,14 @@ func New(identities []Identity, options Options) (*Anonymizer, error) {
 		if strings.TrimSpace(identity.Work) == "" {
 			return nil, valid.Errorf("Anonymisation : une copie sans identifiant.")
 		}
-		base, err := tirage(pris)
+		base, err := chosen(identity.Token, pris)
 		if err != nil {
 			return nil, err
+		}
+		if base == "" {
+			if base, err = tirage(pris); err != nil {
+				return nil, err
+			}
 		}
 		anonymizer.tokens[identity.Work] = Token{
 			Base: base, Work: identity.Work, Origin: identity.Origin,
@@ -384,6 +396,26 @@ func stretch(token string, length int) []rune {
 		stretched[index] = base[index%len(base)]
 	}
 	return stretched
+}
+
+// chosen retient un jeton imposé, ou rend une chaîne vide s'il n'y en a pas.
+func chosen(token string, pris map[string]bool) (string, error) {
+	token = strings.ToUpper(strings.TrimSpace(token))
+	if token == "" {
+		return "", nil
+	}
+	if pris[token] {
+		return "", valid.Errorf(
+			"Anonymisation : le jeton « %s » est demandé deux fois.", token)
+	}
+	for _, char := range token {
+		if !strings.ContainsRune(alphabet, char) {
+			return "", valid.Errorf(
+				"Anonymisation : « %s » n'est pas un jeton de cet outil.", token)
+		}
+	}
+	pris[token] = true
+	return token, nil
 }
 
 // newDraw rend un tireur de jetons. Une graine fixe le tirage, pour qu'une

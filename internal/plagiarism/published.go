@@ -125,8 +125,8 @@ func loadIndexes(sources Sources, request Request,
 			works = append(works, work)
 			inspected = append(inspected, corpus.Inspected{
 				ID: work.ID, Repo: "index de « " + published.Assignment + " »",
-				Kept: len(work.Files), Tokens: work.TokenCount(),
-				Prints: work.PrintCount(),
+				Index: published.Assignment, Kept: len(work.Files),
+				Tokens: work.TokenCount(), Prints: work.PrintCount(),
 			})
 		}
 	}

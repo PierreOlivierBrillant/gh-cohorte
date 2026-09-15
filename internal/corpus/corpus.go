@@ -54,6 +54,11 @@ type Target struct {
 	// elle sert à l'effacer, le jour où l'on anonymise ces copies pour les
 	// transmettre. Vide, seul le nom du dépôt sera cherché.
 	Person roster.Person
+	// Token impose le jeton sous lequel cette copie sera anonymisée. Il sert
+	// quand elle a déjà voyagé sous un jeton — celui d'un index publié — et
+	// qu'elle doit repartir sous le même : sans quoi celui qui la reçoit ne
+	// pourrait pas reconnaître la copie qu'il avait mesurée.
+	Token string
 	// HandedIn date la remise, quand on l'a déjà relevée. Elle ne sert pas non
 	// plus à l'analyse : elle accompagne la table de correspondance d'un envoi
 	// anonymisé, où savoir qui a remis en premier compte.
@@ -99,7 +104,12 @@ type Inspected struct {
 	// Short compte les fichiers retenus mais trop courts pour former un
 	// k-gramme. Ils restent dans l'index — ils ont été retenus, ils doivent
 	// rester visibles —, mais ils ne peuvent s'apparier à rien.
-	Short   int            `json:"short"`
+	Short int `json:"short"`
+	// Index nomme le travail dont l'index publié a fourni cette copie. Il est
+	// vide pour tout ce qui vient d'un dépôt : c'est lui qui distingue une
+	// copie qu'on a lue d'une copie qu'on a seulement mesurée, et donc celles
+	// qu'il faudra demander pour en voir une ligne.
+	Index   string         `json:"index,omitempty"`
 	Bytes   int            `json:"bytes"`
 	Tokens  int            `json:"tokens"`
 	Prints  int            `json:"prints"`

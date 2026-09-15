@@ -42,8 +42,11 @@ func Export(client corpus.Client, request Request, options anonymize.Options,
 	progress func(done, total int, id string)) (*Exported, error) {
 
 	request = request.normalized()
-	if err := request.Validate(); err != nil {
+	if err := request.ValidateSettings(); err != nil {
 		return nil, err
+	}
+	if len(request.Targets) == 0 {
+		return nil, valid.Errorf("Envoi anonymisé : aucune copie à envoyer.")
 	}
 	inspector, err := inspect.New(request.Inspection, request.Rules.Profiles)
 	if err != nil {
@@ -54,7 +57,7 @@ func Export(client corpus.Client, request Request, options anonymize.Options,
 	for _, target := range request.Targets {
 		identities = append(identities, anonymize.Identity{
 			Work: target.ID, Person: target.Person, Origin: target.Origin,
-			HandedIn: target.HandedIn,
+			HandedIn: target.HandedIn, Token: target.Token,
 		})
 	}
 	anonymizer, err := anonymize.New(identities, options)
