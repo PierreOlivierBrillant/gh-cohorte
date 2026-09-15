@@ -15,6 +15,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -132,7 +133,8 @@ func (m *manageSession) plagiat(group *groups.Group) error {
 			"dépôts n'ont rien reçu depuis, il n'y avait rien à retélécharger.",
 			rapport.Reused)
 	}
-	montrerRapport(console, rapport)
+	registre, _ := m.session.names(m.org)
+	montrerRapport(console, rapport, registre.Marks())
 	chemin, csv, err := rapport.Save(m.session.Options.ReportDir)
 	if err != nil {
 		return err
@@ -306,7 +308,8 @@ func racineDite(root string) string {
 }
 
 // montrerRapport affiche les paires, du plus suspect au moins suspect.
-func montrerRapport(console *ui.Console, rapport *plagiarism.Report) {
+func montrerRapport(console *ui.Console, rapport *plagiarism.Report,
+	marques signature.Book) {
 	console.Blank()
 	if écartées := rapport.Result.IgnoredBaseline + rapport.Result.IgnoredCommon; écartées > 0 {
 		console.Note("%d empreinte(s) écartée(s) : %d venant du gabarit distribué, "+
@@ -347,7 +350,7 @@ func montrerRapport(console *ui.Console, rapport *plagiarism.Report) {
 	} else if rapport.Result.ThresholdNote != "" {
 		console.Note("%s", rapport.Result.ThresholdNote)
 	}
-	montrerSignaux(console, rapport)
+	montrerSignaux(console, rapport, marques)
 	montrerSoucis(console, rapport)
 }
 
@@ -360,7 +363,8 @@ func repere(seuil, similarite float64) string {
 }
 
 // montrerSignaux rapporte ce que le winnowing ne voit pas.
-func montrerSignaux(console *ui.Console, rapport *plagiarism.Report) {
+func montrerSignaux(console *ui.Console, rapport *plagiarism.Report,
+	marques signature.Book) {
 	if len(rapport.Result.Signals) == 0 {
 		return
 	}
@@ -368,7 +372,17 @@ func montrerSignaux(console *ui.Console, rapport *plagiarism.Report) {
 	for _, signal := range rapport.Result.Signals {
 		switch signal.Kind {
 		case similarity.SharedSignature:
-			console.Warning("Même signature dans %s.", strings.Join(signal.Works, ", "))
+			// La marque seule ne dit rien : c'est le registre qui répond à
+			// « de qui est-elle ». Un collègue qui ne l'a pas voit la
+			// coïncidence sans voir le nom, et c'est voulu.
+			porteur := ""
+			if ligne, connue := marques.Who(signal.Detail); connue {
+				porteur = " — délivrée à @" + ligne.Username +
+					" pour « " + ligne.Assignment + " »"
+			}
+			console.Warning("Même marque invisible dans %s%s. Deux travaux qui "+
+				"la portent n'ont pas d'explication innocente.",
+				strings.Join(signal.Works, ", "), porteur)
 		case similarity.SharedComment:
 			console.Warning("Commentaire identique dans %s : « %s »",
 				strings.Join(signal.Works, ", "), abrege(signal.Detail))

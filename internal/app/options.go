@@ -125,6 +125,11 @@ type Options struct {
 	// leurs ressemblances et les classe par ordre de suspicion. Ce n'est pas un
 	// verdict — le rapport le dit lui-même à chaque fois.
 	Plagiarism bool
+	// NoSign renonce à la marque invisible déposée dans le README de chaque
+	// dépôt distribué. NoSignSet distingue le drapeau absent d'un
+	// « --no-sign=false », qui la rétablit après l'avoir désactivée.
+	NoSign    bool
+	NoSignSet bool
 	// EmitWorkflow dépose le gabarit de passe automatisée, puis quitte. Sans
 	// valeur, il l'écrit à sa place ordinaire.
 	EmitWorkflow    string
@@ -292,6 +297,10 @@ Drapeaux :
                            une ressemblance forte n'est pas une preuve)
   --emit-workflow [CHEMIN] déposer le gabarit de passe GitHub Actions puis
                            quitter (défaut : .github/workflows/plagiat.yml)
+  --no-sign[=false]        ne pas déposer, dans le README de chaque dépôt, une
+                           marque invisible propre à son destinataire. Deux
+                           travaux qui portent la même n'ont pas d'explication
+                           innocente ; l'absence de marque, elle, ne prouve rien
   --publish-index          publier l'index d'empreintes du travail géré, pour que
                            vos collègues y comparent leurs copies. Ce sont des
                            hachés : ni code, ni nom ne quittent votre poste
@@ -440,6 +449,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"comparer entre elles les copies du travail géré")
 	emitWorkflow := set.String("emit-workflow", unset,
 		"déposer le gabarit de passe GitHub Actions puis quitter")
+	noSign := set.String("no-sign", unset,
+		"ne pas déposer de marque invisible dans les dépôts distribués")
 	set.BoolVar(&options.PublishIndex, "publish-index", false,
 		"publier l'index d'empreintes du travail géré")
 	set.StringVar(&options.Against, "against", "",
@@ -555,6 +566,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.Teachers = splitList(*enseignants)
 	}
 
+	if *noSign != unset {
+		options.NoSignSet = true
+		options.NoSign = *noSign == "" || strings.EqualFold(*noSign, "true")
+	}
 	if *emitWorkflow != unset {
 		options.EmitWorkflowSet = true
 		options.EmitWorkflow = *emitWorkflow

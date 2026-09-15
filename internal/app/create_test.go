@@ -312,7 +312,8 @@ func TestFichiersDeDepartDeposes(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	fichiers := h.State.Files("acme/tp1-emilie-cote", "main")
-	if fichiers["README.md"] != "# À faire\n" || fichiers["src/main.py"] != "# à compléter\n" {
+	if sansMarque(fichiers["README.md"]) != "# À faire\n" ||
+		fichiers["src/main.py"] != "# à compléter\n" {
 		t.Fatalf("contenu = %+v", fichiers)
 	}
 	if len(fichiers) != 2 {
@@ -762,7 +763,8 @@ func TestForcerLesFichiersDeDepartDepuisLaLigneDeCommande(t *testing.T) {
 	if code := h.muet(); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
-	if fichiers := h.State.Files("acme/tp1-emilie-cote", "main"); fichiers["README.md"] != "# À faire\n" {
+	fichiers := h.State.Files("acme/tp1-emilie-cote", "main")
+	if sansMarque(fichiers["README.md"]) != "# À faire\n" {
 		t.Errorf("--force-starter doit écraser : %+v", fichiers)
 	}
 }
@@ -934,4 +936,28 @@ func TestQuestionsDeCheminEnGestion(t *testing.T) {
 	if !trouvee || question.Complete != complete.Path {
 		t.Errorf("question = %+v, trouvée = %v", question, trouvee)
 	}
+}
+
+// sansMarque retire d'un contenu la marque invisible, pour que les épreuves de
+// contenu comparent ce qui se lit.
+//
+// La marque est faite de blancs posés sur des lignes vides : la retirer revient
+// à rendre à ces lignes leur vacuité. Une épreuve qui la verrait comparerait
+// autre chose que ce qu'un étudiant ouvre.
+func sansMarque(contenu string) string {
+	lignes := strings.Split(contenu, "\n")
+	nettoyees := make([]string, 0, len(lignes))
+	for _, ligne := range lignes {
+		if strings.TrimSpace(ligne) == "" {
+			nettoyees = append(nettoyees, "")
+			continue
+		}
+		nettoyees = append(nettoyees, ligne)
+	}
+	// Les lignes vides ajoutées en queue par la marque disparaissent avec elle.
+	for len(nettoyees) > 1 && nettoyees[len(nettoyees)-1] == "" &&
+		nettoyees[len(nettoyees)-2] == "" {
+		nettoyees = nettoyees[:len(nettoyees)-1]
+	}
+	return strings.Join(nettoyees, "\n")
 }

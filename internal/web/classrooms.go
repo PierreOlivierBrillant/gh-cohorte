@@ -11,6 +11,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
@@ -490,6 +491,7 @@ func (s *Server) handleAddStudent(writer http.ResponseWriter, request *http.Requ
 			}
 			executor := runner.New(s.deps.Client, remise.Settings, remise.Bundle)
 			report, err := executor.Run(remise.Items, runner.Options{
+				Sign:        !remise.Settings.NoSign,
 				TeacherTeam: equipe, TeacherPermission: droit,
 				OnProgress: func(_, _ int, result runner.Result) {
 					job.Line(result.Repo+" : "+result.Status, result)
@@ -1346,6 +1348,7 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 		report, err := executor.Run(items, runner.Options{
 			DryRun:            body.DryRun,
 			ForceStarter:      body.ForceStarter,
+			Sign:              !settings.NoSign,
 			TeacherTeam:       equipe,
 			TeacherPermission: droit,
 			OnProgress: func(index, total int, result runner.Result) {
@@ -1360,9 +1363,21 @@ func (s *Server) handleCreateAssignment(writer http.ResponseWriter, request *htt
 			// Voir « updateInventory » : une création se relit, un renommage se suit.
 			s.forget(cours.Org)
 		}
+		// Les marques délivrées montent au registre : c'est le seul endroit qui
+		// dira un jour à qui appartient l'une d'elles. Un échec ne fait pas
+		// échouer la distribution — les dépôts sont créés — mais il se dit.
+		if !body.DryRun && report.Signed() > 0 {
+			if _, err := s.registryOf(cours.Org).Apply(
+				registry.Mark(report.Signatures(settings.Assignment)...)); err != nil {
+				job.Warn("Marques non enregistrées au registre : " + err.Error() +
+					". Les dépôts sont signés, mais rien ne dira à qui " +
+					"appartient une marque.")
+			}
+		}
 
 		bilan := map[string]any{
 			"report": report, "assignment": settings.Assignment,
+			"signed":     report.Signed(),
 			"short_name": cours.ShortName(settings.Assignment),
 			"created":    report.Count(runner.Created),
 			"existing":   report.Count(runner.Existing),

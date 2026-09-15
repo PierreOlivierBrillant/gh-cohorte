@@ -222,6 +222,12 @@ déjà distribués continuent de fonctionner.
   un détecteur de plagiat** : une ressemblance forte n'est pas une preuve — elle
   se vérifie en lisant les passages communs, et elle s'explique parfois. L'outil
   le redit sur chaque écran, et ce n'est pas une formule de politesse.
+  Chaque dépôt distribué reçoit en outre une **marque invisible** propre à son
+  destinataire : un jeton tiré au hasard, écrit en espaces et en tabulations sur
+  une ligne vide du README. Rien ne se voit, l'étudiant ne peut ni la lire ni la
+  deviner, et deux travaux qui portent la même n'ont pas d'explication
+  innocente. Son absence, en revanche, ne prouve rien : un formateur l'efface
+  sans le savoir. Elle se désactive dans les réglages, ou par `--no-sign`.
   La comparaison porte sur le groupe, sur le cours, ou sur toutes les sessions
   (`--reach`). Un cours qui a changé de sigle n'est retrouvé que si on l'a dit :
   les équivalences — « 5N6 est devenu 5M6 » — se déclarent une fois dans le

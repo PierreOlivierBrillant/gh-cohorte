@@ -692,6 +692,7 @@ func (m *manageSession) addRepos(group *groups.Group) error {
 		WithClock(session.Sleep, session.Now)
 	report, err := executor.Run(items, runner.Options{
 		ForceStarter: session.Options.ForceStarter,
+		Sign:         !session.Settings.NoSign,
 		OnProgress: func(index, total int, result runner.Result) {
 			session.printProgress(index, total, result, width)
 		},

@@ -4390,6 +4390,7 @@ async function changerOrganisation(org) {
 $('reglages-enregistrer').addEventListener('click', async () => {
   etat.reglages.delay_seconds = Number($('reglage-delay').value) || 0;
   etat.reglages.clone_dir = $('reglage-clone-dir').value.trim();
+  etat.reglages.no_sign = !$('reglage-signature').checked;
   const bilan = await tenter(() => api('PUT', '/api/settings', etat.reglages), 'Réglages');
   if (!bilan) return;
   $('reglages-etat').textContent = bilan.saved
@@ -6232,6 +6233,10 @@ async function demarrer() {
 function ecrireReglagesGeneraux() {
   const contexte = etat.contexte || {};
   $('reglage-delay').value = etat.reglages.delay_seconds ?? 1;
+  // Le réglage est écrit à l'envers côté serveur — « ne pas signer » — pour
+  // qu'un fichier de réglages écrit avant qu'elle existe se relise avec la
+  // marque active. La case, elle, dit ce qu'on fait.
+  $('reglage-signature').checked = !etat.reglages.no_sign;
   $('reglage-clone-dir').value = etat.reglages.clone_dir || '';
   $('reglages-selecteur').textContent = contexte.native_picker
     ? `« Parcourir… » ouvre la fenêtre du système (${contexte.native_picker}).`
@@ -6897,19 +6902,36 @@ function dessinerSignauxPlagiat() {
   corps.append(el('p', {
     classe: 'note',
     texte: 'Ces coïncidences sont relevées à part, et ne comptent pas dans la '
-      + 'similarité. Un commentaire identique au mot près n’a pas d’explication '
-      + 'innocente aussi souvent qu’une ressemblance de code.',
+      + 'similarité. Deux travaux qui portent la même marque invisible n’ont pas '
+      + 'd’explication innocente ; l’absence de marque, elle, ne prouve rien — '
+      + 'un formateur l’efface sans le savoir.',
   }));
+  const porteurs = etat.plagiat.donnees.marks || {};
   for (const signal of signaux) {
-    const quoi = signal.kind === 'signature'
-      ? 'Même signature invisible'
-      : 'Commentaire identique';
+    if (signal.kind !== 'signature') {
+      corps.append(el('p', {},
+        el('strong', { texte: 'Commentaire identique : ' }),
+        el('span', { texte: signal.works.join(', ') }),
+        el('span', { classe: 'note', texte: ` — « ${signal.detail} »` })));
+      continue;
+    }
+    // La marque seule ne dit rien : c'est le registre qui répond à « de qui
+    // est-elle ». Un collègue qui ne l'a pas voit la coïncidence sans le nom.
+    const porteur = porteurs[signal.detail];
     corps.append(el('p', {},
-      el('strong', { texte: quoi + ' : ' }),
+      el('strong', { texte: 'Même marque invisible : ' }),
       el('span', { texte: signal.works.join(', ') }),
-      signal.detail && signal.kind !== 'signature'
-        ? el('span', { classe: 'note', texte: ` — « ${signal.detail} »` })
-        : null));
+      porteur
+        ? el('span', {
+          classe: 'note',
+          texte: ` — délivrée à ${porteur.full_name || '@' + porteur.username}`
+            + ` pour « ${porteur.assignment} ».`,
+        })
+        : el('span', {
+          classe: 'note',
+          texte: ' — le registre ne dit pas à qui elle a été délivrée : elle '
+            + 'vient d’ailleurs, et seul son expéditeur peut le dire.',
+        })));
   }
   zone.append(el('div', { classe: 'boite' },
     el('div', { classe: 'boite-entete' },

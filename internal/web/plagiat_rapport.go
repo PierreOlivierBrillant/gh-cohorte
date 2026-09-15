@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -111,6 +112,7 @@ func (s *Server) handlePlagiarismReport(writer http.ResponseWriter, request *htt
 		"inspection": report.Request.Inspection,
 		"works":      works(report),
 		"result":     report.Result,
+		"marks":      s.porteursDeMarques(report),
 		"problems":   report.Problems,
 		"inspected":  report.Inspected,
 	})
@@ -222,4 +224,35 @@ func (s *Server) pairRequest(request *http.Request) (
 		return nil, body, valid.Errorf("Paire incomplète : deux copies sont attendues.")
 	}
 	return report, body, nil
+}
+
+// porteursDeMarques rend, pour chaque marque relevée en double, la personne à
+// qui elle a été délivrée.
+//
+// La marque seule ne dit rien : c'est le registre qui répond à « de qui
+// est-elle ». Un collègue qui ne l'a pas voit la coïncidence sans voir le nom,
+// et c'est exactement ce qu'on veut — la coïncidence se constate à deux, la
+// levée du nom appartient à qui a distribué le travail.
+func (s *Server) porteursDeMarques(report *plagiarism.Report) map[string]any {
+	porteurs := map[string]any{}
+	org := strings.TrimSpace(report.Request.Org)
+	if org == "" {
+		org = s.org()
+	}
+	set, _ := s.names(org)
+	marques := set.Marks()
+	for _, signal := range report.Result.Signals {
+		if signal.Kind != similarity.SharedSignature || signal.Detail == "" {
+			continue
+		}
+		ligne, connue := marques.Who(signal.Detail)
+		if !connue {
+			continue
+		}
+		porteurs[signal.Detail] = map[string]any{
+			"username": ligne.Username, "full_name": set.Name(ligne.Username),
+			"assignment": ligne.Assignment, "issued_at": ligne.IssuedAt,
+		}
+	}
+	return porteurs
 }

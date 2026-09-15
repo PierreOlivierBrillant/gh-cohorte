@@ -205,6 +205,11 @@ func (s *Session) run() (int, error) {
 		return ExitValidation, err
 	}
 	s.Rules = declarees
+	// Le drapeau vaut pour cette exécution et pour les suivantes : la marque
+	// est un réglage de distribution, comme le droit accordé ou la visibilité.
+	if s.Options.NoSignSet {
+		s.Settings.NoSign = s.Options.NoSign
+	}
 
 	// Déposer le gabarit ne demande ni jeton ni réseau : c'est un fichier à
 	// écrire, et rien d'autre.
