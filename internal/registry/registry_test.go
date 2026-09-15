@@ -441,3 +441,31 @@ func TestDeuxNomsQuiSeContredisentSeSignalent(t *testing.T) {
 		t.Error("le slug de la ligne écartée est perdu")
 	}
 }
+
+// Une liste de paires où l'on lit « Émilie Côté » d'un côté et
+// « h24.5m6.02.tp-1.ancien-eleve » de l'autre est une liste qu'il faut
+// déchiffrer ligne à ligne.
+func TestNameForRendUnNomLisibleMemeSansFiche(t *testing.T) {
+	set, _, err := registry.Empty().With(registry.Learn(
+		roster.Person{FullName: "Émilie Côté", Username: "ecote"},
+	), "2026-09-15")
+	if err != nil {
+		t.Fatalf("registre : %v", err)
+	}
+
+	if nom := set.NameFor("a26.5n6.01.tp1.emilie-cote"); nom != "Émilie Côté" {
+		t.Fatalf("nom connu : %q", nom)
+	}
+	// Personne ne réclame ce slug : c'est lui qu'on montre, pas le dépôt entier.
+	if nom := set.NameFor("h24.5m6.02.tp-1.ancien-eleve"); nom != "ancien-eleve" {
+		t.Fatalf("nom inconnu : %q", nom)
+	}
+	// Un dépôt hors nomenclature garde son nom : il n'y a rien à en tirer.
+	if nom := set.NameFor("notes-du-cours"); nom != "notes-du-cours" {
+		t.Fatalf("hors nomenclature : %q", nom)
+	}
+	var absent *registry.Set
+	if nom := absent.NameFor("a26.5n6.01.tp1.emilie-cote"); nom != "emilie-cote" {
+		t.Fatalf("sans registre : %q", nom)
+	}
+}

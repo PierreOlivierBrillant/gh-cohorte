@@ -28,13 +28,16 @@
 package registry
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -56,6 +59,17 @@ const (
 	// rythme ni sous la même main, et deux fichiers rendent lisible sur
 	// github.com ce qu'un commit a vraiment touché.
 	AssignmentsFile = "travaux.json"
+	// RulesFile porte ce que l'équipe déclare pour la comparaison des copies :
+	// les sigles qui désignent le même cours au fil des ans, les noms qui
+	// désignent le même travail, les profils d'inspection maison. Il est à
+	// part parce qu'il ne parle de personne : le modifier n'engage aucun
+	// renseignement personnel, et il peut se relire sur github.com sans
+	// exposer une liste de noms.
+	RulesFile = "regles.json"
+	// CatalogFile porte le catalogue des travaux donnés : la place, le nom du
+	// travail, un décompte. Il est à part parce qu'il ne nomme personne — un
+	// collègue peut le lire sans qu'aucune liste de classe ne lui soit ouverte.
+	CatalogFile = exchange.CatalogFile
 	// ReadmeFile explique le dépôt à qui l'ouvre sur github.com. C'est bien
 	// « README.md » : GitHub n'affiche que celui-là sur la page du dépôt, et
 	// c'est aussi le fichier que la création avec « auto_init » y dépose — le
@@ -199,10 +213,19 @@ type Set struct {
 	// les scelle — ce qu'on a lu de l'une vaut aussi longtemps que l'autre.
 	assignments  []Assignment
 	byAssignment map[string]int
+	// Les règles que l'équipe déclare : équivalences de sigles, profils
+	// d'inspection, bornes préférées. Elles voyagent avec le reste parce qu'un
+	// seul commit scelle les fichiers.
+	rules rules.Rules
+	// Le catalogue des travaux donnés : la place, le nom, un décompte. Il ne
+	// nomme aucun étudiant, et c'est lui qui permet à un enseignant de voir ce
+	// qu'un collègue a donné sans voir ses dépôts.
+	catalog exchange.Catalog
 }
 
 // newSet range les fiches et dresse ses index.
-func newSet(users []User, assignments []Assignment) *Set {
+func newSet(users []User, assignments []Assignment, declared rules.Rules,
+	catalog exchange.Catalog) *Set {
 	rangees := append([]User(nil), users...)
 	sort.SliceStable(rangees, func(i, j int) bool {
 		return rangees[i].Key() < rangees[j].Key()
@@ -212,6 +235,8 @@ func newSet(users []User, assignments []Assignment) *Set {
 		return travaux[i].Key() < travaux[j].Key()
 	})
 	set := &Set{
+		rules:        declared,
+		catalog:      catalog,
 		users:        rangees,
 		byLogin:      make(map[string]int, len(rangees)),
 		bySlug:       make(map[string]int, 2*len(rangees)),
@@ -235,7 +260,37 @@ func newSet(users []User, assignments []Assignment) *Set {
 
 // Empty rend un registre vide : celui d'une organisation qu'on n'a pas encore
 // amorcée.
-func Empty() *Set { return newSet(nil, nil) }
+func Empty() *Set { return newSet(nil, nil, rules.Rules{}, exchange.Catalog{}) }
+
+// Rules rend ce que l'organisation déclare.
+func (s *Set) Rules() rules.Rules { return s.rules }
+
+// Catalog rend ce que l'organisation sait des travaux donnés.
+func (s *Set) Catalog() exchange.Catalog {
+	if s == nil {
+		return exchange.Catalog{}
+	}
+	return s.catalog
+}
+
+// NameFor rend le nom complet derrière un dépôt de la nomenclature.
+//
+// À défaut, c'est le fragment qui nomme la personne — « ancien-eleve » — et non
+// le nom du dépôt entier. La différence compte à l'écran : une liste de paires
+// où l'on lit « Émilie Côté » d'un côté et « h24.5m6.02.tp-1.ancien-eleve » de
+// l'autre est une liste qu'il faut déchiffrer ligne à ligne.
+func (s *Set) NameFor(repoName string) string {
+	parts, reconnu := naming.Parse(repoName)
+	if !reconnu {
+		return repoName
+	}
+	if s != nil {
+		if user, connu := s.Resolve(parts.Student); connu && user.FullName != "" {
+			return user.FullName
+		}
+	}
+	return parts.Student
+}
 
 // Len compte les personnes connues.
 func (s *Set) Len() int { return len(s.users) }
@@ -372,6 +427,13 @@ type Change struct {
 	// n'y a pas de geste séparé pour cela, c'est la même décision prise dans
 	// l'autre sens.
 	Deadlines []Assignment
+	// Rules remplace les règles de l'organisation. Nil n'y touche pas — c'est
+	// la différence entre « je ne déclare rien » et « je retire tout ».
+	Rules *rules.Rules
+	// Teaching verse des lignes au catalogue des travaux. Contrairement aux
+	// règles, il ne remplace pas : chacun n'y écrit que ses lignes, et publier
+	// les siennes ne doit pas retirer celles d'un collègue.
+	Teaching []exchange.Teaching
 	// Reason est ce que dira le message de commit. Vide, il est composé.
 	Reason string
 }
@@ -432,7 +494,18 @@ func Reschedule(travaux ...Assignment) Change {
 // Empty dit qu'il n'y a rien à écrire.
 func (c Change) Empty() bool {
 	return len(c.Learn) == 0 && len(c.Forget) == 0 &&
-		len(c.Roles) == 0 && len(c.Deadlines) == 0
+		len(c.Roles) == 0 && len(c.Deadlines) == 0 && c.Rules == nil &&
+		len(c.Teaching) == 0
+}
+
+// Declare compose le changement qui remplace les règles de l'organisation.
+func Declare(declared rules.Rules) Change {
+	return Change{Rules: &declared, Reason: "Règles de comparaison"}
+}
+
+// Publish compose le changement qui verse des travaux au catalogue.
+func Publish(entries ...exchange.Teaching) Change {
+	return Change{Teaching: entries, Reason: "Travaux donnés"}
 }
 
 // With applique un changement et rend le registre qui en résulte, avec un
@@ -510,7 +583,33 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	return newSet(fiches, travaux), bouge || datesOnt, nil
+
+	catalogue, catalogueOnt, err := s.catalog.With(change.Teaching)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Les règles se remplacent en bloc plutôt que de se fusionner : ce qu'on
+	// déclare est la liste complète des équivalences, et en retirer une doit
+	// pouvoir se faire. Les fusionner rendrait tout ajout définitif.
+	declarees, regleOnt := s.rules, false
+	if change.Rules != nil {
+		valides, err := change.Rules.Validate()
+		if err != nil {
+			return nil, false, err
+		}
+		avant, err := rules.Encode(s.rules)
+		if err != nil {
+			return nil, false, err
+		}
+		apres, err := rules.Encode(valides)
+		if err != nil {
+			return nil, false, err
+		}
+		declarees, regleOnt = valides, !bytes.Equal(avant, apres)
+	}
+	return newSet(fiches, travaux, declarees, catalogue),
+		bouge || datesOnt || regleOnt || catalogueOnt, nil
 }
 
 // scheduled applique à la section des échéances ce qu'un changement lui
@@ -723,7 +822,7 @@ func Decode(content []byte) (*Set, []string) {
 			"%d fiches en double réunies aux leurs")+
 			" : le fichier gagnerait à être nettoyé.")
 	}
-	return newSet(fiches, nil), soucis
+	return newSet(fiches, nil, rules.Rules{}, exchange.Catalog{}), soucis
 }
 
 // fondue réunit deux fiches que le fichier donne pour un même compte, et dit si
