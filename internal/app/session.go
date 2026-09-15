@@ -276,6 +276,9 @@ func (s *Session) run() (int, error) {
 	if mode == "demandes" {
 		return s.demandesMode()
 	}
+	if mode == "index-manquants" {
+		return s.publierLesIndexManquants()
+	}
 	if mode == "etudiants" {
 		return newDirectorySession(s).run()
 	}
@@ -323,6 +326,11 @@ func (s *Session) chooseMode() (string, error) {
 	// elle-même le travail qu'elle concerne.
 	if s.Options.decidesAsk() {
 		return "demandes", nil
+	}
+	// « --publish-index » sans travail ne gère rien non plus : c'est le
+	// catalogue qui dit lesquels n'ont pas d'index.
+	if s.Options.PublishIndex && strings.TrimSpace(s.Options.Manage) == "" {
+		return "index-manquants", nil
 	}
 	// La fiche d'un compte prime sur l'annuaire : « --students --user X » veut
 	// dire « cet utilisateur-là », et non « la liste, plus lui ».

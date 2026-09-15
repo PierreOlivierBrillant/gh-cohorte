@@ -262,6 +262,7 @@ Utilisation :
   gh cohorte --export-zip envoi.zip --manage a26.5n6.01.tp1
   gh cohorte --plagiarism --manage a26.5n6.01.tp1 --import-zip recu.zip
   gh cohorte --publish-index --manage a26.5n6.01.tp1
+  gh cohorte --publish-index --org acme -y       rattraper les index manquants
   gh cohorte --plagiarism --manage a26.5n6.01.tp1 --against a26.5n6.02.tp1
   gh cohorte --ask a26.5n6.02.tp1:K7DM2X --reason "deux TP quasi identiques"
   gh cohorte --requests
@@ -317,7 +318,10 @@ Drapeaux :
                            innocente ; l'absence de marque, elle, ne prouve rien
   --publish-index          publier l'index d'empreintes du travail géré, pour que
                            vos collègues y comparent leurs copies. Ce sont des
-                           hachés : ni code, ni nom ne quittent votre poste
+                           hachés : ni code, ni nom ne quittent votre poste.
+                           Sans « --manage », publie l'index de chaque travail
+                           annoncé qui n'en a pas encore : c'est la forme qu'une
+                           passe automatisée répète
   --against TRAVAUX        travaux d'un collègue à comparer aux vôtres, par leur
                            identifiant (« a26.5n6.02.tp1 »). Leur index doit
                            avoir été publié
@@ -613,8 +617,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	// drapeau ouvre donc le mode gestion de lui-même. Sans préfixe, l'assistant
 	// demande lequel, comme « --manage » sans valeur.
 	// « --grant » se sert du même « --export-zip » pour dire où écrire, mais il
-	// ne gère aucun travail : c'est la demande qui dit lequel.
-	if options.Plagiarism || options.PublishIndex ||
+	// ne gère aucun travail : c'est la demande qui dit lequel. Et
+	// « --publish-index » sans travail ne gère rien non plus : il rattrape tous
+	// ceux qui n'ont pas d'index.
+	if options.Plagiarism || (options.PublishIndex && options.Manage != "") ||
 		(options.ExportZip != "" && !options.decidesAsk()) {
 		options.ManageRequested = true
 	}

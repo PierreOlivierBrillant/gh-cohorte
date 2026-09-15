@@ -14,6 +14,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
@@ -490,4 +491,85 @@ func TestLOrdreDesRemisesEstDitSousLeTableauDesPaires(t *testing.T) {
 	// dit ce que cet ordre ne prouve pas.
 	suivant.contient("Ordre des remises", "Jean-Luc Picard le 2026-09-01",
 		"Émilie Côté le 2026-09-20", "pas qui a copié qui")
+}
+
+// La forme qu'une passe automatisée répète : sans travail nommé, les index
+// annoncés qui manquent sont rattrapés, et l'état normal — il n'en manque
+// aucun — se dit sans erreur.
+func TestSansTravailNommeLesIndexManquantsSontRattrapes(t *testing.T) {
+	h := groupeRemis(t)
+	h.Options.PublishIndex = true
+	h.Options.Manage = "a26.5n6.01.tp1"
+	h.Options.ManageRequested = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("publication : code = %d\n%s", code, h.texte())
+	}
+
+	// Tout est publié : la passe le dit, et ne touche à rien.
+	rien := nouveauDansLeMemeDossier(t, h)
+	rien.Options.PublishIndex = true
+	rien.Options.Manage = ""
+	rien.Options.ManageRequested = false
+	rien.Options.Yes = true
+	if code := rien.muet(); code != app.ExitOK {
+		t.Fatalf("rien à rattraper : code = %d\n%s", code, rien.texte())
+	}
+	rien.contient("Tous les travaux que vous avez annoncés ont leur index")
+
+	// Le travail redevient annoncé sans index — ce que voit un collègue à qui
+	// l'on n'a publié que le catalogue. La passe le rattrape sans qu'on ait à
+	// le nommer.
+	desindexer(t, h, "a26.5n6.01.tp1")
+	passe := nouveauDansLeMemeDossier(t, h)
+	passe.Options.PublishIndex = true
+	passe.Options.Manage = ""
+	passe.Options.ManageRequested = false
+	passe.Options.Yes = true
+	if code := passe.muet(); code != app.ExitOK {
+		t.Fatalf("rattrapage : code = %d\n%s", code, passe.texte())
+	}
+	passe.contient("Index manquants", "a26.5n6.01.tp1", "1 index publié(s)")
+
+	// Et il ne manque plus rien : la passe est idempotente, ce qui est toute
+	// la raison de la laisser tourner chaque semaine.
+	apres := nouveauDansLeMemeDossier(t, h)
+	apres.Options.PublishIndex = true
+	apres.Options.Manage = ""
+	apres.Options.ManageRequested = false
+	apres.Options.Yes = true
+	if code := apres.muet(); code != app.ExitOK {
+		t.Fatalf("seconde passe : code = %d\n%s", code, apres.texte())
+	}
+	apres.contient("Tous les travaux que vous avez annoncés ont leur index")
+}
+
+// desindexer remet une ligne du catalogue dans l'état « annoncé, sans index ».
+func desindexer(t *testing.T, h *harnais, travail string) {
+	t.Helper()
+	fichiers := h.State.Files("acme/.cohorte", "main")
+	contenu, present := fichiers[exchange.CatalogFile]
+	if !present {
+		t.Fatalf("aucun catalogue publié : %v", fichiers)
+	}
+	var catalogue exchange.Catalog
+	if err := json.Unmarshal([]byte(contenu), &catalogue); err != nil {
+		t.Fatalf("catalogue : %v", err)
+	}
+	trouve := false
+	for index := range catalogue.Teaching {
+		if catalogue.Teaching[index].Key() == travail {
+			catalogue.Teaching[index].Indexed = false
+			trouve = true
+		}
+	}
+	if !trouve {
+		t.Fatalf("« %s » n'est pas au catalogue : %+v", travail, catalogue.Teaching)
+	}
+	payload, err := json.Marshal(catalogue)
+	if err != nil {
+		t.Fatalf("catalogue : %v", err)
+	}
+	fichiers[exchange.CatalogFile] = string(payload)
+	h.State.SeedCommit("acme/.cohorte", fichiers, "main")
 }

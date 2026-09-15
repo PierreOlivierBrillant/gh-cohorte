@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
@@ -9,6 +10,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"strconv"
 )
 
 // Publier ce qu'on a donné.
@@ -135,4 +137,77 @@ func montrerCatalogue(console *ui.Console, catalogue exchange.Catalog, compte st
 	console.Note("Comparer vos copies aux siennes : gh cohorte --plagiarism "+
 		"--manage VOTRE-TRAVAIL --against %s — ce sont des empreintes qui "+
 		"circulent, jamais du code.", siens[0].ID())
+}
+
+// Publier ce qui manque, d'un coup.
+//
+// Un travail annoncé au catalogue sans index publié ne sert à moitié : un
+// collègue voit qu'il existe, et ne peut rien y mesurer — il ne peut que
+// demander qu'on le publie. Les rattraper un par un est le genre de corvée
+// qu'on remet, et c'est exactement ce qu'une passe automatisée sait faire à
+// notre place.
+//
+// Ce qui est « manquant » se décide au catalogue, dans le domaine : le
+// terminal, le navigateur et le workflow doivent en avoir la même idée.
+
+// publierLesIndexManquants publie l'index de chaque travail annoncé qui n'en a
+// pas encore.
+func (s *Session) publierLesIndexManquants() (int, error) {
+	org := s.Settings.Org
+	set, avis := s.names(org)
+	if avis != "" {
+		s.Console.Print(s.Console.Warn(avis))
+	}
+	if set == nil {
+		return ExitValidation, valid.Errorf(
+			"Publication : le registre de « %s » n'a pas pu être lu.", org)
+	}
+	manquants := set.Catalog().Unindexed(s.Viewer)
+
+	s.Console.Heading("Index manquants")
+	if len(manquants) == 0 {
+		s.Console.Success("Tous les travaux que vous avez annoncés ont leur index.")
+		s.Console.Note("Pour en republier un après coup : « --publish-index " +
+			"--manage a26.5n6.01.tp1 ».")
+		return ExitOK, nil
+	}
+	lignes := make([][]string, 0, len(manquants))
+	for _, ligne := range manquants {
+		lignes = append(lignes, []string{
+			ligne.ID(), strconv.Itoa(ligne.Copies), ligne.LastHandin,
+		})
+	}
+	s.Console.Table([]string{"Travail", "Copies", "Dernière remise"}, lignes, 0)
+	s.Console.Note("Ce qui part : des empreintes et des jetons. Ni code, ni nom. " +
+		"Les tables qui relient les jetons aux personnes restent sur ce poste.")
+
+	if !s.Options.Yes {
+		suite, err := s.Prompt.Confirm(
+			fmt.Sprintf("Publier %d index ?", len(manquants)), true)
+		if err != nil || !suite {
+			return ExitOK, err
+		}
+	}
+
+	// Un travail qui échoue n'arrête pas les autres : une passe qui s'arrête au
+	// premier dépôt supprimé ne publierait jamais rien.
+	publies, echecs := 0, 0
+	for _, ligne := range manquants {
+		manager, _, groupe, err := s.travailOuvert(ligne.ID())
+		if err == nil {
+			err = manager.publierIndex(groupe)
+		}
+		if err != nil {
+			echecs++
+			s.Console.Failure("%s : %v", ligne.ID(), err)
+			continue
+		}
+		publies++
+	}
+	if echecs > 0 {
+		s.Console.Warning("%d index publié(s), %d en échec.", publies, echecs)
+		return ExitFailure, nil
+	}
+	s.Console.Success("%d index publié(s).", publies)
+	return ExitOK, nil
 }

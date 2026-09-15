@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
@@ -394,25 +395,39 @@ func (s *Session) accorder(demande exchange.Ask, destination string) error {
 	return nil
 }
 
-// requeteDuTravail rebâtit la demande d'analyse d'un travail à soi, pour en
-// tirer l'envoi d'une seule copie.
-func (s *Session) requeteDuTravail(assignment string) (plagiarism.Request, error) {
-	place, nom, reconnu := naming.SplitAssignment(assignment)
+// travailOuvert ouvre un travail nommé par son identifiant, sans passer par le
+// choix de groupe de l'assistant : les drapeaux et les demandes le désignent
+// déjà en entier.
+func (s *Session) travailOuvert(assignment string) (
+	*manageSession, classroom.Classroom, *groups.Group, error) {
+
+	place, _, reconnu := naming.SplitAssignment(assignment)
 	if !reconnu {
-		return plagiarism.Request{}, valid.Errorf(
+		return nil, classroom.Classroom{}, nil, valid.Errorf(
 			"« %s » n'est pas un travail de la nomenclature.", assignment)
 	}
 	manager := newManageSession(s, place)
 	repos, err := manager.loadRepos(false)
 	if err != nil {
-		return plagiarism.Request{}, err
+		return nil, classroom.Classroom{}, nil, err
 	}
 	groupe := groups.Build(assignment, repos)
 	cours, _, connu := manager.travail(&groupe)
 	if !connu {
-		return plagiarism.Request{}, valid.Errorf(
+		return nil, classroom.Classroom{}, nil, valid.Errorf(
 			"« %s » n'appartient à aucun groupe de cette organisation.", assignment)
 	}
+	return manager, cours, &groupe, nil
+}
+
+// requeteDuTravail rebâtit la demande d'analyse d'un travail à soi, pour en
+// tirer l'envoi d'une seule copie.
+func (s *Session) requeteDuTravail(assignment string) (plagiarism.Request, error) {
+	manager, cours, _, err := s.travailOuvert(assignment)
+	if err != nil {
+		return plagiarism.Request{}, err
+	}
+	_, nom, _ := naming.SplitAssignment(assignment)
 	declarees, err := manager.reglesDeComparaison()
 	if err != nil {
 		return plagiarism.Request{}, err
