@@ -38,6 +38,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
@@ -66,6 +67,11 @@ const (
 	// renseignement personnel, et il peut se relire sur github.com sans
 	// exposer une liste de noms.
 	RulesFile = "regles.json"
+	// MarksFile porte les marques invisibles délivrées. C'est le seul fichier
+	// du registre qui relie une marque à quelqu'un : sans lui, deux travaux qui
+	// portent la même se reconnaissent encore, mais personne ne peut dire de
+	// qui il s'agit.
+	MarksFile = signature.BookFile
 	// CatalogFile porte le catalogue des travaux donnés : la place, le nom du
 	// travail, un décompte. Il est à part parce qu'il ne nomme personne — un
 	// collègue peut le lire sans qu'aucune liste de classe ne lui soit ouverte.
@@ -221,11 +227,16 @@ type Set struct {
 	// nomme aucun étudiant, et c'est lui qui permet à un enseignant de voir ce
 	// qu'un collègue a donné sans voir ses dépôts.
 	catalog exchange.Catalog
+	// Les marques invisibles délivrées : un jeton par personne et par travail.
+	// C'est le seul endroit qui relie une marque à quelqu'un — deux travaux qui
+	// portent la même se reconnaissent sans lui, mais nul autre ne peut dire
+	// de qui il s'agit.
+	marks signature.Book
 }
 
 // newSet range les fiches et dresse ses index.
 func newSet(users []User, assignments []Assignment, declared rules.Rules,
-	catalog exchange.Catalog) *Set {
+	catalog exchange.Catalog, marks signature.Book) *Set {
 	rangees := append([]User(nil), users...)
 	sort.SliceStable(rangees, func(i, j int) bool {
 		return rangees[i].Key() < rangees[j].Key()
@@ -237,6 +248,7 @@ func newSet(users []User, assignments []Assignment, declared rules.Rules,
 	set := &Set{
 		rules:        declared,
 		catalog:      catalog,
+		marks:        marks,
 		users:        rangees,
 		byLogin:      make(map[string]int, len(rangees)),
 		bySlug:       make(map[string]int, 2*len(rangees)),
@@ -260,10 +272,20 @@ func newSet(users []User, assignments []Assignment, declared rules.Rules,
 
 // Empty rend un registre vide : celui d'une organisation qu'on n'a pas encore
 // amorcée.
-func Empty() *Set { return newSet(nil, nil, rules.Rules{}, exchange.Catalog{}) }
+func Empty() *Set {
+	return newSet(nil, nil, rules.Rules{}, exchange.Catalog{}, signature.Book{})
+}
 
 // Rules rend ce que l'organisation déclare.
 func (s *Set) Rules() rules.Rules { return s.rules }
+
+// Marks rend les marques invisibles délivrées.
+func (s *Set) Marks() signature.Book {
+	if s == nil {
+		return signature.Book{}
+	}
+	return s.marks
+}
 
 // Catalog rend ce que l'organisation sait des travaux donnés.
 func (s *Set) Catalog() exchange.Catalog {
@@ -430,6 +452,10 @@ type Change struct {
 	// Rules remplace les règles de l'organisation. Nil n'y touche pas — c'est
 	// la différence entre « je ne déclare rien » et « je retire tout ».
 	Rules *rules.Rules
+	// Marks verse des marques invisibles au registre. Comme le catalogue, il ne
+	// remplace pas : une marque délivrée à quelqu'un d'autre n'a pas à
+	// disparaître parce qu'on redistribue un travail.
+	Marks []signature.Issued
 	// Teaching verse des lignes au catalogue des travaux. Contrairement aux
 	// règles, il ne remplace pas : chacun n'y écrit que ses lignes, et publier
 	// les siennes ne doit pas retirer celles d'un collègue.
@@ -495,12 +521,17 @@ func Reschedule(travaux ...Assignment) Change {
 func (c Change) Empty() bool {
 	return len(c.Learn) == 0 && len(c.Forget) == 0 &&
 		len(c.Roles) == 0 && len(c.Deadlines) == 0 && c.Rules == nil &&
-		len(c.Teaching) == 0
+		len(c.Teaching) == 0 && len(c.Marks) == 0
 }
 
 // Declare compose le changement qui remplace les règles de l'organisation.
 func Declare(declared rules.Rules) Change {
 	return Change{Rules: &declared, Reason: "Règles de comparaison"}
+}
+
+// Mark compose le changement qui verse des marques invisibles.
+func Mark(issued ...signature.Issued) Change {
+	return Change{Marks: issued, Reason: "Signatures délivrées"}
 }
 
 // Publish compose le changement qui verse des travaux au catalogue.
@@ -588,6 +619,10 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	marques, marquesOnt, err := s.marks.With(change.Marks)
+	if err != nil {
+		return nil, false, err
+	}
 
 	// Les règles se remplacent en bloc plutôt que de se fusionner : ce qu'on
 	// déclare est la liste complète des équivalences, et en retirer une doit
@@ -608,8 +643,8 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 		}
 		declarees, regleOnt = valides, !bytes.Equal(avant, apres)
 	}
-	return newSet(fiches, travaux, declarees, catalogue),
-		bouge || datesOnt || regleOnt || catalogueOnt, nil
+	return newSet(fiches, travaux, declarees, catalogue, marques),
+		bouge || datesOnt || regleOnt || catalogueOnt || marquesOnt, nil
 }
 
 // scheduled applique à la section des échéances ce qu'un changement lui
@@ -822,7 +857,7 @@ func Decode(content []byte) (*Set, []string) {
 			"%d fiches en double réunies aux leurs")+
 			" : le fichier gagnerait à être nettoyé.")
 	}
-	return newSet(fiches, nil, rules.Rules{}, exchange.Catalog{}), soucis
+	return newSet(fiches, nil, rules.Rules{}, exchange.Catalog{}, signature.Book{}), soucis
 }
 
 // fondue réunit deux fiches que le fichier donne pour un même compte, et dit si
