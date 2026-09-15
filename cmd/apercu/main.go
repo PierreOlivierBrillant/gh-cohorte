@@ -152,10 +152,20 @@ func garnirPourLaComparaison(state *fakegh.State) {
 		"a26.5n6.01.tp1.aminata-diallo":  autre,
 		"a26.5n6.01.tp1.claire-otis":     encoreAutre,
 	}
+	// Des dates de remise étalées : c'est ce qui permet de voir, devant une
+	// paire, qui a remis en premier — et la réserve qui accompagne la réponse.
+	remises := map[string]fakegh.HistoryEntry{
+		"a26.5n6.01.tp1.emilie-cote":     {At: "2026-09-20T10:00:00Z", Login: "emilie-cote"},
+		"a26.5n6.01.tp1.jean-luc-picard": {At: "2026-09-01T10:00:00Z", Login: "jlpicard"},
+		"a26.5n6.01.tp1.bruno-tanguay":   {At: "2026-09-18T22:00:00Z", Login: "btanguay"},
+		"a26.5n6.01.tp1.aminata-diallo":  {At: "2026-09-12T08:00:00Z", Login: "aminata-d"},
+		"a26.5n6.01.tp1.claire-otis":     {At: "2026-09-19T16:00:00Z", Login: "cotis"},
+	}
 	for nom, source := range copies {
 		if _, connu := state.Repos["acme/"+nom]; !connu {
 			state.AddRepo("acme", nom, true)
 		}
+		state.Repos["acme/"+nom].History = []fakegh.HistoryEntry{remises[nom]}
 		state.SeedCommit("acme/"+nom, map[string]string{
 			"src/Inventaire.java": modele,
 			"src/Solution.java":   source,

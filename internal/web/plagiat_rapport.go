@@ -187,11 +187,18 @@ func (s *Server) handlePlagiarismPair(writer http.ResponseWriter, request *http.
 		fail(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, map[string]any{
+	// Qui a remis en premier, quand les deux dates sont connues. La phrase
+	// vient du domaine : elle dit l'ordre et, dans le même souffle, ce qu'il ne
+	// prouve pas.
+	rendu := map[string]any{
 		"match":      pair.Match,
 		"project":    pair.Project(report),
 		"disclaimer": report.Disclaimer,
-	})
+	}
+	if chrono, datee := report.Chronology(body.Left, body.Right); datee {
+		rendu["chronology"] = chrono
+	}
+	writeJSON(writer, http.StatusOK, rendu)
 }
 
 // handlePlagiarismFile rend la vue « comparer deux fichiers ».

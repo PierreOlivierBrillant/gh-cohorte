@@ -9,6 +9,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
@@ -189,9 +190,18 @@ func (m *manageSession) plagiatCibles(cours classroom.Classroom, nom string,
 	}
 	set, _ := m.session.names(m.org)
 
+	// Les remises déjà relevées sont versées au passage : elles ne coûtent
+	// aucune requête et disent qui a remis en premier.
+	noms := make([]string, 0, len(cibles))
+	for _, cible := range cibles {
+		noms = append(noms, cible.Repo)
+	}
+	remises := m.resolver.Handins(m.org, noms, identity.Cached, nil)
+
 	for index := range cibles {
 		cibles[index].PushedAt = envois[strings.ToLower(cibles[index].Repo)]
 		cibles[index].Label = nomDeCopie(cours, set, cibles[index].Repo)
+		cibles[index].HandedIn = cours.HandedIn(remises[cibles[index].Repo])
 		// L'identité ne sert pas à l'analyse : elle sert à l'effacer, le jour
 		// où l'on anonymise ces copies ou qu'on en publie l'index.
 		cibles[index].Person = identiteDe(cours, set, cibles[index].Repo)
@@ -351,9 +361,48 @@ func montrerRapport(console *ui.Console, rapport *plagiarism.Report,
 	} else if rapport.Result.ThresholdNote != "" {
 		console.Note("%s", rapport.Result.ThresholdNote)
 	}
+	montrerChronologie(console, rapport)
 	montrerSignaux(console, rapport, marques)
 	montrerSoucis(console, rapport)
 }
+
+// montrerChronologie dit qui a remis en premier, pour les paires qui sortent.
+//
+// Seulement celles-là : c'est devant une paire qu'on se pose la question, et la
+// poser pour les quarante autres noierait la réponse. Quand un seuil a été
+// proposé, ce sont les paires au-dessus ; sinon, les plus fortes, car ce sont
+// celles qu'on ouvrira de toute façon.
+//
+// La phrase vient du domaine — elle dit l'ordre et, dans le même souffle, ce
+// qu'il ne prouve pas, et le navigateur la dit mot pour mot de la même façon.
+func montrerChronologie(console *ui.Console, rapport *plagiarism.Report) {
+	seuil := rapport.Result.Threshold
+	dites := 0
+	for _, match := range rapport.Result.Matches {
+		if seuil > 0 && match.Similarity < seuil {
+			continue
+		}
+		if seuil <= 0 && dites >= MaxChronologies {
+			break
+		}
+		chrono, datee := rapport.Chronology(match.Left, match.Right)
+		if !datee || chrono.Same() {
+			continue
+		}
+		if dites == 0 {
+			console.Heading("Ordre des remises")
+		}
+		dites++
+		console.Printf("  %s le %s, %s le %s.",
+			orDim(console, chrono.FirstName, chrono.First), chrono.FirstAt,
+			orDim(console, chrono.SecondName, chrono.Second), chrono.SecondAt)
+		console.Note("%s", chrono.Note)
+	}
+}
+
+// MaxChronologies borne ce qui est dit quand aucun seuil n'a été proposé : sans
+// seuil, rien ne distingue les paires, et les dater toutes remplirait l'écran.
+const MaxChronologies = 5
 
 // repere marque d'un signe les paires au-dessus du seuil.
 func repere(seuil, similarite float64) string {

@@ -1,6 +1,10 @@
 package plagiarism
 
 import (
+	"fmt"
+	"strings"
+	"time"
+
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
@@ -24,6 +28,9 @@ type Side struct {
 	Origin string `json:"origin,omitempty"`
 	Commit string `json:"commit,omitempty"`
 	Repo   string `json:"repo,omitempty"`
+	// HandedIn date la remise. Elle ne dit pas qui a copié qui — un dépôt se
+	// pousse quand on veut —, mais elle dit par où commencer.
+	HandedIn string `json:"handed_in,omitempty"`
 }
 
 // Pair est une paire chargée : les deux copies, et leur contenu.
@@ -112,7 +119,7 @@ func fetch(client corpus.Client, report *Report, inspector *inspect.Inspector,
 		texts[kept.Path] = kept.Content
 	}
 	side := Side{ID: id, Label: target.Label, Origin: target.Origin,
-		Commit: ref, Repo: target.FullName()}
+		Commit: ref, Repo: target.FullName(), HandedIn: target.HandedIn}
 	return side, texts, nil
 }
 
@@ -319,4 +326,110 @@ func countLines(content []byte) int {
 		}
 	}
 	return lines
+}
+
+// La chronologie des remises.
+//
+// Quand deux copies se ressemblent trop, la première question posée est
+// toujours la même : laquelle est arrivée d'abord. L'outil sait y répondre — il
+// date déjà chaque remise — mais la réponse ne prouve rien par elle-même. Un
+// dépôt se pousse quand on veut, une copie peut circuler avant d'être remise,
+// et deux personnes peuvent avoir travaillé ensemble sans que l'ordre y change
+// quoi que ce soit.
+//
+// Elle est donc rendue avec ce qu'elle vaut, et la phrase se décide ici : les
+// trois interfaces doivent en dire la même chose, au mot près.
+
+// Chronology ordonne les deux remises d'une paire.
+type Chronology struct {
+	// First et Second nomment les copies, la première remise d'abord.
+	First      string `json:"first"`
+	Second     string `json:"second"`
+	FirstName  string `json:"first_name,omitempty"`
+	SecondName string `json:"second_name,omitempty"`
+	FirstAt    string `json:"first_at"`
+	SecondAt   string `json:"second_at"`
+	// Days est le nombre de jours qui les sépare, arrondi au jour.
+	Days int `json:"days"`
+	// Note dit ce que l'écart vaut, et ce qu'il ne vaut pas.
+	Note string `json:"note"`
+}
+
+// Same dit que les deux copies ont été remises le même jour.
+func (c Chronology) Same() bool { return c.Days == 0 }
+
+// Chronology dit laquelle des deux copies a été remise en premier.
+//
+// Faux quand l'une des deux n'a pas de date : une copie reçue dans une archive
+// ou mesurée dans un index publié n'en porte pas toujours, et inventer un ordre
+// serait pire que n'en donner aucun.
+func (r *Report) Chronology(left, right string) (Chronology, bool) {
+	premier, ok := r.handedIn(left)
+	second, encore := r.handedIn(right)
+	if !ok || !encore {
+		return Chronology{}, false
+	}
+	gauche, droite := left, right
+	if second.Before(premier) {
+		gauche, droite = right, left
+		premier, second = second, premier
+	}
+
+	jours := int(second.Sub(premier).Hours() / 24)
+	chrono := Chronology{
+		First: gauche, Second: droite,
+		FirstName: r.nameOf(gauche), SecondName: r.nameOf(droite),
+		FirstAt: premier.Format(HandinDay), SecondAt: second.Format(HandinDay),
+		Days: jours,
+	}
+	switch {
+	case jours == 0:
+		chrono.Note = "Les deux ont remis le même jour : l'ordre ne dit rien ici."
+	default:
+		jour := "jour"
+		if jours > 1 {
+			jour = "jours"
+		}
+		chrono.Note = fmt.Sprintf(
+			"%s a remis %d %s avant. Un dépôt se pousse quand on veut, et une "+
+				"copie peut circuler avant d'être remise : l'ordre dit par où "+
+				"commencer, pas qui a copié qui.",
+			nomOuJeton(chrono.FirstName, chrono.First), jours, jour)
+	}
+	return chrono, true
+}
+
+// HandinDay est le format des dates rendues : le jour suffit, et l'heure
+// daterait une personne.
+const HandinDay = "2006-01-02"
+
+// handedIn lit la date de remise d'une copie.
+func (r *Report) handedIn(id string) (time.Time, bool) {
+	target, known := r.Target(id)
+	if !known || strings.TrimSpace(target.HandedIn) == "" {
+		return time.Time{}, false
+	}
+	moment, err := time.Parse(time.RFC3339, target.HandedIn)
+	if err != nil {
+		if moment, err = time.Parse(HandinDay, target.HandedIn); err != nil {
+			return time.Time{}, false
+		}
+	}
+	return moment, true
+}
+
+// nameOf rend le nom complet derrière une copie, quand ce poste le connaît.
+func (r *Report) nameOf(id string) string {
+	if target, known := r.Target(id); known {
+		return target.Label
+	}
+	return ""
+}
+
+// nomOuJeton nomme une copie de la façon la plus parlante disponible.
+func nomOuJeton(name, id string) string {
+	if strings.TrimSpace(name) != "" {
+		return name
+	}
+	return id
 }

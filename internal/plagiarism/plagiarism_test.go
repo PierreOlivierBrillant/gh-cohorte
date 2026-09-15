@@ -515,3 +515,54 @@ func TestUnFichierTropCourtResteVisibleAvecSaRaison(t *testing.T) {
 		t.Fatalf("fichiers sans correspondant : %+v", paire.Project(rapport).LeftOnly)
 	}
 }
+
+// Devant deux copies trop semblables, la première question est toujours la
+// même : laquelle est arrivée d'abord. L'outil sait y répondre, et doit dire
+// dans le même souffle ce que la réponse ne prouve pas.
+func TestLOrdreDesRemisesSeDitAvecCeQuIlNeProuvePas(t *testing.T) {
+	requete := demande()
+	for index := range requete.Targets {
+		switch requete.Targets[index].ID {
+		case "alice":
+			requete.Targets[index].HandedIn = "2026-09-01T10:00:00Z"
+		case "bruno":
+			requete.Targets[index].HandedIn = "2026-09-20T09:00:00Z"
+		case "david":
+			requete.Targets[index].HandedIn = "2026-09-01T23:00:00Z"
+		}
+	}
+	rapport, err := plagiarism.Run(cohorte(t), requete, nil)
+	if err != nil {
+		t.Fatalf("analyse : %v", err)
+	}
+
+	// L'ordre ne dépend pas du sens dans lequel on nomme la paire.
+	for _, sens := range [][2]string{{"alice", "bruno"}, {"bruno", "alice"}} {
+		chrono, datee := rapport.Chronology(sens[0], sens[1])
+		if !datee {
+			t.Fatalf("%v : aucune chronologie", sens)
+		}
+		if chrono.First != "alice" || chrono.Days != 18 {
+			t.Fatalf("%v : %+v", sens, chrono)
+		}
+		if !strings.Contains(chrono.Note, "pas qui a copié qui") {
+			t.Fatalf("la phrase doit dire ce qu'elle ne prouve pas : %q", chrono.Note)
+		}
+	}
+
+	// Treize heures d'écart, c'est le même jour : l'ordre ne dit rien, et le
+	// rapport doit le dire plutôt que d'annoncer « 0 jour avant ».
+	chrono, datee := rapport.Chronology("alice", "david")
+	if !datee || !chrono.Same() {
+		t.Fatalf("même jour : %+v (datée : %v)", chrono, datee)
+	}
+	if !strings.Contains(chrono.Note, "ne dit rien") {
+		t.Fatalf("phrase du même jour : %q", chrono.Note)
+	}
+
+	// Claire n'a pas de date : inventer un ordre serait pire que n'en donner
+	// aucun.
+	if _, datee := rapport.Chronology("alice", "claire"); datee {
+		t.Fatal("une copie sans date de remise ne doit produire aucun ordre")
+	}
+}

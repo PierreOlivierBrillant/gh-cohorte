@@ -95,8 +95,16 @@ func groupeRemis(t *testing.T) *harnais {
 		"a26.5n6.01.tp1.jean-luc-picard": solutionTP,
 		"a26.5n6.01.tp1.aminata-diallo":  autreTP,
 	}
+	// Des remises étalées : c'est ce qui permet de dire, sous le tableau des
+	// paires, qui a remis en premier.
+	remises := map[string]fakegh.HistoryEntry{
+		"a26.5n6.01.tp1.emilie-cote":     {At: "2026-09-20T10:00:00Z", Login: "emilie-cote"},
+		"a26.5n6.01.tp1.jean-luc-picard": {At: "2026-09-01T10:00:00Z", Login: "jlpicard"},
+		"a26.5n6.01.tp1.aminata-diallo":  {At: "2026-09-12T08:00:00Z", Login: "aminata-d"},
+	}
 	for nom, source := range copies {
-		state.AddRepo("acme", nom, true)
+		depot := state.AddRepo("acme", nom, true)
+		depot.History = []fakegh.HistoryEntry{remises[nom]}
 		state.SeedCommit("acme/"+nom, map[string]string{
 			"src/Inventaire.java": gabaritTP,
 			"src/Solution.java":   source,
@@ -455,4 +463,31 @@ func TestLAssistantRefuseUneDemandeRecue(t *testing.T) {
 		t.Fatalf("liste : code = %d\n%s", code, liste.texte())
 	}
 	liste.contient(demande, "refusée", "la direction")
+}
+
+// La vue de comparaison n'a pas d'équivalent au terminal, mais la question
+// qu'on s'y pose en premier — qui a remis d'abord — doit y trouver sa réponse,
+// avec la même réserve qu'au navigateur.
+func TestLOrdreDesRemisesEstDitSousLeTableauDesPaires(t *testing.T) {
+	h := groupeRemis(t)
+	h.Options.Handins = true
+	h.Options.Manage = "a26.5n6.01.tp1"
+	h.Options.ManageRequested = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("relevé : code = %d\n%s", code, h.texte())
+	}
+
+	suivant := nouveauDansLeMemeDossier(t, h)
+	suivant.Options.Handins = false
+	suivant.Options.Plagiarism = true
+	suivant.Options.Yes = true
+	if code := suivant.muet(); code != app.ExitOK {
+		t.Fatalf("analyse : code = %d\n%s", code, suivant.texte())
+	}
+
+	// Jean-Luc a remis le premier, dix-neuf jours avant Émilie ; et la phrase
+	// dit ce que cet ordre ne prouve pas.
+	suivant.contient("Ordre des remises", "Jean-Luc Picard le 2026-09-01",
+		"Émilie Côté le 2026-09-20", "pas qui a copié qui")
 }

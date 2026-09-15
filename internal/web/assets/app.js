@@ -7022,6 +7022,7 @@ function dessinerPairePlagiat() {
     + `${match.longest_fragment} jetons. Commits comparés : `
     + `${projet.left.commit} et ${projet.right.commit}.`;
   $('pl-paire-avertissement').textContent = vue.disclaimer;
+  dessinerChronologie(vue.chronology);
 
   const liens = $('pl-paire-liens');
   vider(liens);
@@ -7060,6 +7061,26 @@ function dessinerPairePlagiat() {
     projet.left, projet.left_only);
   dessinerSeuls('pl-paire-droite-titre', 'pl-paire-droite-seuls',
     projet.right, projet.right_only);
+}
+
+// dessinerChronologie dit qui a remis en premier.
+//
+// C'est la première question qu'on se pose devant deux copies trop semblables,
+// et la réponse ne prouve rien par elle-même : la phrase qui le dit vient du
+// domaine, pour que le terminal la dise mot pour mot de la même façon.
+function dessinerChronologie(chrono) {
+  const zone = $('pl-paire-chronologie');
+  vider(zone);
+  if (!chrono) return;
+  zone.append(el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-corps' },
+      el('p', {},
+        el('strong', { texte: 'Remises : ' }),
+        el('span', {
+          texte: `${chrono.first_name || chrono.first} le ${chrono.first_at}, `
+            + `${chrono.second_name || chrono.second} le ${chrono.second_at}.`,
+        })),
+      el('p', { classe: 'note', texte: chrono.note }))));
 }
 
 function dessinerSeuls(idTitre, idListe, cote, seuls) {

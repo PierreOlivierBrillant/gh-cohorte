@@ -96,8 +96,16 @@ func groupeAvecCopies(t *testing.T) (*harnais, string) {
 		"a26.5n6.01.tp1.bruno-tanguay": solutionJava,
 		"a26.5n6.01.tp1.claire-otis":   autreJava,
 	}
+	// Des remises étalées : c'est ce qui permet de dire, devant une paire, qui
+	// a remis en premier.
+	remises := map[string]fakegh.HistoryEntry{
+		"a26.5n6.01.tp1.alice-martin":  {At: "2026-09-01T10:00:00Z", Login: "alice"},
+		"a26.5n6.01.tp1.bruno-tanguay": {At: "2026-09-20T09:00:00Z", Login: "bruno"},
+		"a26.5n6.01.tp1.claire-otis":   {At: "2026-09-12T08:00:00Z", Login: "claire"},
+	}
 	for nom, source := range copies {
-		state.AddRepo("acme", nom, true)
+		depot := state.AddRepo("acme", nom, true)
+		depot.History = []fakegh.HistoryEntry{remises[nom]}
 		state.SeedCommit("acme/"+nom, map[string]string{
 			"src/Inventaire.java": gabaritJava,
 			"src/Solution.java":   source,
@@ -335,12 +343,24 @@ func verifierPaire(t *testing.T, h *harnais, rapport, gauche, droite string) {
 				SameName        bool   `json:"same_name"`
 			} `json:"links"`
 		} `json:"project"`
+		Chronology struct {
+			First   string `json:"first"`
+			FirstAt string `json:"first_at"`
+			Note    string `json:"note"`
+		} `json:"chronology"`
 	}
 	h.json(http.MethodPost, "/api/plagiat/reports/"+rapport+"/pair",
 		map[string]any{"left": gauche, "right": droite}, &projet)
 
 	if projet.Project.Left.Commit == "" {
 		t.Fatal("la vue de projet doit dire sur quel commit elle porte")
+	}
+	// L'ordre des remises n'est rendu que si les deux dates sont connues, et il
+	// dit toujours ce qu'il ne prouve pas.
+	if projet.Chronology.First != "" &&
+		!strings.Contains(projet.Chronology.Note, "pas qui a copié qui") &&
+		!strings.Contains(projet.Chronology.Note, "ne dit rien") {
+		t.Fatalf("chronologie sans sa réserve : %+v", projet.Chronology)
 	}
 	if len(projet.Project.Links) == 0 {
 		t.Fatalf("aucun fichier relié : %+v", projet.Project)
@@ -1013,5 +1033,61 @@ func TestOnNeTranchePasLaDemandeDUnAutre(t *testing.T) {
 		map[string]any{"reason": "non"})
 	if reponse.StatusCode < 400 || !strings.Contains(string(contenu), "s'adresse à") {
 		t.Fatalf("la demande d'un autre doit être refusée : %s", contenu)
+	}
+}
+
+// Devant deux copies trop semblables, la première question est toujours la
+// même : laquelle est arrivée d'abord. La vue de paire doit y répondre, et dire
+// dans le même souffle ce que la réponse ne prouve pas.
+func TestLaVueDePaireDitQuiARemisEnPremier(t *testing.T) {
+	h, scope := groupeAvecCopies(t)
+
+	// Les remises se relèvent avant l'analyse : sans elles, aucune date n'est
+	// connue et l'outil n'invente pas d'ordre.
+	h.travail(http.MethodPost, "/api/classrooms/"+scope+"/assignments/tp1/handins", nil)
+
+	bilan := h.travail(http.MethodPost,
+		"/api/classrooms/"+scope+"/assignments/tp1/plagiat",
+		map[string]any{"profile": "tout", "baseline": true})
+	resultat, _ := bilan["result"].(map[string]any)
+	nom, _ := resultat["report"].(string)
+	if nom == "" {
+		t.Fatalf("aucun rapport produit : %+v", bilan)
+	}
+
+	var vue struct {
+		Chronology struct {
+			First      string `json:"first"`
+			Second     string `json:"second"`
+			FirstName  string `json:"first_name"`
+			SecondName string `json:"second_name"`
+			FirstAt    string `json:"first_at"`
+			SecondAt   string `json:"second_at"`
+			Days       int    `json:"days"`
+			Note       string `json:"note"`
+		} `json:"chronology"`
+	}
+	h.json(http.MethodPost, "/api/plagiat/reports/"+nom+"/pair", map[string]any{
+		"left": "a26.5n6.01.tp1.bruno-tanguay", "right": "a26.5n6.01.tp1.alice-martin",
+	}, &vue)
+
+	// Alice a remis dix-huit jours pleins avant Bruno, et l'ordre ne dépend pas
+	// du sens dans lequel la paire est nommée.
+	if vue.Chronology.First != "a26.5n6.01.tp1.alice-martin" {
+		t.Fatalf("première remise : %+v", vue.Chronology)
+	}
+	if vue.Chronology.FirstAt != "2026-09-01" || vue.Chronology.SecondAt != "2026-09-20" {
+		t.Fatalf("dates rendues : %+v", vue.Chronology)
+	}
+	if vue.Chronology.Days != 18 {
+		t.Fatalf("écart : %+v", vue.Chronology)
+	}
+	if vue.Chronology.FirstName != "Alice Martin" {
+		t.Fatalf("le nom complet doit être rendu : %+v", vue.Chronology)
+	}
+	// Et la réserve voyage avec l'ordre : sans elle, la vue prononcerait un
+	// verdict que la date ne permet pas.
+	if !strings.Contains(vue.Chronology.Note, "pas qui a copié qui") {
+		t.Fatalf("la phrase doit dire ce qu'elle ne prouve pas : %q", vue.Chronology.Note)
 	}
 }
