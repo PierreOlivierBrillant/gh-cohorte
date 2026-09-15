@@ -74,7 +74,7 @@ func (s *Server) handleMoveStudent(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
-	personnes, err := movers(depart, arrivee, body)
+	personnes, err := movers(depart, body)
 	if err != nil {
 		fail(writer, err)
 		return
@@ -187,8 +187,15 @@ func (s *Server) moveTarget(cible string, neuf *movePlace, repos []groups.RepoIn
 }
 
 // movers rassemble les personnes à déplacer, en refusant d'emblée celles que le
-// groupe de départ ne connaît pas et celles que l'arrivée connaît déjà.
-func movers(depart, arrivee classroom.Classroom, body moveInput) ([]roster.Person, error) {
+// groupe de départ ne connaît pas.
+//
+// Figurer déjà dans la liste d'arrivée n'en fait pas partie : c'est même la
+// situation qu'on vient réparer. Une erreur d'inscription laisse quelqu'un avec
+// des dépôts dans deux groupes, et le déplacement est justement ce qui les
+// rassemble — ses dépôts rejoignent l'arrivée, sa fiche quitte le départ et
+// fusionne avec celle qui l'y attendait. Refuser ici ne laissait d'autre issue
+// que de le désinscrire à la main des deux côtés.
+func movers(depart classroom.Classroom, body moveInput) ([]roster.Person, error) {
 	demandes := append([]string(nil), body.Usernames...)
 	if strings.TrimSpace(body.Username) != "" {
 		demandes = append(demandes, body.Username)
@@ -209,10 +216,6 @@ func movers(depart, arrivee classroom.Classroom, body moveInput) ([]roster.Perso
 		personne, trouvee := depart.Find(username)
 		if !trouvee {
 			return nil, valid.Errorf("@%s n'est pas dans « %s ».", username, depart.Label())
-		}
-		if arrivee.Has(personne.Username) {
-			return nil, valid.Errorf("@%s est déjà dans « %s ».",
-				personne.Username, arrivee.Label())
 		}
 		personnes = append(personnes, personne)
 	}
