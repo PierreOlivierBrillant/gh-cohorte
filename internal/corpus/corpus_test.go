@@ -9,6 +9,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
 )
 
 const solution = `
@@ -325,5 +326,63 @@ func TestLesPoidsEtLesDureesSeLisent(t *testing.T) {
 		if obtenu := corpus.Duration(secondes); obtenu != attendu {
 			t.Fatalf("%.0f s : %q, attendu %q", secondes, obtenu, attendu)
 		}
+	}
+}
+
+// La marque invisible est cherchée dans tout ce que l'inspection a retenu, et
+// non dans le seul README : un étudiant qui déplace un fichier ne la fait pas
+// disparaître.
+func TestUneMarqueInvisibleEstRelevee(t *testing.T) {
+	token, err := signature.New()
+	if err != nil {
+		t.Fatalf("tirage : %v", err)
+	}
+	signe := string(signature.Sign([]byte("# Travail pratique 1\n\nConsignes.\n"), token))
+
+	state := fakegh.NewState()
+	depot(state, "alice", map[string]string{
+		"README.md": signe, "src/Solution.java": solution,
+	})
+	depot(state, "bruno", map[string]string{"src/Solution.java": solution})
+
+	result := corpus.Build(client(t, state),
+		[]corpus.Target{cible("alice"), cible("bruno")},
+		options(t, inspect.Settings{}), nil)
+
+	for _, work := range result.Corpus.Works {
+		if work.ID == "alice" {
+			if work.Extras.Signature != signature.Text(token) {
+				t.Fatalf("marque relevée : %q, attendue %q",
+					work.Extras.Signature, signature.Text(token))
+			}
+			continue
+		}
+		// Une copie sans marque n'en invente pas : son absence ne prouve rien,
+		// mais elle ne doit pas être confondue avec une marque vide partagée.
+		if work.Extras.Signature != "" {
+			t.Fatalf("une marque est apparue de nulle part : %+v", work)
+		}
+	}
+	for _, inspected := range result.Inspected {
+		if inspected.ID == "alice" && !inspected.Signed {
+			t.Fatalf("la copie signée doit être rapportée comme telle : %+v", inspected)
+		}
+	}
+
+	// Et la marque n'entre pas dans la mesure : des blancs ne produisent aucun
+	// jeton, et deux copies ne diffèrent pas parce que l'une est signée.
+	sans := corpus.Build(client(t, state), []corpus.Target{cible("bruno")},
+		options(t, inspect.Settings{}), nil)
+	avec, sansMarque := 0, 0
+	for _, work := range result.Corpus.Works {
+		if work.ID == "alice" {
+			avec = work.PrintCount()
+		}
+	}
+	for _, work := range sans.Corpus.Works {
+		sansMarque = work.PrintCount()
+	}
+	if avec < sansMarque {
+		t.Fatalf("la marque a coûté des empreintes : %d contre %d", avec, sansMarque)
 	}
 }

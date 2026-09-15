@@ -16,6 +16,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/tokens"
 )
@@ -91,6 +92,10 @@ type Inspected struct {
 	Commit  string `json:"commit,omitempty"`
 	Kept    int    `json:"kept"`
 	Skipped int    `json:"skipped"`
+	// Signed dit que la copie porte une marque invisible. Son absence ne prouve
+	// rien — un formateur l'efface sans le savoir —, mais elle se rapporte :
+	// une copie non signée est une copie dont ce signal ne dira jamais rien.
+	Signed bool `json:"signed,omitempty"`
 	// Short compte les fichiers retenus mais trop courts pour former un
 	// k-gramme. Ils restent dans l'index — ils ont été retenus, ils doivent
 	// rester visibles —, mais ils ne peuvent s'apparier à rien.
@@ -265,6 +270,16 @@ func Fingerprint(loose Loose, options Options) (similarity.Work, Inspected, *Pro
 
 	work := similarity.Work{ID: loose.ID, Label: loose.Label, Origin: loose.Origin}
 	for _, kept := range selection.Kept {
+		// La marque invisible, s'il y en a une. Elle est cherchée dans tout ce
+		// qui a été retenu, et non dans le seul README : un étudiant qui
+		// déplace un fichier ne la fait pas disparaître, et la chercher partout
+		// ne coûte qu'un balayage de lignes vides.
+		if work.Extras.Signature == "" {
+			if token, signee := signature.First(kept.Content); signee {
+				work.Extras.Signature = signature.Text(token)
+				inspected.Signed = true
+			}
+		}
 		analysis := tokens.Lex(kept.Language, kept.Content)
 		file, short := similarity.Analyze(kept.Path, analysis, options.Kgram, options.Window)
 		inspected.Tokens += file.Tokens
