@@ -181,6 +181,83 @@ func TestPlusieursEtudiantsDeplacesEnsemble(t *testing.T) {
 	}
 }
 
+// Une erreur d'inscription laisse parfois quelqu'un avec des dépôts dans deux
+// groupes à la fois. Le déplacement est ce qui les rassemble : figurer déjà
+// dans la liste d'arrivée ne le refuse pas, sa fiche y fusionne avec celle qui
+// l'attendait au lieu de s'y dédoubler.
+func TestEtudiantDejaInscritALArriveeSyRassemble(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.1030.tp1.jean-luc-picard", "a26.5n6.1040.tp2.jean-luc-picard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	depart := h.groupe("a26", "5n6", "1040", "Jean-Luc Picard", "jlpicard")
+	arrivee := h.groupe("a26", "5n6", "1030", "Jean-Luc Picard", "jlpicard")
+
+	bilan := h.travail(http.MethodPost, "/api/classrooms/"+depart+"/students/move",
+		map[string]any{"username": "jlpicard", "target": arrivee})
+	if bilan["status"] != "terminé" {
+		t.Fatalf("travail %v : %v", bilan["status"], bilan["failure"])
+	}
+	resultat, _ := bilan["result"].(map[string]any)
+	if resultat["count"] != float64(1) || resultat["renamed"] != float64(1) {
+		t.Fatalf("bilan : %+v", resultat)
+	}
+
+	// Les deux travaux sont sous le même toit, chacun sous son propre nom.
+	noms := h.depots()
+	sort.Strings(noms)
+	attendu := "a26.5n6.1030.tp1.jean-luc-picard,a26.5n6.1030.tp2.jean-luc-picard"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts : %v", noms)
+	}
+
+	if declares := h.declares(depart); len(declares) != 0 {
+		t.Fatalf("groupe de départ : %v", declares)
+	}
+	if declares := h.declares(arrivee); len(declares) != 1 || declares[0] != "jlpicard" {
+		t.Fatalf("groupe d'arrivée : %v", declares)
+	}
+}
+
+// Deux dépôts ne peuvent pas porter le même nom : le même travail des deux
+// côtés refuse le rassemblement, et le dit avant le premier renommage plutôt
+// que de laisser la moitié du déplacement derrière.
+func TestRassemblementRefuseQuandLeMemeTravailExisteDesDeuxCotes(t *testing.T) {
+	state := fakegh.NewState()
+	for _, nom := range []string{
+		"a26.5n6.1030.tp1.jean-luc-picard", "a26.5n6.1040.tp1.jean-luc-picard",
+	} {
+		state.AddRepo("acme", nom, true)
+	}
+	h := nouveau(t, state)
+	depart := h.groupe("a26", "5n6", "1040", "Jean-Luc Picard", "jlpicard")
+	arrivee := h.groupe("a26", "5n6", "1030", "Jean-Luc Picard", "jlpicard")
+
+	reponse, contenu := h.requete(http.MethodPost,
+		"/api/classrooms/"+depart+"/students/move",
+		map[string]any{"username": "jlpicard", "target": arrivee})
+	if reponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("statut %d — %s", reponse.StatusCode, contenu)
+	}
+	if !strings.Contains(string(contenu), "a26.5n6.1030.tp1.jean-luc-picard") {
+		t.Fatalf("message : %s", contenu)
+	}
+
+	// Rien n'a bougé : ni les dépôts, ni les listes.
+	noms := h.depots()
+	sort.Strings(noms)
+	attendu := "a26.5n6.1030.tp1.jean-luc-picard,a26.5n6.1040.tp1.jean-luc-picard"
+	if strings.Join(noms, ",") != attendu {
+		t.Fatalf("dépôts : %v", noms)
+	}
+	if declares := h.declares(depart); len(declares) != 1 {
+		t.Fatalf("groupe de départ : %v", declares)
+	}
+}
+
 // Le groupe d'arrivée n'a pas à exister d'avance : c'est le déplacement qui le
 // déclare, sans qu'on ait à sortir de la liste des étudiants pour le créer.
 func TestDeplacementDeclareLeGroupeDArrivee(t *testing.T) {
