@@ -189,6 +189,11 @@ sans en lire une ligne ni savoir de qui elles sont. Un catalogue — dans le
 registre — dit qui a donné quel travail, à combien de personnes : de quoi savoir
 à qui s'adresser, sans qu'aucune liste de classe ne soit publiée.
 
+Le voile ne se lève que sur un geste : une **demande** nommée (`--ask`), que le
+propriétaire des copies accorde ou refuse (`--grant`, `--deny`). S'il accorde,
+l'outil lui prépare l'archive anonymisée de la seule copie demandée, et c'est
+lui qui l'envoie. Aucune passe automatisée ne tranche à sa place.
+
 Un groupe se déplace d'une place à l'autre — une autre session, un autre cours,
 un autre numéro — en renommant ses dépôts, avec un aperçu avant écriture.
 GitHub garde une redirection depuis chaque ancien nom : les clones et les liens
