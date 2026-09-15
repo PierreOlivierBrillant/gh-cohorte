@@ -246,6 +246,9 @@ func TestLeGabaritDePasseSeDeposeEtSExplique(t *testing.T) {
 	for _, attendu := range []string{
 		"COHORTE_TOKEN", "protégé en écriture", "--publish-index",
 		"ni code ni nom",
+		// Elle tourne toute seule, et il y a une chose qu'elle ne fera
+		// jamais : trancher une demande à la place du propriétaire.
+		"schedule:", "ne se tranche jamais ici",
 	} {
 		if !strings.Contains(string(contenu), attendu) {
 			t.Fatalf("le gabarit doit dire « %s » :\n%s", attendu, contenu)

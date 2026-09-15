@@ -12,8 +12,9 @@ import (
 //
 // L'analyse est déjà scriptable : « gh cohorte --plagiarism … --non-interactive »
 // ne demande rien à personne. La faire tourner dans une GitHub Action ne
-// demande donc aucun code de plus — un gabarit de workflow, et deux choses à
-// dire clairement.
+// demande donc presque rien de plus — un gabarit de workflow, une commande qui
+// rattrape les index manquants sans qu'on ait à nommer chaque travail, et deux
+// choses à dire clairement.
 //
 // La première est le jeton. Lire les dépôts d'un collègue demande un accès en
 // lecture sur toute l'organisation, et un tel accès ne se met pas dans un
@@ -23,6 +24,11 @@ import (
 // La seconde est ce que la passe rend. Un rapport d'analyse porte des noms
 // d'étudiants ; un index publié n'en porte aucun. Le gabarit publie l'index par
 // défaut, et laisse le rapport en variante commentée, avec ce qu'il faut savoir.
+//
+// Ce qu'elle ne fait jamais : trancher une demande de levée du voile. Une
+// approbation ne vaut que parce que le propriétaire des copies l'a écrite
+// lui-même, et une passe qui accorderait à sa place annulerait le
+// cloisonnement qu'elle est censée respecter.
 
 // WorkflowFile est le nom sous lequel le gabarit se dépose.
 const WorkflowFile = ".github/workflows/plagiat.yml"
@@ -31,9 +37,15 @@ const WorkflowFile = ".github/workflows/plagiat.yml"
 const Workflow = `# Comparaison des copies, tournée par GitHub Actions.
 #
 # Déposé par « gh cohorte --emit-workflow ». Ce qu'il fait par défaut : publier
-# l'index d'empreintes d'un travail, pour que les collègues de l'organisation
-# puissent y comparer leurs copies. Un index ne porte ni code ni nom — rien de
-# ce que cette passe produit ne peut être lu comme une liste d'étudiants.
+# l'index d'empreintes des travaux annoncés qui n'en ont pas, pour que les
+# collègues de l'organisation puissent y comparer leurs copies. Un index ne
+# porte ni code ni nom — rien de ce que cette passe produit ne peut être lu
+# comme une liste d'étudiants.
+#
+# Une demande de levée du voile ne se tranche jamais ici, et c'est délibéré :
+# l'approbation ne vaut que parce que le propriétaire des copies l'a écrite
+# lui-même. Une passe qui accorderait à sa place annulerait ce qu'elle est
+# censée respecter.
 #
 # ── Avant de s'en servir ────────────────────────────────────────────────────
 #
@@ -55,11 +67,16 @@ const Workflow = `# Comparaison des copies, tournée par GitHub Actions.
 name: plagiat
 
 on:
+  # Chaque lundi : les travaux annoncés sans index sont rattrapés tout seuls.
+  # Un travail déjà indexé n'est pas retouché, la passe ne coûte donc rien
+  # quand il n'y a rien à faire.
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
     inputs:
       travail:
-        description: "Travail à traiter (« a26.5n6.01.tp1 »)"
-        required: true
+        description: "Travail à publier (vide : tous ceux qui n'ont pas d'index)"
+        required: false
       profil:
         description: "Profil d'inspection"
         required: false
@@ -74,9 +91,23 @@ jobs:
           GH_TOKEN: ${{ secrets.COHORTE_TOKEN }}
         run: gh extension install PierreOlivierBrillant/gh-cohorte
 
-      # Publie l'index d'empreintes du travail, et l'annonce au catalogue.
+      # Sans travail nommé — le cas du déclenchement périodique —, publie
+      # l'index de chaque travail annoncé au catalogue qui n'en a pas encore.
       # Rien de ce qui sort ne nomme quiconque.
-      - name: Publier l'index
+      - name: Publier les index manquants
+        if: inputs.travail == ''
+        env:
+          GH_TOKEN: ${{ secrets.COHORTE_TOKEN }}
+        run: |
+          gh cohorte --publish-index \
+            --org "${{ github.repository_owner }}" \
+            --profile "${{ inputs.profil || 'tout' }}" \
+            --non-interactive --yes
+
+      # Un travail nommé est republié, qu'il ait déjà un index ou non : c'est
+      # ce qu'on lance après avoir ajouté des copies.
+      - name: Publier l'index d'un travail
+        if: inputs.travail != ''
         env:
           GH_TOKEN: ${{ secrets.COHORTE_TOKEN }}
         run: |
