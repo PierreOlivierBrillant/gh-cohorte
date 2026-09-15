@@ -55,13 +55,19 @@ func (m *manageSession) demandes() error {
 			return err
 		}
 		if action == "deposer" {
-			if err := m.deposerDemande(); err != nil {
-				return err
-			}
+			err = m.deposerDemande()
+		} else {
+			err = m.deciderDemande(demandes.Waiting(m.session.Viewer),
+				action == "accorder")
+		}
+		// Un refus de l'outil — pas de copie dépistée, table d'index perdue —
+		// se dit et laisse l'écran ouvert : en sortir obligerait à refaire tout
+		// le chemin pour la demande suivante.
+		if valid.IsValidation(err) {
+			m.session.Console.Failure("%v", err)
 			continue
 		}
-		if err := m.deciderDemande(demandes.Waiting(m.session.Viewer),
-			action == "accorder"); err != nil {
+		if err != nil {
 			return err
 		}
 	}

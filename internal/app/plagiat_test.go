@@ -410,3 +410,49 @@ func contenuDeZip(t *testing.T, fichier *zip.File) string {
 	}
 	return string(contenu)
 }
+
+// L'assistant ouvre le même écran, et le refus s'y prend en trois touches. Ce
+// qui est vérifié ici, c'est le chemin : le menu du travail y mène, et la
+// décision se retrouve au registre.
+func TestLAssistantRefuseUneDemandeRecue(t *testing.T) {
+	h := groupeRemis(t)
+	h.Options.PublishIndex = true
+	h.Options.Manage = "a26.5n6.01.tp1"
+	h.Options.ManageRequested = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("publication : code = %d\n%s", code, h.texte())
+	}
+	jeton := premierJetonPublie(t, h.Rapports)
+
+	collegue := nouveauDansLeMemeDossier(t, h)
+	collegue.State.Viewer = "collegue"
+	collegue.Options.Ask = "a26.5n6.01.tp1:" + jeton
+	collegue.Options.ManageRequested = false
+	if code := collegue.muet(); code != app.ExitOK {
+		t.Fatalf("dépôt : code = %d\n%s", code, collegue.texte())
+	}
+	demande := identifiantDeDemande(t, collegue.texte())
+
+	prof := nouveauDansLeMemeDossier(t, h)
+	prof.State.Viewer = "prof"
+	prof.Options.PublishIndex = false
+	prof.Options.Manage = "a26.5n6.01.tp1"
+	prof.Options.ManageRequested = true
+	code, _ := prof.script("demandes", "refuser", demande,
+		"le dossier est déjà entre les mains de la direction", "retour", "quitter")
+	if code != app.ExitOK {
+		t.Fatalf("assistant : code = %d\n%s", code, prof.texte())
+	}
+	prof.contient("Demandes reçues", demande, "refusée")
+
+	liste := nouveauDansLeMemeDossier(t, h)
+	liste.State.Viewer = "prof"
+	liste.Options.PublishIndex = false
+	liste.Options.Requests = true
+	liste.Options.ManageRequested = false
+	if code := liste.muet(); code != app.ExitOK {
+		t.Fatalf("liste : code = %d\n%s", code, liste.texte())
+	}
+	liste.contient(demande, "refusée", "la direction")
+}
