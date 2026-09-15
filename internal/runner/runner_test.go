@@ -15,6 +15,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
 )
 
@@ -549,5 +550,108 @@ func TestSansEquipeEnseignanteRienNEstAccorde(t *testing.T) {
 	}
 	if len(serveur.State.TeamRepos) != 0 {
 		t.Fatalf("partages = %v", serveur.State.TeamRepos)
+	}
+}
+
+// La marque est déposée dans le README du dépôt, et elle ne s'y voit pas.
+func TestLaDistributionDeposeUneMarqueInvisible(t *testing.T) {
+	client, serveur := monter(t, nil)
+	settings := reglages()
+	items := construire(t, settings, cohorte)
+
+	rapport, err := runner.New(client, settings, squelette(t)).Run(items,
+		runner.Options{Sign: true})
+	if err != nil {
+		t.Fatalf("Run : %v", err)
+	}
+	if rapport.Signed() != len(cohorte) {
+		t.Fatalf("dépôts signés : %d sur %d", rapport.Signed(), len(cohorte))
+	}
+
+	marques := map[string]bool{}
+	for _, result := range rapport.Results {
+		if result.Signature == "" {
+			t.Fatalf("dépôt non signé : %+v", result)
+		}
+		// Deux personnes ne peuvent pas porter la même marque : la détection
+		// les confondrait, et c'est ce qu'elle existe pour éviter.
+		if marques[result.Signature] {
+			t.Fatalf("deux dépôts portent la marque %s", result.Signature)
+		}
+		marques[result.Signature] = true
+
+		fichiers := serveur.State.Files("acme/"+result.Repo, "main")
+		contenu, present := fichiers[signature.ReadmeFile]
+		if !present {
+			t.Fatalf("aucun README dans « %s »", result.Repo)
+		}
+		// Rien de visible n'a changé : le texte de départ est là, intact.
+		if !strings.HasPrefix(contenu, "# Départ\n") {
+			t.Fatalf("le README a été abîmé : %q", contenu)
+		}
+		token, signee := signature.First([]byte(contenu))
+		if !signee || signature.Text(token) != result.Signature {
+			t.Fatalf("la marque du bilan ne se retrouve pas dans le dépôt : %+v", result)
+		}
+	}
+
+	// Les marques se versent au registre : c'est le seul endroit qui dira un
+	// jour à qui appartient l'une d'elles.
+	delivrees := rapport.Signatures("a26.5n6.01.tp1")
+	if len(delivrees) != len(cohorte) {
+		t.Fatalf("marques à verser : %+v", delivrees)
+	}
+	for _, delivree := range delivrees {
+		if delivree.Username == "" || delivree.Assignment != "a26.5n6.01.tp1" {
+			t.Fatalf("marque incomplète : %+v", delivree)
+		}
+	}
+}
+
+// Sans le drapeau, rien n'est déposé : c'est un réglage, et il se respecte.
+func TestSansLeDrapeauAucuneMarqueNEstDeposee(t *testing.T) {
+	client, serveur := monter(t, nil)
+	settings := reglages()
+	items := construire(t, settings, cohorte)
+
+	rapport, err := runner.New(client, settings, squelette(t)).Run(items, runner.Options{})
+	if err != nil {
+		t.Fatalf("Run : %v", err)
+	}
+	if rapport.Signed() != 0 {
+		t.Fatalf("%d dépôts signés à tort", rapport.Signed())
+	}
+	fichiers := serveur.State.Files("acme/"+rapport.Results[0].Repo, "main")
+	if len(signature.Find([]byte(fichiers[signature.ReadmeFile]))) != 0 {
+		t.Fatal("une marque a été déposée sans qu'on la demande")
+	}
+}
+
+// Un dépôt sans README n'est pas signé : déposer un fichier que personne n'a
+// demandé serait une modification visible, pour une marque qui se veut
+// invisible.
+func TestUnDepotSansReadmeNEstPasSigne(t *testing.T) {
+	racine := t.TempDir()
+	if err := os.WriteFile(filepath.Join(racine, "main.py"), []byte("print('x')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := starter.Load(racine)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client, serveur := monter(t, nil)
+	settings := reglages()
+	rapport, err := runner.New(client, settings, bundle).Run(
+		construire(t, settings, cohorte[:1]), runner.Options{Sign: true})
+	if err != nil {
+		t.Fatalf("Run : %v", err)
+	}
+	if rapport.Signed() != 0 {
+		t.Fatalf("un dépôt sans README a été signé : %+v", rapport.Results)
+	}
+	fichiers := serveur.State.Files("acme/"+rapport.Results[0].Repo, "main")
+	if _, present := fichiers[signature.ReadmeFile]; present {
+		t.Fatal("un README a été créé pour l'occasion")
 	}
 }

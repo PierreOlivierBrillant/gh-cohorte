@@ -37,6 +37,10 @@ var manageMenu = ui.Options(
 	"pull", "Mettre à jour des clones existants",
 	"supprimer", "Supprimer un dépôt",
 	"remises", "Relever les commits et les remises",
+	"plagiat", "Comparer les copies entre elles",
+	"envoi", "Envoyer les copies anonymisées à un collègue",
+	"publier", "Publier l'index d'empreintes de ce travail",
+	"demandes", "Demander à voir une copie, ou répondre à une demande",
 	"echeance", "Fixer la date cible de ce travail",
 	"renommer", "Renommer ce travail",
 	"deplacer", "Déplacer ce travail vers un groupe",
@@ -689,6 +693,7 @@ func (m *manageSession) addRepos(group *groups.Group) error {
 		WithClock(session.Sleep, session.Now)
 	report, err := executor.Run(items, runner.Options{
 		ForceStarter: session.Options.ForceStarter,
+		Sign:         !session.Settings.NoSign,
 		OnProgress: func(index, total int, result runner.Result) {
 			session.printProgress(index, total, result, width)
 		},
@@ -1509,6 +1514,30 @@ func (m *manageSession) run() (int, error) {
 			}
 			return ExitOK, nil
 		}
+		if m.session.Options.PublishIndex {
+			m.session.Options.PublishIndex = false
+			if err := m.publierIndex(group); err != nil {
+				return ExitValidation, err
+			}
+			return ExitOK, nil
+		}
+		if m.session.Options.ExportZip != "" {
+			destination := m.session.Options.ExportZip
+			m.session.Options.ExportZip = ""
+			if err := m.exporter(group, destination); err != nil {
+				return ExitValidation, err
+			}
+			return ExitOK, nil
+		}
+		// « --plagiarism » fait une chose et s'en va : il compare les copies du
+		// travail géré, écrit son rapport, et dit où il est.
+		if m.session.Options.Plagiarism {
+			m.session.Options.Plagiarism = false
+			if err := m.plagiat(group); err != nil {
+				return ExitValidation, err
+			}
+			return ExitOK, nil
+		}
 
 		// Passé les drapeaux qui font une chose et s'en vont, l'assistant reste
 		// ouvert : ce qu'on va y regarder se prépare pendant qu'on choisit.
@@ -1580,6 +1609,14 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return m.deleteRepo(group)
 	case "remises":
 		return m.remises(group)
+	case "plagiat":
+		return m.plagiat(group)
+	case "envoi":
+		return m.demanderEnvoi(group)
+	case "publier":
+		return m.publierIndex(group)
+	case "demandes":
+		return m.demandes()
 	case "echeance":
 		return m.echeance(group)
 	case "renommer":

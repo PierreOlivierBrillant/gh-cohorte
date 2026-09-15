@@ -29,6 +29,7 @@ func (s *Session) serveWeb() (int, error) {
 		Refresher:   s.Refresher,
 		Version:     Version,
 		ReportDir:   reportDir,
+		Rules:       s.Rules,
 		Jobs:        s.Options.Jobs,
 		Depth:       s.Options.Depth,
 		SaveConfig:  !s.Options.NoSaveConfig,

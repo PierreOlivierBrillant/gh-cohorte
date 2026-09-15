@@ -362,6 +362,7 @@ var (
 	refRe          = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/ref/heads/(.+)$`)
 	refUpdateRe    = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/git/refs/heads/(.+)$`)
 	historyRe      = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/commits$`)
+	tarballRe      = regexp.MustCompile(`^/repos/([^/]+)/([^/]+)/tarball(?:/(.+))?$`)
 )
 
 func (s *Server) handle(writer http.ResponseWriter, request *http.Request) {
@@ -460,6 +461,10 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 			return
 		}
 		s.send(writer, 200, map[string]any{"role": role})
+		return
+	}
+	if match := tarballRe.FindStringSubmatch(path); match != nil {
+		s.tarball(writer, match[1]+"/"+match[2], match[3])
 		return
 	}
 	if match := userRe.FindStringSubmatch(path); match != nil {

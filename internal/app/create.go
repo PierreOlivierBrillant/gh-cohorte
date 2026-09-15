@@ -11,6 +11,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
@@ -732,6 +733,7 @@ func (s *Session) execute(items []plan.PlannedRepo) (int, error) {
 	report, err := executor.Run(items, runner.Options{
 		DryRun:            s.Options.DryRun,
 		ForceStarter:      s.Options.ForceStarter,
+		Sign:              !s.Settings.NoSign,
 		TeacherTeam:       equipe,
 		TeacherPermission: droit,
 		OnProgress: func(index, total int, result runner.Result) {
@@ -746,6 +748,7 @@ func (s *Session) execute(items []plan.PlannedRepo) (int, error) {
 		s.Cache.Forget(cache.ReposKey(s.Settings.Org))
 		s.invalidateCaches()
 	}
+	s.verserLesMarques(report)
 
 	s.Console.Heading("Bilan")
 	createdLabel := "créé(s)"
@@ -828,4 +831,27 @@ func itoa(value int) string { return strconv.Itoa(value) }
 // plural insère un nombre dans un libellé contenant %d.
 func plural(format string, count int) string {
 	return strings.Replace(format, "%d", itoa(count), 1)
+}
+
+// verserLesMarques monte au registre les marques invisibles délivrées.
+//
+// Un échec ne fait pas échouer la distribution : les dépôts sont créés, les
+// étudiants peuvent travailler. Ce qui manque est la table qui relie une marque
+// à quelqu'un — la détection verra encore deux travaux porter la même, mais
+// personne ne pourra dire de qui il s'agit. Cela mérite un avertissement, pas
+// un refus.
+func (s *Session) verserLesMarques(report *runner.Report) {
+	if s.Options.DryRun || report.Signed() == 0 {
+		return
+	}
+	delivrees := report.Signatures(s.Settings.Assignment)
+	if len(delivrees) == 0 {
+		return
+	}
+	if _, err := s.registryOf(s.Settings.Org).Apply(registry.Mark(delivrees...)); err != nil {
+		s.Console.Warning("Marques non enregistrées au registre : %v. Les dépôts "+
+			"sont signés, mais rien ne dira à qui appartient une marque.", err)
+		return
+	}
+	s.Console.Printf("  %d dépôt(s) signés d'une marque invisible.", report.Signed())
 }

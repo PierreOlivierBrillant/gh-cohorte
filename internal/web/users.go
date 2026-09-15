@@ -201,6 +201,11 @@ func (s *Server) handleUser(writer http.ResponseWriter, request *http.Request) {
 		// bouton ne laisserait aucun chemin pour le faire.
 		"viewer": s.deps.Viewer, "viewer_teaches": set.Teaches(s.deps.Viewer),
 		"teachers": len(set.Teachers()), "host": s.hostName(),
+		// Les équipes disent quels cours quelqu'un a donnés ; elles ne disent
+		// pas quels travaux — leurs noms ne se lisent que dans des dépôts qu'un
+		// collègue cloisonné ne voit pas. C'est le catalogue qui comble ce trou,
+		// et c'est par là qu'on demande à comparer.
+		"given": set.Catalog().Of(compte),
 	})
 }
 

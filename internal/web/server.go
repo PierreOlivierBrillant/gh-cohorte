@@ -23,11 +23,13 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/preload"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -52,9 +54,12 @@ type Deps struct {
 	// variable d'environnement. Ce que gh peut renouveler en dépend.
 	TokenOrigin string
 	// Refresher renouvelle le jeton ; nil branche l'interface sur le vrai gh.
-	Refresher  *scopes.Refresher
-	Version    string
-	ReportDir  string
+	Refresher *scopes.Refresher
+	Version   string
+	ReportDir string
+	// Rules surcharge les règles de l'organisation, telles que « --rules » les
+	// a chargées au lancement.
+	Rules      rules.Rules
 	Jobs       int
 	Depth      int
 	SaveConfig bool
@@ -81,6 +86,12 @@ type Server struct {
 	squads     map[string][]teams.Info       // organisation → équipes connues
 	resolvers  map[string]*identity.Resolver // organisation → noms complets
 	registries map[string]*registry.Store    // organisation → registre des étudiants
+	// indexStores retient, par organisation, le dépôt des index d'empreintes.
+	indexStores map[string]*exchange.Store
+	// reports garde les rapports de plagiat déjà lus et la dernière paire
+	// ouverte : un rapport pèse parfois des méga-octets, et ouvrir une paire
+	// retélécharge deux dépôts.
+	reports reportCache
 }
 
 // New prépare le serveur et réserve son port sur la boucle locale.
@@ -104,19 +115,20 @@ func New(deps Deps) (*Server, error) {
 	}
 
 	server := &Server{
-		deps:       deps,
-		jobs:       NewJobs(),
-		warmer:     preload.New(),
-		listener:   listener,
-		token:      token,
-		port:       port,
-		classrooms: classroom.Open(classroom.PathNextTo(deps.ConfigFile)),
-		stop:       make(chan struct{}),
-		settings:   deps.Settings,
-		inventory:  map[string][]groups.RepoInfo{},
-		squads:     map[string][]teams.Info{},
-		resolvers:  map[string]*identity.Resolver{},
-		registries: map[string]*registry.Store{},
+		deps:        deps,
+		jobs:        NewJobs(),
+		warmer:      preload.New(),
+		listener:    listener,
+		token:       token,
+		port:        port,
+		classrooms:  classroom.Open(classroom.PathNextTo(deps.ConfigFile)),
+		stop:        make(chan struct{}),
+		settings:    deps.Settings,
+		inventory:   map[string][]groups.RepoInfo{},
+		squads:      map[string][]teams.Info{},
+		resolvers:   map[string]*identity.Resolver{},
+		registries:  map[string]*registry.Store{},
+		indexStores: map[string]*exchange.Store{},
 	}
 	// Le magasin consulte le registre avant d'écrire : un nom que le registre
 	// porte déjà n'a pas à être redit dans le fichier local.
@@ -135,6 +147,16 @@ func (s *Server) URL() string {
 
 // Address est l'adresse sans jeton, pour les messages du terminal.
 func (s *Server) Address() string { return "http://127.0.0.1:" + s.port }
+
+// RegistryApply écrit au registre d'une organisation.
+//
+// Il n'existe que pour les épreuves : elles ont besoin d'y déposer ce qu'un
+// collègue y aurait écrit depuis son poste, et le faux serveur n'a pas de
+// second client.
+func (s *Server) RegistryApply(org string, change registry.Change) error {
+	_, err := s.registryOf(org).Apply(change)
+	return err
+}
 
 // Settings renvoie les réglages tels que l'interface les a laissés : la session
 // du terminal les mémorise en quittant.
@@ -284,6 +306,28 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/paths/browse", s.handleBrowsePath)
 
 	// --- travaux en arrière-plan
+	mux.HandleFunc("GET /api/orgs/{org}/catalog", s.handleCatalog)
+	mux.HandleFunc("GET /api/orgs/{org}/asks", s.handleAsks)
+	mux.HandleFunc("POST /api/orgs/{org}/asks", s.handleAsk)
+	mux.HandleFunc("POST /api/orgs/{org}/asks/{id}/grant", s.handleGrantAsk)
+	mux.HandleFunc("POST /api/orgs/{org}/asks/{id}/deny", s.handleDenyAsk)
+	mux.HandleFunc("GET /api/orgs/{org}/rules", s.handleRules)
+	mux.HandleFunc("PUT /api/orgs/{org}/rules", s.handleSetRules)
+
+	// Détection de plagiat.
+	mux.HandleFunc("GET /api/plagiat/options", s.handlePlagiarismOptions)
+	mux.HandleFunc("GET /api/plagiat/reports", s.handlePlagiarismReports)
+	mux.HandleFunc("GET /api/plagiat/reports/{name}", s.handlePlagiarismReport)
+	mux.HandleFunc("POST /api/plagiat/reports/{name}/publish", s.handlePlagiarismPublish)
+	mux.HandleFunc("POST /api/plagiat/reports/{name}/pair", s.handlePlagiarismPair)
+	mux.HandleFunc("POST /api/plagiat/reports/{name}/file", s.handlePlagiarismFile)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/plagiat/preview",
+		s.handlePlagiarismPreview)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/plagiat",
+		s.handlePlagiarismRun)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/plagiat/export",
+		s.handlePlagiarismExport)
+
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleJob)
 	mux.HandleFunc("GET /api/jobs/{id}/events", s.handleJobEvents)
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", s.handleCancelJob)

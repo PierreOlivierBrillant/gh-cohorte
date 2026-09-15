@@ -534,6 +534,7 @@
           <div class="menu-flottant menu-liste" id="detail-menu" hidden role="menu">
             <button type="button" id="detail-acces" role="menuitem">Inspecter les accès</button>
             <button type="button" id="detail-remises" role="menuitem">Relever les remises</button>
+            <button type="button" id="detail-plagiat" role="menuitem">Comparer les copies entre elles…</button>
             <button type="button" id="detail-echeance" role="menuitem">Date cible…</button>
             <button type="button" id="detail-partager" role="menuitem" hidden>Partager avec les équipes…</button>
             <button type="button" id="detail-renommer" role="menuitem">Renommer ce travail…</button>
@@ -978,6 +979,272 @@
   </section>
 
   <!-- ------------------------------------------------------ réglages généraux -->
+  <!-- --------------------------------------------- plagiat : préparation -->
+  <!-- Trois moments, et l'ordre compte : on montre ce qui entre et ce que ça
+       coûtera, on lance, on lit. Une analyse lancée à l'aveugle sur cinq ans de
+       dépôts se termine mal, et personne ne saurait dire pourquoi. -->
+  <section id="vue-plagiat" class="vue" hidden>
+    <div class="barre-outils">
+      <div>
+        <h2 id="pl-titre">Comparer les copies</h2>
+        <p class="note" id="pl-sous-titre"></p>
+      </div>
+      <div class="actions">
+        <div class="menu-ancre">
+          <button type="button" id="pl-menu-ouvrir" class="bouton"
+            aria-expanded="false" aria-haspopup="true"
+            aria-controls="pl-menu">Échanger</button>
+          <div class="menu-flottant menu-liste" id="pl-menu" hidden role="menu">
+            <button type="button" id="pl-contre" role="menuitem">Comparer avec un collègue…</button>
+            <button type="button" id="pl-envoyer" role="menuitem">Envoyer ces copies à un collègue…</button>
+            <button type="button" id="pl-recevoir" role="menuitem">Ajouter des copies reçues…</button>
+            <button type="button" id="pl-rattraper" role="menuitem">Publier les index manquants…</button>
+            <button type="button" id="pl-regles-ouvrir" role="menuitem">Règles de comparaison…</button>
+          </div>
+        </div>
+        <button type="button" id="pl-apercu" class="bouton">Voir ce qui sera comparé</button>
+        <button type="button" id="pl-lancer" class="bouton vert">Analyser</button>
+      </div>
+    </div>
+
+    <p class="avertissement" id="pl-avertissement"></p>
+
+    <div class="boite">
+      <div class="boite-entete"><strong>Ce qui est inspecté</strong></div>
+      <div class="boite-corps">
+        <div class="ligne-champs">
+          <label class="champ-bloc choix-etudiant">
+            <span class="etiquette">Profil d'inspection</span>
+            <select id="pl-profil" class="champ"></select>
+          </label>
+          <label class="champ-bloc choix-etudiant">
+            <span class="etiquette">Portée</span>
+            <select id="pl-portee" class="champ"></select>
+          </label>
+          <label class="case pl-bascule">
+            <input type="checkbox" id="pl-gabarit" checked>
+            <span>
+              Écarter le gabarit distribué
+              <span class="aide" id="pl-gabarit-nom"></span>
+            </span>
+          </label>
+        </div>
+        <p class="note" id="pl-profil-note"></p>
+        <p class="note" id="pl-portee-note"></p>
+
+        <h3>Langages comparés</h3>
+        <p class="note">Aucun coché : ceux du profil, et à défaut tous les langages reconnus.</p>
+        <div class="jetons" id="pl-langages"></div>
+
+        <div class="ligne-champs" style="margin-top:.75rem">
+          <label class="champ-bloc souple">
+            <span class="etiquette">N'inspecter que</span>
+            <input type="text" id="pl-only" class="champ" placeholder="app/**, src/**">
+            <span class="aide">Motifs à la manière d'un « .gitignore ». Vide : tout ce qui reste.</span>
+          </label>
+          <label class="champ-bloc souple">
+            <span class="etiquette">Ne pas inspecter</span>
+            <input type="text" id="pl-ignore" class="champ" placeholder="docs/**, *.sql">
+            <span class="aide">En plus des dépendances et des binaires, écartés d'office.</span>
+          </label>
+        </div>
+        <p class="note" id="pl-ecarte-doffice"></p>
+      </div>
+    </div>
+
+    <details class="boite pl-avance">
+      <summary>Réglages de la mesure</summary>
+      <div class="boite-corps">
+        <div class="ligne-champs">
+          <label class="champ-bloc">
+            <span class="etiquette">Jetons par k-gramme</span>
+            <input type="number" id="pl-kgram" class="champ" min="2" max="200" placeholder="selon le langage">
+            <span class="aide">Le monter rend la détection plus grossière et plus rapide.</span>
+          </label>
+          <label class="champ-bloc">
+            <span class="etiquette">Fenêtre</span>
+            <input type="number" id="pl-window" class="champ" min="1" max="200" placeholder="selon le langage">
+            <span class="aide">Le monter divise la mémoire ; les passages courts cessent d'être vus.</span>
+          </label>
+          <label class="champ-bloc">
+            <span class="etiquette">Empreintes banales</span>
+            <input type="number" id="pl-noise" class="champ" min="0" max="100" step="5" placeholder="30">
+            <span class="aide">Part des copies au-delà de laquelle une empreinte ne dit plus rien (%).</span>
+          </label>
+        </div>
+      </div>
+    </details>
+
+    <div id="pl-demandes"></div>
+    <div id="pl-collegues"></div>
+    <div id="pl-archives"></div>
+    <div id="pl-envoi-resultat"></div>
+    <div id="pl-apercu-resultat"></div>
+  </section>
+
+  <!-- --------------------------------------------------- plagiat : règles -->
+  <!-- Ce qu'un département déclare et que l'outil ne doit pas savoir : quels
+       sigles ont désigné le même cours, quels noms ont désigné le même travail.
+       Cela vit dans le registre de l'organisation, partagé par toute l'équipe :
+       une personne le déclare, et les analyses de chacun retrouvent dès lors
+       les copies d'il y a trois ans. -->
+  <section id="vue-plagiat-regles" class="vue" hidden>
+    <div class="barre-outils">
+      <div>
+        <p class="note" id="pl-regles-sous-titre"></p>
+      </div>
+      <div class="actions">
+        <button type="button" id="pl-regles-retour" class="bouton">Retour</button>
+        <button type="button" id="pl-regles-ecrire" class="bouton vert">Écrire au registre</button>
+      </div>
+    </div>
+    <p class="avertissement" id="pl-regles-surcharge" hidden></p>
+
+    <div class="boite">
+      <div class="boite-entete">
+        <strong>Cours qui ont changé de sigle</strong>
+        <span class="espace"></span>
+        <button type="button" id="pl-regles-cours-ajouter" class="bouton petit">Ajouter un cours</button>
+      </div>
+      <div class="boite-corps">
+        <p class="note">Un cours, et tous les sigles qu'il a portés. « 5N6, 5M6 »
+          fait qu'une analyse sur plusieurs sessions retrouve les copies des deux.</p>
+        <div id="pl-regles-cours"></div>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete">
+        <strong>Travaux qui ont changé de nom</strong>
+        <span class="espace"></span>
+        <button type="button" id="pl-regles-travaux-ajouter" class="bouton petit">Ajouter un travail</button>
+      </div>
+      <div class="boite-corps">
+        <p class="note">Le même piège, un niveau plus bas : « tp1 » un an,
+          « tp-1 » l'autre.</p>
+        <div id="pl-regles-travaux"></div>
+      </div>
+    </div>
+
+    <p class="note" id="pl-regles-profils"></p>
+  </section>
+
+  <!-- ------------------------------------------------- plagiat : rapport -->
+  <section id="vue-plagiat-rapport" class="vue" hidden>
+    <div class="barre-outils">
+      <div>
+        <p class="note" id="pl-rapport-resume"></p>
+      </div>
+      <div class="actions">
+        <button type="button" id="pl-rapport-publier" class="bouton">Publier l’index…</button>
+        <button type="button" id="pl-rapport-rejouer" class="bouton">Nouvelle analyse</button>
+      </div>
+    </div>
+
+    <p class="avertissement" id="pl-rapport-avertissement"></p>
+    <div id="pl-rapport-soucis"></div>
+
+    <div class="rangee pl-graphiques">
+      <div class="boite souple">
+        <div class="boite-entete">
+          <strong>Distribution des similarités</strong>
+          <span class="espace"></span>
+          <span class="note" id="pl-seuil-libelle"></span>
+        </div>
+        <div class="boite-corps">
+          <div id="pl-histogramme"></div>
+          <label class="champ-bloc" style="margin-top:.5rem">
+            <span class="etiquette">Seuil</span>
+            <input type="range" id="pl-seuil" min="0" max="100" step="1" class="pl-curseur">
+            <span class="aide" id="pl-seuil-aide"></span>
+          </label>
+        </div>
+      </div>
+      <div class="boite souple">
+        <div class="boite-entete">
+          <strong>Chaque paire, par ce qu'elle partage</strong>
+          <span class="espace"></span>
+          <span class="note" id="pl-nuage-legende"></span>
+        </div>
+        <div class="boite-corps"><div id="pl-nuage"></div></div>
+      </div>
+    </div>
+
+    <div class="boite">
+      <div class="boite-entete">
+        <strong id="pl-paires-titre">Paires</strong>
+        <span class="espace"></span>
+        <label class="case"><input type="checkbox" id="pl-paires-seuil" checked>
+          <span>N'afficher que ce qui est au-dessus du seuil</span></label>
+      </div>
+      <div id="pl-paires"></div>
+    </div>
+
+    <div id="pl-signaux"></div>
+    <div id="pl-ecarte"></div>
+  </section>
+
+  <!-- ------------------------------------------- plagiat : deux projets -->
+  <section id="vue-plagiat-paire" class="vue" hidden>
+    <div class="barre-outils">
+      <div>
+        <p class="note" id="pl-paire-resume"></p>
+      </div>
+      <div class="actions">
+        <button type="button" id="pl-paire-retour" class="bouton">Retour au rapport</button>
+      </div>
+    </div>
+    <p class="avertissement" id="pl-paire-avertissement"></p>
+    <div id="pl-paire-chronologie"></div>
+    <div class="boite">
+      <div class="boite-entete"><strong>Fichiers reliés</strong>
+        <span class="espace"></span>
+        <span class="note">Cliquez une ligne pour comparer les deux fichiers.</span>
+      </div>
+      <div id="pl-paire-liens"></div>
+    </div>
+    <div class="rangee">
+      <div class="boite souple">
+        <div class="boite-entete"><strong id="pl-paire-gauche-titre"></strong></div>
+        <div id="pl-paire-gauche-seuls"></div>
+      </div>
+      <div class="boite souple">
+        <div class="boite-entete"><strong id="pl-paire-droite-titre"></strong></div>
+        <div id="pl-paire-droite-seuls"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------ plagiat : deux fichiers -->
+  <section id="vue-plagiat-fichier" class="vue" hidden>
+    <div class="barre-outils">
+      <div>
+        <p class="note" id="pl-fichier-resume"></p>
+      </div>
+      <div class="actions">
+        <div class="onglets pl-modes" role="tablist">
+          <button type="button" data-mode="commun" class="actif">Ce qui est commun</button>
+          <button type="button" data-mode="different">Ce qui diffère</button>
+          <button type="button" data-mode="jetons">Ce que le moteur compare</button>
+        </div>
+        <button type="button" id="pl-fichier-precedent" class="bouton petit">← Fragment</button>
+        <button type="button" id="pl-fichier-suivant" class="bouton petit">Fragment →</button>
+        <button type="button" id="pl-fichier-retour" class="bouton">Retour</button>
+      </div>
+    </div>
+    <p class="note" id="pl-mode-explication"></p>
+    <div class="pl-cote-a-cote">
+      <div class="boite">
+        <div class="boite-entete"><strong id="pl-fichier-gauche-titre"></strong></div>
+        <pre class="pl-code" id="pl-fichier-gauche"></pre>
+      </div>
+      <div class="boite">
+        <div class="boite-entete"><strong id="pl-fichier-droite-titre"></strong></div>
+        <pre class="pl-code" id="pl-fichier-droite"></pre>
+      </div>
+    </div>
+  </section>
+
   <section id="vue-reglages" class="vue" hidden>
     <div class="boite">
       <div class="boite-entete"><strong>Organisation</strong></div>
@@ -1065,6 +1332,18 @@
           <span class="etiquette">Marge entre deux créations (secondes)</span>
           <input type="number" id="reglage-delay" class="champ" min="0" step="0.5">
           <span class="aide">GitHub limite les écritures en rafale.</span>
+        </label>
+        <label class="case">
+          <input type="checkbox" id="reglage-signature" checked>
+          <span>
+            Déposer une marque invisible dans chaque dépôt distribué
+            <span class="aide">Un jeton tiré au hasard, écrit en espaces et en
+              tabulations sur une ligne vide du README : rien ne se voit, et
+              l’étudiant ne peut ni le lire ni le deviner. Deux travaux qui
+              portent la même marque n’ont pas d’explication innocente.
+              Son absence, elle, ne prouve rien : un formateur l’efface sans
+              le savoir.</span>
+          </span>
         </label>
         <label class="champ-bloc">
           <span class="etiquette">Dossier des clones</span>

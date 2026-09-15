@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/progress"
 )
@@ -14,8 +15,12 @@ type Progress struct {
 	label   string
 	total   int
 	bar     progress.Model
-	last    int
-	active  bool
+	// Les travaux parallèles rendent compte de leur avancement chacun depuis
+	// sa goroutine : sans verrou, deux lignes s'entremêleraient sur la même
+	// ligne du terminal, et le décompte se perdrait.
+	mutex  sync.Mutex
+	last   int
+	active bool
 }
 
 // NewProgress prépare une barre de progression.
@@ -30,6 +35,8 @@ func (p *Progress) Update(done int, suffix string) {
 	if p.total <= 0 {
 		return
 	}
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 	if done > p.total {
 		done = p.total
 	}
@@ -54,10 +61,12 @@ func (p *Progress) Update(done int, suffix string) {
 
 // Finish efface la barre et laisse éventuellement un message final.
 func (p *Progress) Finish(message string) {
+	p.mutex.Lock()
 	if p.console.TTY && p.active {
 		fmt.Fprint(p.console.Out, "\r\033[K")
 	}
 	p.active = false
+	p.mutex.Unlock()
 	if message != "" {
 		p.console.Print(message)
 	}
