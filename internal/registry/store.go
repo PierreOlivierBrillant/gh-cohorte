@@ -102,8 +102,8 @@ type Snapshot struct {
 // C'est arrivé au renommage de « students » en « users ». Une entrée d'une
 // forme qu'on ne reconnaît pas n'est donc plus lue du tout : relire GitHub
 // coûte une requête, se tromper coûtait bien davantage.
-// La version 5 ajoute les règles, le catalogue des travaux et les marques.
-const keptSchema = 5
+// La version 6 ajoute les demandes de levée du voile.
+const keptSchema = 6
 
 // keptSet est ce que le cache local retient : le registre, et le commit qui le
 // scelle. Tant que la branche pointe sur ce commit, ce contenu vaut toujours.
@@ -120,6 +120,7 @@ type keptSet struct {
 	Rules       rules.Rules      `json:"rules,omitzero"`
 	Catalog     exchange.Catalog `json:"catalog,omitzero"`
 	Marks       signature.Book   `json:"marks,omitzero"`
+	Asks        exchange.Asks    `json:"asks,omitzero"`
 }
 
 // Load lit le registre.
@@ -183,6 +184,10 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, s.step("lecture du fichier "+MarksFile, err)
 	}
+	demandees, err := s.client.ReadFile(s.org, RepoName, AsksFile, head)
+	if err != nil {
+		return Snapshot{}, s.step("lecture du fichier "+AsksFile, err)
+	}
 
 	var soucis []string
 	var fiches []User
@@ -190,6 +195,7 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 	var regles rules.Rules
 	var catalogue exchange.Catalog
 	var marques signature.Book
+	var demandes exchange.Asks
 	if utilisateurs != nil {
 		lu, ennuis := Decode(utilisateurs.Content)
 		fiches, soucis = lu.All(), append(soucis, ennuis...)
@@ -210,7 +216,11 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 		lu, ennuis := signature.DecodeBook(marquees.Content)
 		marques, soucis = lu, append(soucis, ennuis...)
 	}
-	set := newSet(fiches, dates, regles, catalogue, marques)
+	if demandees != nil {
+		lues, ennuis := exchange.DecodeAsks(demandees.Content)
+		demandes, soucis = lues, append(soucis, ennuis...)
+	}
+	set := newSet(fiches, dates, regles, catalogue, marques, demandes)
 	s.keep(head, set)
 	return Snapshot{Set: set, Head: head, Issues: soucis, Seeded: utilisateurs != nil}, nil
 }
@@ -227,7 +237,7 @@ func (s *Store) kept() (Snapshot, bool) {
 	}
 	return Snapshot{
 		Set: newSet(garde.Users, garde.Assignments, garde.Rules, garde.Catalog,
-			garde.Marks),
+			garde.Marks, garde.Asks),
 		Head: garde.Head,
 	}, true
 }
@@ -240,7 +250,7 @@ func (s *Store) keep(head string, set *Set) {
 	s.local.Set(cache.RegistryKey(s.org), keptSet{
 		Schema: keptSchema, Head: head,
 		Users: set.All(), Assignments: set.Assignments(), Rules: set.Rules(),
-		Catalog: set.Catalog(), Marks: set.Marks(),
+		Catalog: set.Catalog(), Marks: set.Marks(), Asks: set.Asks(),
 	})
 }
 
@@ -380,6 +390,19 @@ func (s *Store) commit(set *Set, snapshot Snapshot, message string) (string, err
 	if !set.Marks().Empty() && !bytes.Equal(marques, anciennesMarques) {
 		fichiers = append(fichiers, ghapi.PushFile{
 			Path: MarksFile, Mode: "100644", Content: marques})
+	}
+
+	demandes, err := exchange.EncodeAsks(set.Asks())
+	if err != nil {
+		return "", err
+	}
+	anciennesDemandes, err := exchange.EncodeAsks(snapshot.Set.Asks())
+	if err != nil {
+		return "", err
+	}
+	if !set.Asks().Empty() && !bytes.Equal(demandes, anciennesDemandes) {
+		fichiers = append(fichiers, ghapi.PushFile{
+			Path: AsksFile, Mode: "100644", Content: demandes})
 	}
 
 	if !snapshot.Seeded {

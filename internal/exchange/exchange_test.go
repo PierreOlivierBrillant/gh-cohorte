@@ -210,3 +210,61 @@ func TestLeCheminDUnIndexEstStable(t *testing.T) {
 		t.Fatal("le dépôt doit expliquer ce qu'il ne contient pas")
 	}
 }
+
+// Une demande passe d'« en attente » à « accordée » en se réécrivant : c'est la
+// dernière écrite qui vaut, sans quoi une décision n'en serait jamais une.
+func TestTrancherUneDemandeRemplaceLaPrecedente(t *testing.T) {
+	depart, err := exchange.Asks{Asks: []exchange.Ask{
+		{ID: "K7DM2X", From: "prof", To: "collegue",
+			Assignment: "a26.5n6.02.tp1", Token: "BCDFGH", CreatedAt: "2026-10-01T09:00:00Z"},
+		{ID: "ZZ99ZZ", From: "collegue", To: "prof",
+			Assignment: "a26.5n6.01.tp1", Token: "JKLMNP", CreatedAt: "2026-10-02T09:00:00Z"},
+	}}.Validate()
+	if err != nil {
+		t.Fatalf("demandes refusées : %v", err)
+	}
+	if len(depart.Waiting("collegue")) != 1 || len(depart.By("prof")) != 1 {
+		t.Fatalf("répartition : %+v", depart.Asks)
+	}
+
+	tranchee, _ := depart.Find("K7DM2X")
+	tranchee.State, tranchee.DecidedAt = exchange.AskGranted, "2026-10-03T09:00:00Z"
+	apres, bouge, err := depart.With([]exchange.Ask{tranchee})
+	if err != nil || !bouge {
+		t.Fatalf("décision : %v", err)
+	}
+	if len(apres.Asks) != 2 {
+		t.Fatalf("demandes : %+v", apres.Asks)
+	}
+	relue, _ := apres.Find("K7DM2X")
+	if relue.State != exchange.AskGranted {
+		t.Fatalf("la décision doit l'emporter : %+v", relue)
+	}
+	if len(apres.Waiting("collegue")) != 0 {
+		t.Fatal("une demande tranchée n'attend plus")
+	}
+	// Et celle du voisin n'a pas bougé.
+	if voisine, _ := apres.Find("ZZ99ZZ"); !voisine.Pending() {
+		t.Fatalf("la demande d'un autre a été touchée : %+v", voisine)
+	}
+}
+
+func TestUnIdentifiantDeDemandeNeFormePasDeMot(t *testing.T) {
+	vus := map[string]bool{}
+	for essai := 0; essai < 300; essai++ {
+		id, err := exchange.NewAskID()
+		if err != nil {
+			t.Fatalf("tirage : %v", err)
+		}
+		if strings.ContainsAny(id, "AEIOUYaeiouy") {
+			t.Fatalf("l'identifiant « %s » porte une voyelle", id)
+		}
+		if len(id) != 6 {
+			t.Fatalf("longueur : %q", id)
+		}
+		vus[id] = true
+	}
+	if len(vus) < 290 {
+		t.Fatalf("trop de collisions : %d identifiants distincts sur 300", len(vus))
+	}
+}

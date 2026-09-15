@@ -67,6 +67,9 @@ const (
 	// renseignement personnel, et il peut se relire sur github.com sans
 	// exposer une liste de noms.
 	RulesFile = "regles.json"
+	// AsksFile porte les demandes de levée du voile. Elles ne nomment aucun
+	// étudiant : un travail, un jeton, et ce que le demandeur a mesuré.
+	AsksFile = exchange.AsksFile
 	// MarksFile porte les marques invisibles délivrées. C'est le seul fichier
 	// du registre qui relie une marque à quelqu'un : sans lui, deux travaux qui
 	// portent la même se reconnaissent encore, mais personne ne peut dire de
@@ -232,11 +235,14 @@ type Set struct {
 	// portent la même se reconnaissent sans lui, mais nul autre ne peut dire
 	// de qui il s'agit.
 	marks signature.Book
+	// Les demandes de levée du voile. Elles ne nomment aucun étudiant : un
+	// travail, un jeton, et ce que le demandeur a mesuré.
+	asks exchange.Asks
 }
 
 // newSet range les fiches et dresse ses index.
 func newSet(users []User, assignments []Assignment, declared rules.Rules,
-	catalog exchange.Catalog, marks signature.Book) *Set {
+	catalog exchange.Catalog, marks signature.Book, asks exchange.Asks) *Set {
 	rangees := append([]User(nil), users...)
 	sort.SliceStable(rangees, func(i, j int) bool {
 		return rangees[i].Key() < rangees[j].Key()
@@ -249,6 +255,7 @@ func newSet(users []User, assignments []Assignment, declared rules.Rules,
 		rules:        declared,
 		catalog:      catalog,
 		marks:        marks,
+		asks:         asks,
 		users:        rangees,
 		byLogin:      make(map[string]int, len(rangees)),
 		bySlug:       make(map[string]int, 2*len(rangees)),
@@ -273,11 +280,20 @@ func newSet(users []User, assignments []Assignment, declared rules.Rules,
 // Empty rend un registre vide : celui d'une organisation qu'on n'a pas encore
 // amorcée.
 func Empty() *Set {
-	return newSet(nil, nil, rules.Rules{}, exchange.Catalog{}, signature.Book{})
+	return newSet(nil, nil, rules.Rules{}, exchange.Catalog{}, signature.Book{},
+		exchange.Asks{})
 }
 
 // Rules rend ce que l'organisation déclare.
 func (s *Set) Rules() rules.Rules { return s.rules }
+
+// Asks rend les demandes de levée du voile.
+func (s *Set) Asks() exchange.Asks {
+	if s == nil {
+		return exchange.Asks{}
+	}
+	return s.asks
+}
 
 // Marks rend les marques invisibles délivrées.
 func (s *Set) Marks() signature.Book {
@@ -452,6 +468,9 @@ type Change struct {
 	// Rules remplace les règles de l'organisation. Nil n'y touche pas — c'est
 	// la différence entre « je ne déclare rien » et « je retire tout ».
 	Rules *rules.Rules
+	// Asks verse des demandes de levée du voile, ou les tranche : une demande
+	// réécrite avec le même identifiant remplace la sienne.
+	Asks []exchange.Ask
 	// Marks verse des marques invisibles au registre. Comme le catalogue, il ne
 	// remplace pas : une marque délivrée à quelqu'un d'autre n'a pas à
 	// disparaître parce qu'on redistribue un travail.
@@ -521,12 +540,17 @@ func Reschedule(travaux ...Assignment) Change {
 func (c Change) Empty() bool {
 	return len(c.Learn) == 0 && len(c.Forget) == 0 &&
 		len(c.Roles) == 0 && len(c.Deadlines) == 0 && c.Rules == nil &&
-		len(c.Teaching) == 0 && len(c.Marks) == 0
+		len(c.Teaching) == 0 && len(c.Marks) == 0 && len(c.Asks) == 0
 }
 
 // Declare compose le changement qui remplace les règles de l'organisation.
 func Declare(declared rules.Rules) Change {
 	return Change{Rules: &declared, Reason: "Règles de comparaison"}
+}
+
+// AskFor compose le changement qui dépose ou tranche des demandes.
+func AskFor(asks ...exchange.Ask) Change {
+	return Change{Asks: asks, Reason: "Demandes de comparaison"}
 }
 
 // Mark compose le changement qui verse des marques invisibles.
@@ -623,6 +647,10 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	demandes, demandesOnt, err := s.asks.With(change.Asks)
+	if err != nil {
+		return nil, false, err
+	}
 
 	// Les règles se remplacent en bloc plutôt que de se fusionner : ce qu'on
 	// déclare est la liste complète des équivalences, et en retirer une doit
@@ -643,8 +671,8 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 		}
 		declarees, regleOnt = valides, !bytes.Equal(avant, apres)
 	}
-	return newSet(fiches, travaux, declarees, catalogue, marques),
-		bouge || datesOnt || regleOnt || catalogueOnt || marquesOnt, nil
+	return newSet(fiches, travaux, declarees, catalogue, marques, demandes),
+		bouge || datesOnt || regleOnt || catalogueOnt || marquesOnt || demandesOnt, nil
 }
 
 // scheduled applique à la section des échéances ce qu'un changement lui
@@ -857,7 +885,8 @@ func Decode(content []byte) (*Set, []string) {
 			"%d fiches en double réunies aux leurs")+
 			" : le fichier gagnerait à être nettoyé.")
 	}
-	return newSet(fiches, nil, rules.Rules{}, exchange.Catalog{}, signature.Book{}), soucis
+	return newSet(fiches, nil, rules.Rules{}, exchange.Catalog{}, signature.Book{},
+		exchange.Asks{}), soucis
 }
 
 // fondue réunit deux fiches que le fichier donne pour un même compte, et dit si
