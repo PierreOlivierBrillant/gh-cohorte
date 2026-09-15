@@ -40,6 +40,7 @@ var manageMenu = ui.Options(
 	"plagiat", "Comparer les copies entre elles",
 	"envoi", "Envoyer les copies anonymisées à un collègue",
 	"publier", "Publier l'index d'empreintes de ce travail",
+	"demandes", "Demander à voir une copie, ou répondre à une demande",
 	"echeance", "Fixer la date cible de ce travail",
 	"renommer", "Renommer ce travail",
 	"deplacer", "Déplacer ce travail vers un groupe",
@@ -1614,6 +1615,8 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return m.demanderEnvoi(group)
 	case "publier":
 		return m.publierIndex(group)
+	case "demandes":
+		return m.demandes()
 	case "echeance":
 		return m.echeance(group)
 	case "renommer":

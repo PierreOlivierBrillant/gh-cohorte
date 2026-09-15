@@ -149,6 +149,17 @@ type Options struct {
 	// nom de famille seul, le prénom seul. C'est plus agressif, et cela abîme
 	// parfois du texte ordinaire : « Côté » est aussi un mot français.
 	AnonymizeParts bool
+	// Requests liste les demandes de levée du voile, Grant et Deny en tranchent
+	// une par son identifiant, et Ask en dépose une — « travail:jeton ». Une
+	// demande est le seul chemin par lequel le code d'un collègue devient
+	// lisible : elle se nomme, elle se décide, et elle reste écrite.
+	Requests bool
+	Grant    string
+	Deny     string
+	Ask      string
+	// Reason accompagne une demande déposée ou un refus : c'est ce qu'on dit à
+	// l'autre, et la seule chose qu'il lira.
+	Reason string
 	// Reach dit jusqu'où le corpus s'étend : ce groupe, tout le cours, ou
 	// toutes les sessions — équivalences de sigles comprises.
 	Reach string
@@ -252,6 +263,9 @@ Utilisation :
   gh cohorte --plagiarism --manage a26.5n6.01.tp1 --import-zip recu.zip
   gh cohorte --publish-index --manage a26.5n6.01.tp1
   gh cohorte --plagiarism --manage a26.5n6.01.tp1 --against a26.5n6.02.tp1
+  gh cohorte --ask a26.5n6.02.tp1:K7DM2X --reason "deux TP quasi identiques"
+  gh cohorte --requests
+  gh cohorte --grant D4K2M9 --export-zip envoi.zip
   gh cohorte --refresh-token --scopes delete_repo
   gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
   gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
@@ -314,6 +328,14 @@ Drapeaux :
                            (chemins séparés par des virgules)
   --anonymize-parts        anonymiser aussi les noms de famille et prénoms pris
                            isolément (plus sûr, mais abîme le texte ordinaire)
+  --ask TRAVAIL:COPIE      demander à voir une copie mesurée dans l'index d'un
+                           collègue (« a26.5n6.02.tp1:K7DM2X »)
+  --requests               lister les demandes reçues et faites
+  --grant DEMANDE          accorder une demande : l'archive anonymisée de la
+                           seule copie concernée est écrite à --export-zip, et
+                           c'est vous qui l'envoyez
+  --deny DEMANDE           refuser une demande
+  --reason TEXTE           ce qu'on dit en déposant une demande ou en la refusant
   --reach PORTEE           jusqu'où comparer : groupe (défaut), cours, annees.
                            « annees » suit les sigles qu'un cours a portés, tels
                            que le registre de l'organisation les déclare
@@ -461,6 +483,15 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"archives de copies reçues à verser dans l'analyse")
 	set.BoolVar(&options.AnonymizeParts, "anonymize-parts", false,
 		"anonymiser aussi les fragments de noms pris isolément")
+	set.BoolVar(&options.Requests, "requests", false,
+		"lister les demandes de levée du voile")
+	set.StringVar(&options.Grant, "grant", "",
+		"accorder une demande, et préparer l'envoi de la copie")
+	set.StringVar(&options.Deny, "deny", "", "refuser une demande")
+	set.StringVar(&options.Ask, "ask", "",
+		"demander à voir une copie — « a26.5n6.02.tp1:K7DM2X »")
+	set.StringVar(&options.Reason, "reason", "",
+		"ce qu'on dit en déposant une demande ou en la refusant")
 	set.StringVar(&options.Reach, "reach", "", "portée de la comparaison")
 	set.StringVar(&options.Rules, "rules", "", "fichier de règles de comparaison")
 	set.StringVar(&options.PublishRules, "publish-rules", "",
@@ -581,7 +612,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	// Comparer des copies, c'est forcément gérer un travail existant : le
 	// drapeau ouvre donc le mode gestion de lui-même. Sans préfixe, l'assistant
 	// demande lequel, comme « --manage » sans valeur.
-	if options.Plagiarism || options.ExportZip != "" || options.PublishIndex {
+	// « --grant » se sert du même « --export-zip » pour dire où écrire, mais il
+	// ne gère aucun travail : c'est la demande qui dit lequel.
+	if options.Plagiarism || options.PublishIndex ||
+		(options.ExportZip != "" && !options.decidesAsk()) {
 		options.ManageRequested = true
 	}
 	if *importer != unset {
@@ -627,6 +661,13 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.Depth = 0
 	}
 	return options, nil
+}
+
+// decidesAsk dit si les drapeaux tranchent ou déposent une demande. Ces
+// gestes-là ne gèrent aucun travail : la demande dit elle-même lequel.
+func (o *Options) decidesAsk() bool {
+	return o.Requests || strings.TrimSpace(o.Grant) != "" ||
+		strings.TrimSpace(o.Deny) != "" || strings.TrimSpace(o.Ask) != ""
 }
 
 // splitList découpe une liste écrite d'un trait — « eq1,eq2 » ou « eq1 eq2 » —

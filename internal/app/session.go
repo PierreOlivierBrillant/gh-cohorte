@@ -273,6 +273,9 @@ func (s *Session) run() (int, error) {
 		}
 		return s.publishRegistry()
 	}
+	if mode == "demandes" {
+		return s.demandesMode()
+	}
 	if mode == "etudiants" {
 		return newDirectorySession(s).run()
 	}
@@ -315,6 +318,11 @@ func (s *Session) chooseMode() (string, error) {
 	if s.Options.PublishRegistry || s.Options.ForgetRegistryHistory ||
 		s.Options.RegistryTeam != "" || s.Options.PublishRules != "" {
 		return "registre", nil
+	}
+	// Trancher ou déposer une demande ne gère aucun travail : la demande porte
+	// elle-même le travail qu'elle concerne.
+	if s.Options.decidesAsk() {
+		return "demandes", nil
 	}
 	// La fiche d'un compte prime sur l'annuaire : « --students --user X » veut
 	// dire « cet utilisateur-là », et non « la liste, plus lui ».

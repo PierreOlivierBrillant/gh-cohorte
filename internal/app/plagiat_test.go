@@ -1,11 +1,16 @@
 package app_test
 
 import (
+	"archive/zip"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
@@ -248,4 +253,160 @@ func TestLeGabaritDePasseSeDeposeEtSExplique(t *testing.T) {
 		t.Fatalf("un gabarit existant doit être refusé (code %d)", code)
 	}
 	h.contient("existe déjà")
+}
+
+// Le chemin complet d'une levée du voile, au terminal : un index publié, un
+// collègue qui mesure sans pouvoir lire, une demande, une décision, et l'archive
+// d'une seule copie que le propriétaire enverra lui-même.
+func TestUneDemandeSeDeposeSeTrancheEtProduitUneArchive(t *testing.T) {
+	h := groupeRemis(t)
+	h.Options.PublishIndex = true
+	h.Options.Manage = "a26.5n6.01.tp1"
+	h.Options.ManageRequested = true
+	h.Options.Yes = true
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("publication : code = %d\n%s", code, h.texte())
+	}
+
+	// Le jeton que le collègue a mesuré : c'est la table écrite à la
+	// publication qui le donne, et lui seul voyagera.
+	jeton := premierJetonPublie(t, h.Rapports)
+
+	// Le collègue dépose sa demande. Le catalogue dit à qui elle s'adresse.
+	collegue := nouveauDansLeMemeDossier(t, h)
+	collegue.State.Viewer = "collegue"
+	collegue.Options.Ask = "a26.5n6.01.tp1:" + jeton
+	collegue.Options.Reason = "deux copies quasi identiques"
+	collegue.Options.ManageRequested = false
+	if code := collegue.muet(); code != app.ExitOK {
+		t.Fatalf("dépôt : code = %d\n%s", code, collegue.texte())
+	}
+	collegue.contient("déposée auprès de @prof")
+	demande := identifiantDeDemande(t, collegue.texte())
+
+	// Elle ne s'adresse pas au collègue : il ne peut pas la trancher lui-même.
+	sien := nouveauDansLeMemeDossier(t, h)
+	sien.State.Viewer = "collegue"
+	sien.Options.Deny = demande
+	sien.Options.ManageRequested = false
+	if code := sien.muet(); code != app.ExitValidation {
+		t.Fatalf("un refus par le demandeur doit être écarté (code %d)\n%s",
+			code, sien.texte())
+	}
+	sien.contient("s'adresse à @prof")
+
+	// Le propriétaire accorde : une seule copie part, sous le jeton mesuré.
+	archive := filepath.Join(t.TempDir(), "envoi.zip")
+	prof := nouveauDansLeMemeDossier(t, h)
+	prof.State.Viewer = "prof"
+	prof.Options.Grant = demande
+	prof.Options.ExportZip = archive
+	prof.Options.ManageRequested = false
+	prof.Options.Yes = true
+	if code := prof.muet(); code != app.ExitOK {
+		t.Fatalf("accord : code = %d\n%s", code, prof.texte())
+	}
+	prof.contient("accordée", "Envoyez")
+
+	lecture, err := zip.OpenReader(archive)
+	if err != nil {
+		t.Fatalf("archive : %v", err)
+	}
+	defer lecture.Close()
+	copies := map[string]bool{}
+	for _, fichier := range lecture.File {
+		if racine, _, coupe := strings.Cut(fichier.Name, "/"); coupe {
+			copies[racine] = true
+		}
+		// Ni nom ni compte : c'est tout l'objet de l'anonymisation.
+		contenu := contenuDeZip(t, fichier)
+		for _, interdit := range []string{"emilie-cote", "Émilie", "Picard"} {
+			if strings.Contains(contenu, interdit) ||
+				strings.Contains(fichier.Name, interdit) {
+				t.Fatalf("« %s » reste dans %s", interdit, fichier.Name)
+			}
+		}
+	}
+	delete(copies, "")
+	if len(copies) != 1 || !copies[jeton] {
+		t.Fatalf("l'archive doit porter la seule copie « %s » : %v", jeton, copies)
+	}
+	// La table de correspondance ne voyage jamais : elle seule dit qui se cache
+	// derrière le jeton.
+	for _, fichier := range lecture.File {
+		if strings.Contains(fichier.Name, "correspondance") {
+			t.Fatalf("la table est partie dans l'archive : %s", fichier.Name)
+		}
+	}
+
+	// La décision est écrite, et une demande tranchée ne se retranche pas.
+	encore := nouveauDansLeMemeDossier(t, h)
+	encore.State.Viewer = "prof"
+	encore.Options.Deny = demande
+	encore.Options.ManageRequested = false
+	if code := encore.muet(); code != app.ExitValidation {
+		t.Fatalf("une demande tranchée doit être écartée (code %d)\n%s",
+			code, encore.texte())
+	}
+	encore.contient("déjà accordée")
+
+	// La liste dit les deux côtés : ce qu'on nous demande, et ce qu'on demande.
+	liste := nouveauDansLeMemeDossier(t, h)
+	liste.State.Viewer = "prof"
+	liste.Options.Requests = true
+	liste.Options.ManageRequested = false
+	if code := liste.muet(); code != app.ExitOK {
+		t.Fatalf("liste : code = %d\n%s", code, liste.texte())
+	}
+	liste.contient("Demandes reçues", demande, "accordée")
+}
+
+// premierJetonPublie lit, dans la table écrite à la publication, le jeton d'une
+// copie.
+func premierJetonPublie(t *testing.T, rapports string) string {
+	t.Helper()
+	motif := filepath.Join(rapports, plagiarism.Dir,
+		"*"+plagiarism.IndexTableSuffix)
+	chemins, err := filepath.Glob(motif)
+	if err != nil || len(chemins) == 0 {
+		t.Fatalf("table d'index : %v (%v)", chemins, err)
+	}
+	contenu, err := os.ReadFile(chemins[0])
+	if err != nil {
+		t.Fatalf("table d'index : %v", err)
+	}
+	var table anonymize.Table
+	if err := json.Unmarshal(contenu, &table); err != nil {
+		t.Fatalf("table d'index : %v", err)
+	}
+	if len(table.Tokens) == 0 {
+		t.Fatal("la table ne porte aucun jeton")
+	}
+	return table.Tokens[0].Base
+}
+
+// identifiantDeDemande retrouve, dans ce qui a été dit, l'identifiant déposé.
+func identifiantDeDemande(t *testing.T, sortie string) string {
+	t.Helper()
+	trouve := regexp.MustCompile(`Demande ([A-Z0-9]{6}) déposée`).
+		FindStringSubmatch(sortie)
+	if trouve == nil {
+		t.Fatalf("aucun identifiant de demande dans :\n%s", sortie)
+	}
+	return trouve[1]
+}
+
+// contenuDeZip lit un fichier de l'archive.
+func contenuDeZip(t *testing.T, fichier *zip.File) string {
+	t.Helper()
+	lecture, err := fichier.Open()
+	if err != nil {
+		t.Fatalf("%s : %v", fichier.Name, err)
+	}
+	defer lecture.Close()
+	contenu, err := io.ReadAll(lecture)
+	if err != nil {
+		t.Fatalf("%s : %v", fichier.Name, err)
+	}
+	return string(contenu)
 }
