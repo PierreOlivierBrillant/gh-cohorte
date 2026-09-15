@@ -1,6 +1,7 @@
 package exchange_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -266,5 +267,41 @@ func TestUnIdentifiantDeDemandeNeFormePasDeMot(t *testing.T) {
 	}
 	if len(vus) < 290 {
 		t.Fatalf("trop de collisions : %d identifiants distincts sur 300", len(vus))
+	}
+}
+
+// Un travail annoncé sans index ne sert qu'à moitié : un collègue voit qu'il
+// existe et ne peut rien y mesurer. C'est ce que la passe automatisée rattrape,
+// et « manquant » doit vouloir dire la même chose partout.
+func TestLeCatalogueNommeLesTravauxSansIndex(t *testing.T) {
+	catalogue, _, err := exchange.Catalog{Version: exchange.Version}.With([]exchange.Teaching{
+		{Scope: "a26.5n6.01", Assignment: "tp1", Teacher: "prof", Copies: 5, Indexed: true},
+		{Scope: "a26.5n6.01", Assignment: "tp2", Teacher: "prof", Copies: 5},
+		{Scope: "h27.5n6.02", Assignment: "tp1", Teacher: "prof", Copies: 4},
+		{Scope: "a26.5n6.02", Assignment: "tp1", Teacher: "collegue", Copies: 3},
+	})
+	if err != nil {
+		t.Fatalf("catalogue : %v", err)
+	}
+
+	manquants := catalogue.Unindexed("prof")
+	ids := make([]string, 0, len(manquants))
+	for _, ligne := range manquants {
+		ids = append(ids, ligne.ID())
+	}
+	// Les siens seulement, du plus récent au plus ancien : publier l'index d'un
+	// collègue redistribuerait ce qu'on nous a confié.
+	attendus := []string{"h27.5n6.02.tp1", "a26.5n6.01.tp2"}
+	if !slices.Equal(ids, attendus) {
+		t.Fatalf("index manquants : %v, attendus %v", ids, attendus)
+	}
+
+	// Rien à rattraper se dit par une liste vide, jamais par une erreur : c'est
+	// l'état normal d'une passe qui tourne chaque semaine.
+	if manquants := catalogue.Unindexed("collegue"); len(manquants) != 1 {
+		t.Fatalf("les travaux d'un autre : %+v", manquants)
+	}
+	if manquants := catalogue.Unindexed("personne"); len(manquants) != 0 {
+		t.Fatalf("un compte sans travail : %+v", manquants)
 	}
 }

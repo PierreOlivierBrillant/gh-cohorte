@@ -171,6 +171,24 @@ func (c Catalog) Of(teacher string) []Teaching {
 	return siens
 }
 
+// Unindexed rend les travaux qu'un enseignant a annoncés sans en publier
+// l'index, du plus récent au plus ancien.
+//
+// C'est ce qu'une passe automatisée a à faire, et la règle est ici plutôt que
+// dans chaque interface : « manquant » doit vouloir dire la même chose au
+// terminal, au navigateur et dans un workflow. Un collègue qui tombe sur l'un
+// de ces travaux ne peut rien mesurer — il ne peut que demander qu'on le
+// publie.
+func (c Catalog) Unindexed(teacher string) []Teaching {
+	manquants := make([]Teaching, 0, 4)
+	for _, ligne := range c.Of(teacher) {
+		if !ligne.Indexed {
+			manquants = append(manquants, ligne)
+		}
+	}
+	return manquants
+}
+
 // Course rend les travaux d'un cours, tous enseignants confondus. Les sigles
 // équivalents sont attendus dépliés par l'appelant : c'est « rules » qui sait
 // qu'un cours a changé de nom, pas le catalogue.
