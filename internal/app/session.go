@@ -10,9 +10,11 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
@@ -41,6 +43,10 @@ type Session struct {
 	Client   *ghapi.Client
 	Viewer   string
 	Starter  *starter.Bundle
+	// Rules porte ce que « --rules » a chargé : des équivalences de sigles et
+	// des profils d'inspection qui surchargent ceux de l'organisation, le temps
+	// de cette exécution.
+	Rules rules.Rules
 
 	ConfigFile string
 	Sleep      func(time.Duration)
@@ -192,6 +198,28 @@ func (s *Session) Run() int {
 }
 
 func (s *Session) run() (int, error) {
+	// Les règles sont chargées avant tout le reste : un fichier illisible doit
+	// se dire tout de suite, et non au milieu d'une analyse.
+	declarees, err := rules.Load(s.Options.Rules)
+	if err != nil {
+		return ExitValidation, err
+	}
+	s.Rules = declarees
+
+	// Déposer le gabarit ne demande ni jeton ni réseau : c'est un fichier à
+	// écrire, et rien d'autre.
+	if s.Options.EmitWorkflowSet {
+		chemin, err := plagiarism.EmitWorkflow(s.Options.EmitWorkflow)
+		if err != nil {
+			return ExitValidation, err
+		}
+		s.Console.Success("Gabarit déposé : %s", chemin)
+		s.Console.Note("Lisez-le avant de vous en servir : il demande un jeton à " +
+			"portée fine sur l'organisation, et le dépôt qui le porte doit être " +
+			"protégé en écriture.")
+		return ExitOK, nil
+	}
+
 	if s.Options.ClearCache {
 		// Purge demandée en ligne de commande : ni jeton ni réseau nécessaires.
 		removed := s.Cache.Clear()
@@ -229,6 +257,9 @@ func (s *Session) run() (int, error) {
 		return s.importRepos()
 	}
 	if mode == "registre" {
+		if s.Options.PublishRules != "" {
+			return s.publishRules(s.Options.PublishRules)
+		}
 		if s.Options.ForgetRegistryHistory {
 			return s.forgetRegistryHistory()
 		}
@@ -277,7 +308,7 @@ func (s *Session) chooseMode() (string, error) {
 		return "importer", nil
 	}
 	if s.Options.PublishRegistry || s.Options.ForgetRegistryHistory ||
-		s.Options.RegistryTeam != "" {
+		s.Options.RegistryTeam != "" || s.Options.PublishRules != "" {
 		return "registre", nil
 	}
 	// La fiche d'un compte prime sur l'annuaire : « --students --user X » veut

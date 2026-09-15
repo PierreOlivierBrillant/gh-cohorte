@@ -5,6 +5,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -247,4 +248,54 @@ func (s *Session) grantTeamFromMenu() error {
 	}
 	_, err = s.grantRegistryTeam(choix)
 	return err
+}
+
+// publishRules écrit dans le registre de l'organisation les règles de
+// comparaison d'un fichier.
+//
+// C'est le pendant scriptable de l'écran des règles : « 5N6 devient 5M6 » se
+// déclare une fois, pour toute l'équipe, et les analyses de chacun retrouvent
+// dès lors les copies d'il y a trois ans. Le fichier remplace ce qui s'y
+// trouvait — retirer une équivalence doit pouvoir se faire —, et l'écran le dit
+// avant d'écrire.
+func (s *Session) publishRules(path string) (int, error) {
+	org := s.Settings.Org
+	s.Console.Heading("Règles de comparaison de « " + org + " »")
+
+	nouvelles, err := rules.Load(path)
+	if err != nil {
+		return ExitValidation, err
+	}
+	set, avis := s.names(org)
+	if avis != "" {
+		s.Console.Print(s.Console.Warn(avis))
+	}
+	anciennes := set.Rules()
+
+	s.Console.Printf("  Cours déclarés : %d, travaux : %d, profils : %d.",
+		len(nouvelles.Courses), len(nouvelles.Assignments), len(nouvelles.Profiles))
+	for _, cours := range nouvelles.Courses {
+		s.Console.Printf("    %s : %s", orDim(s.Console, cours.Label, cours.ID),
+			strings.Join(cours.Codes, ", "))
+	}
+	// Le remplacement est dit avant d'écrire : ce qui figurait au registre et
+	// que le fichier ne redit pas disparaît, et ce n'est pas anodin.
+	if perdus := len(anciennes.Courses) - len(nouvelles.Courses); perdus > 0 {
+		s.Console.Warning("Le registre porte %d cours de plus : ils seront retirés.", perdus)
+	}
+	if s.Options.DryRun {
+		s.Console.Note("Simulation : rien n'a été écrit.")
+		return ExitOK, nil
+	}
+	if !s.Options.Yes {
+		suite, err := s.Prompt.Confirm("Écrire ces règles dans le registre ?", true)
+		if err != nil || !suite {
+			return ExitOK, err
+		}
+	}
+	if _, err := s.registryOf(org).Apply(registry.Declare(nouvelles)); err != nil {
+		return ExitFailure, err
+	}
+	s.Console.Success("Règles écrites dans « %s/%s ».", org, registry.RepoName)
+	return ExitOK, nil
 }

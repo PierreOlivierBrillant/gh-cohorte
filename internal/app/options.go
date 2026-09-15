@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -120,6 +121,55 @@ type Options struct {
 	// commits, les remises postérieures à la date cible, et les personnes dont
 	// aucun commit ne porte la trace.
 	Handins bool
+	// Plagiarism compare entre elles les copies du travail géré : elle mesure
+	// leurs ressemblances et les classe par ordre de suspicion. Ce n'est pas un
+	// verdict — le rapport le dit lui-même à chaque fois.
+	Plagiarism bool
+	// EmitWorkflow dépose le gabarit de passe automatisée, puis quitte. Sans
+	// valeur, il l'écrit à sa place ordinaire.
+	EmitWorkflow    string
+	EmitWorkflowSet bool
+	// PublishIndex publie l'index d'empreintes du travail géré, pour que les
+	// collègues puissent y comparer leurs copies sans lire les nôtres.
+	PublishIndex bool
+	// Against nomme les travaux d'un collègue dont l'index publié entre dans
+	// l'analyse, séparés par des virgules.
+	Against string
+	// ExportZip écrit une archive anonymisée des copies du travail géré, pour
+	// l'envoyer à un collègue. ImportZip fait l'inverse : il verse dans
+	// l'analyse des copies reçues.
+	ExportZip string
+	ImportZip string
+	// AnonymizeParts cherche aussi les fragments de noms pris isolément — le
+	// nom de famille seul, le prénom seul. C'est plus agressif, et cela abîme
+	// parfois du texte ordinaire : « Côté » est aussi un mot français.
+	AnonymizeParts bool
+	// Reach dit jusqu'où le corpus s'étend : ce groupe, tout le cours, ou
+	// toutes les sessions — équivalences de sigles comprises.
+	Reach string
+	// Rules surcharge, le temps d'une analyse, les règles déclarées par
+	// l'organisation. PublishRules fait l'inverse : il les y écrit.
+	Rules        string
+	PublishRules string
+	// Profile, Languages, Only et Ignore disent quoi inspecter. Les langages et
+	// les motifs se séparent par des virgules, comme partout ailleurs dans
+	// l'outil.
+	Profile   string
+	Languages string
+	Only      string
+	Ignore    string
+	// Kgram et Window remplacent les bornes de winnowing du langage. Les
+	// monter allège le calcul et rend la détection plus grossière ; les
+	// descendre fait l'inverse.
+	Kgram  int
+	Window int
+	// Noise est la part des copies au-delà de laquelle une empreinte est tenue
+	// pour banale, MinSimilarity le plancher des paires rapportées.
+	Noise         float64
+	MinSimilarity float64
+	// NoBaseline renonce à écarter le gabarit distribué. Sans lui, l'outil s'en
+	// sert : il sait quel modèle il a déposé, et toutes les copies le portent.
+	NoBaseline bool
 	// MoveTo déplace le travail ouvert vers une place de la nomenclature
 	// courante — « a26.5n6.01 » —, et RenameTo dit le nom qu'il y prendra. Sans
 	// MoveTo, RenameTo renomme le travail là où il est déjà.
@@ -189,6 +239,14 @@ Utilisation :
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
   gh cohorte --manage a26.5n6.01.tp1 --due 2026-10-01
   gh cohorte --manage a26.5n6.01.tp1 --handins
+  gh cohorte --plagiarism --manage a26.5n6.01.tp1
+  gh cohorte --plagiarism --manage a26.5n6.01.tp1 --profile next --languages tsx,css
+  gh cohorte --plagiarism --manage a26.5n6.01.tp1 --reach annees
+  gh cohorte --publish-rules regles.json      déclarer « 5N6 devient 5M6 »
+  gh cohorte --export-zip envoi.zip --manage a26.5n6.01.tp1
+  gh cohorte --plagiarism --manage a26.5n6.01.tp1 --import-zip recu.zip
+  gh cohorte --publish-index --manage a26.5n6.01.tp1
+  gh cohorte --plagiarism --manage a26.5n6.01.tp1 --against a26.5n6.02.tp1
   gh cohorte --refresh-token --scopes delete_repo
   gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
   gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
@@ -229,6 +287,44 @@ Drapeaux :
   --due DATE               date cible du travail (AAAA-MM-JJ ou AAAA-MM-JJTHH:MM,
                            vide pour la retirer)
   --handins                relever les commits des dépôts du travail géré
+  --plagiarism             comparer entre elles les copies du travail géré et les
+                           classer par ordre de suspicion (ce n'est pas un verdict :
+                           une ressemblance forte n'est pas une preuve)
+  --emit-workflow [CHEMIN] déposer le gabarit de passe GitHub Actions puis
+                           quitter (défaut : .github/workflows/plagiat.yml)
+  --publish-index          publier l'index d'empreintes du travail géré, pour que
+                           vos collègues y comparent leurs copies. Ce sont des
+                           hachés : ni code, ni nom ne quittent votre poste
+  --against TRAVAUX        travaux d'un collègue à comparer aux vôtres, par leur
+                           identifiant (« a26.5n6.02.tp1 »). Leur index doit
+                           avoir été publié
+  --export-zip FICHIER     écrire une archive anonymisée des copies du travail
+                           géré, à envoyer à un collègue. La table de
+                           correspondance est écrite à côté, jamais dedans
+  --import-zip FICHIERS    archives de copies reçues, à comparer aux vôtres
+                           (chemins séparés par des virgules)
+  --anonymize-parts        anonymiser aussi les noms de famille et prénoms pris
+                           isolément (plus sûr, mais abîme le texte ordinaire)
+  --reach PORTEE           jusqu'où comparer : groupe (défaut), cours, annees.
+                           « annees » suit les sigles qu'un cours a portés, tels
+                           que le registre de l'organisation les déclare
+  --rules FICHIER          règles de comparaison qui surchargent celles de
+                           l'organisation, le temps d'une analyse
+  --publish-rules FICHIER  écrire des règles de comparaison dans le registre de
+                           l'organisation, puis quitter
+  --profile NOM            profil d'inspection : tout, code-seul, next, angular,
+                           flutter, java, aspnet, python
+  --languages LANGAGES     langages à comparer (virgules) : kotlin, csharp, dart, sql,
+                           java, markdown, python, typescript, tsx, javascript, css,
+                           html, xml
+  --only MOTIFS            n'inspecter que ces chemins (motifs « .gitignore »)
+  --ignore MOTIFS          chemins à ne pas inspecter, en plus des exclusions d'office
+  --kgram N                jetons par k-gramme (défaut : celui du langage)
+  --window N               fenêtre de winnowing ; la monter allège le calcul
+  --noise PART             part des copies au-delà de laquelle une empreinte est
+                           tenue pour banale (défaut : 0,30)
+  --min-similarity PART    similarité en deçà de laquelle une paire n'est pas rapportée
+  --no-baseline            ne pas écarter le gabarit distribué au travail
   --teams                  travail d'équipe : un dépôt par équipe, partagé avec elle
                            (avec --manage seul : liste les équipes du groupe ;
                             avec --import : le dernier niveau nomme une équipe)
@@ -340,6 +436,33 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.StringVar(&options.Roster, "roster", "", "liste des personnes")
 	set.StringVar(&options.Assignment, "assignment", "", "identifiant du travail")
 	set.BoolVar(&options.Teams, "teams", false, "travail d'équipe")
+	set.BoolVar(&options.Plagiarism, "plagiarism", false,
+		"comparer entre elles les copies du travail géré")
+	emitWorkflow := set.String("emit-workflow", unset,
+		"déposer le gabarit de passe GitHub Actions puis quitter")
+	set.BoolVar(&options.PublishIndex, "publish-index", false,
+		"publier l'index d'empreintes du travail géré")
+	set.StringVar(&options.Against, "against", "",
+		"travaux d'un collègue à comparer, par leur identifiant")
+	set.StringVar(&options.ExportZip, "export-zip", "",
+		"écrire une archive anonymisée des copies du travail géré")
+	set.StringVar(&options.ImportZip, "import-zip", "",
+		"archives de copies reçues à verser dans l'analyse")
+	set.BoolVar(&options.AnonymizeParts, "anonymize-parts", false,
+		"anonymiser aussi les fragments de noms pris isolément")
+	set.StringVar(&options.Reach, "reach", "", "portée de la comparaison")
+	set.StringVar(&options.Rules, "rules", "", "fichier de règles de comparaison")
+	set.StringVar(&options.PublishRules, "publish-rules", "",
+		"publier des règles de comparaison dans le registre puis quitter")
+	set.StringVar(&options.Profile, "profile", "", "profil d'inspection")
+	set.StringVar(&options.Languages, "languages", "", "langages à comparer")
+	set.StringVar(&options.Only, "only", "", "n'inspecter que ces chemins")
+	set.StringVar(&options.Ignore, "ignore", "", "chemins à ne pas inspecter")
+	set.IntVar(&options.Kgram, "kgram", 0, "jetons par k-gramme")
+	set.IntVar(&options.Window, "window", 0, "fenêtre de winnowing")
+	set.Float64Var(&options.Noise, "noise", 0, "part des copies au-delà de laquelle une empreinte est banale")
+	set.Float64Var(&options.MinSimilarity, "min-similarity", 0, "similarité minimale rapportée")
+	set.BoolVar(&options.NoBaseline, "no-baseline", false, "ne pas écarter le gabarit distribué")
 	set.BoolVar(&options.Handins, "handins", false,
 		"relever les commits des dépôts du travail")
 	equipe := set.String("team", "", "équipe visée")
@@ -432,9 +555,19 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.Teachers = splitList(*enseignants)
 	}
 
+	if *emitWorkflow != unset {
+		options.EmitWorkflowSet = true
+		options.EmitWorkflow = *emitWorkflow
+	}
 	if *manage != unset {
 		options.ManageRequested = true
 		options.Manage = *manage
+	}
+	// Comparer des copies, c'est forcément gérer un travail existant : le
+	// drapeau ouvre donc le mode gestion de lui-même. Sans préfixe, l'assistant
+	// demande lequel, comme « --manage » sans valeur.
+	if options.Plagiarism || options.ExportZip != "" || options.PublishIndex {
+		options.ManageRequested = true
 	}
 	if *importer != unset {
 		options.ImportRequested = true
@@ -538,4 +671,33 @@ func normalizeArgs(args []string) []string {
 		normalized = append(normalized, argument+"=")
 	}
 	return normalized
+}
+
+// inspection traduit les drapeaux d'inspection en réglage du domaine.
+//
+// La validation est faite là où les règles vivent — un profil inconnu, un
+// langage qui n'existe pas —, et non ici : la ligne de commande et le
+// navigateur doivent refuser les mêmes choses avec les mêmes mots.
+func (o *Options) inspection() (inspect.Settings, error) {
+	settings := inspect.Settings{
+		Profile:   strings.TrimSpace(o.Profile),
+		Languages: liste(o.Languages),
+		Include:   liste(o.Only),
+		Exclude:   liste(o.Ignore),
+	}
+	if _, err := inspect.New(settings, nil); err != nil {
+		return settings, err
+	}
+	return settings, nil
+}
+
+// liste découpe une valeur séparée par des virgules.
+func liste(value string) []string {
+	items := make([]string, 0, 4)
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }

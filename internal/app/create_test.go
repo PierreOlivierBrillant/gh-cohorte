@@ -813,11 +813,14 @@ func TestSelectionParExpressionEnModeLigne(t *testing.T) {
 	h.Options.ManageRequested = true
 	h.Options.Manage = "tp1"
 
+	// Les entrées de menu se désignent par leur nom plutôt que par leur rang :
+	// une liste numérotée change dès qu'on lui ajoute une action, et une
+	// épreuve qui compte les lignes casse à chaque fois sans rien apprendre.
 	entree := strings.Join([]string{
-		"3",   // Que faire ? → afficher les URL
-		"1,3", // sélection par expression
-		"n",   // ne pas enregistrer
-		"16",  // Quitter
+		"urls",    // Que faire ? → afficher les URL
+		"1,3",     // sélection par expression
+		"n",       // ne pas enregistrer
+		"quitter", // Quitter
 		"",
 	}, "\n")
 

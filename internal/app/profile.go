@@ -36,6 +36,10 @@ func (s *Session) showProfile(account string) (int, error) {
 		return ExitFailure, err
 	}
 	s.printProfile(org, fiche)
+	// Les équipes disent quels cours quelqu'un a donnés ; elles ne disent pas
+	// quels travaux — leurs noms ne se lisent que dans des dépôts qu'un
+	// collègue ne voit pas. C'est le catalogue qui comble ce trou.
+	montrerCatalogue(s.Console, set.Catalog(), compte)
 
 	// Un drapeau tranche sans rien demander ; sans lui, la question se pose à
 	// qui peut y répondre.
