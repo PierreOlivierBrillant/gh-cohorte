@@ -10,11 +10,17 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/web"
 )
@@ -80,11 +86,14 @@ func main() {
 		}
 	}
 
+	rapports := filepath.Join(dossier, "rapports")
+	annoncerLesIndex(state, client, rapports)
+
 	serveur, err := web.New(web.Deps{
 		Client: client, Cache: cache.NewIn(filepath.Join(dossier, "cache"), true),
 		Settings: reglages, ConfigFile: fichier, Viewer: state.Viewer,
 		Host: "github.com", TokenOrigin: "oauth_token", Version: "apercu",
-		ReportDir: filepath.Join(dossier, "rapports"), Jobs: 2, SaveConfig: true,
+		ReportDir: rapports, Jobs: 2, SaveConfig: true,
 	})
 	if err != nil {
 		panic(err)
@@ -123,6 +132,19 @@ func garnirPourLaComparaison(state *fakegh.State) {
 		"regles.json":    reglesDeclarees,
 	}, "main")
 
+	// Le groupe d'un collègue, sur qui l'on n'a aucun droit de lecture dans la
+	// vraie vie : c'est son index publié qui traversera, jamais son code.
+	for nom, source := range map[string]string{
+		"a26.5n6.02.tp1.olivier-roy":   solution,
+		"a26.5n6.02.tp1.sophie-nadeau": autre,
+		"a26.5n6.02.tp1.karim-belkadi": encoreAutre,
+	} {
+		state.AddRepo("acme", nom, true)
+		state.SeedCommit("acme/"+nom, map[string]string{
+			"src/Inventaire.java": modele, "src/Solution.java": source,
+		}, "main")
+	}
+
 	copies := map[string]string{
 		"a26.5n6.01.tp1.emilie-cote":     solution,
 		"a26.5n6.01.tp1.jean-luc-picard": solution,
@@ -143,6 +165,99 @@ func garnirPourLaComparaison(state *fakegh.State) {
 		}, "main")
 	}
 }
+
+// annoncerLesIndex met l'organisation dans l'état où l'échange entre
+// enseignants devient visible : deux travaux au catalogue, leurs index publiés,
+// et une demande en attente.
+//
+// Tout passe par le vrai chemin — l'analyse, la publication, la table de
+// correspondance —, pour que ce qu'on regarde à l'écran soit ce que l'outil
+// produit, et non une mise en scène.
+func annoncerLesIndex(state *fakegh.State, client *ghapi.Client, rapports string) {
+	mien := publier(client, rapports, "a26.5n6.01.tp1", "prof", []string{
+		"emilie-cote", "jean-luc-picard", "bruno-tanguay", "aminata-diallo",
+		"claire-otis",
+	})
+	publier(client, rapports, "a26.5n6.02.tp1", "collegue", []string{
+		"olivier-roy", "sophie-nadeau", "karim-belkadi",
+	})
+
+	// La demande porte sur une copie bien réelle : son jeton sort de la table
+	// que la publication vient d'écrire, et l'accorder produira son archive.
+	demandes := fmt.Sprintf(`{
+  "version": 1,
+  "asks": [
+    {
+      "id": "K4RT7M", "from": "collegue", "to": %q,
+      "assignment": "a26.5n6.01.tp1", "token": %q,
+      "similarity": 0.91, "state": "en attente",
+      "created_at": %q,
+      "note": "une de mes copies lui ressemble de près ; j'aimerais lire les passages communs"
+    }
+  ]
+}
+`, state.Viewer, mien, time.Now().Add(-36*time.Hour).Format(time.RFC3339))
+
+	state.SeedCommit("acme/.cohorte", map[string]string{
+		"etudiants.json":     `{"version": 2, "users": []}`,
+		"regles.json":        reglesDeclarees,
+		"enseignements.json": enseignementsDeclares,
+		"demandes.json":      demandes,
+	}, "main")
+}
+
+// publier analyse un travail et publie son index, comme l'enseignant le ferait
+// depuis l'écran. Elle rend le jeton de la première copie.
+func publier(client *ghapi.Client, rapports, travail, enseignant string,
+	slugs []string) string {
+
+	place, _, _ := naming.SplitAssignment(travail)
+	cibles := make([]corpus.Target, 0, len(slugs))
+	for _, slug := range slugs {
+		cibles = append(cibles, corpus.Target{
+			ID: travail + "." + slug, Label: slug, Origin: place,
+			Owner: "acme", Repo: travail + "." + slug,
+		})
+	}
+	// Le même profil que l'écran propose par défaut : un index calculé
+	// autrement est écarté entier, et à juste titre — mais l'aperçu doit
+	// montrer la comparaison, pas le refus.
+	rapport, err := plagiarism.Run(client, plagiarism.Request{
+		Assignment: travail, Org: "acme", Targets: cibles,
+		Inspection: inspect.Settings{Profile: inspect.AllProfile},
+	}, nil)
+	if err != nil {
+		panic(err)
+	}
+	publie, table, err := plagiarism.Publishable(rapport, enseignant, place,
+		anonymize.Options{})
+	if err != nil {
+		panic(err)
+	}
+	if err := exchange.NewStore(client, "acme").Publish(publie); err != nil {
+		panic(err)
+	}
+	if _, err := plagiarism.WriteIndexTable(rapports, rapport.Basename(), table); err != nil {
+		panic(err)
+	}
+	if len(table.Tokens) == 0 {
+		panic("aucun jeton publié pour " + travail)
+	}
+	return table.Tokens[0].Base
+}
+
+// enseignementsDeclares est le catalogue : ce qu'un collègue voit de ce qu'on a
+// donné, sans voir un seul dépôt.
+const enseignementsDeclares = `{
+  "version": 1,
+  "teaching": [
+    { "scope": "a26.5n6.01", "assignment": "tp1", "teacher": "prof",
+      "copies": 5, "last_handin": "2026-09-20", "indexed": true },
+    { "scope": "a26.5n6.02", "assignment": "tp1", "teacher": "collegue",
+      "copies": 3, "last_handin": "2026-09-18", "indexed": true }
+  ]
+}
+`
 
 // reglesDeclarees est ce que l'équipe a écrit dans le registre : le cours a
 // changé de sigle, et le travail de nom.
