@@ -6936,8 +6936,13 @@ function dessinerSignauxPlagiat() {
   const porteurs = etat.plagiat.donnees.marks || {};
   for (const signal of signaux) {
     if (signal.kind !== 'signature') {
+      // La mesure réduit toutes les chaînes à « STR » pour que deux copies ne
+      // différant que par une constante restent appariées. Ce qu'elle jette là
+      // se retrouve ici, à part.
+      const quoi = signal.kind === 'chaîne'
+        ? 'Même phrase affichée : ' : 'Commentaire identique : ';
       corps.append(el('p', {},
-        el('strong', { texte: 'Commentaire identique : ' }),
+        el('strong', { texte: quoi }),
         el('span', { texte: signal.works.join(', ') }),
         el('span', { classe: 'note', texte: ` — « ${signal.detail} »` })));
       continue;

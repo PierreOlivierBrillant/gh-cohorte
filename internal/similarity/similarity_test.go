@@ -2,6 +2,7 @@ package similarity_test
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -582,4 +583,75 @@ func TestUnLongCommentaireIdentiqueEstUnSignal(t *testing.T) {
 		}
 	}
 	t.Fatalf("le commentaire partagé n'a pas été relevé : %+v", rapport.Signals)
+}
+
+// Une phrase que deux copies affichent à l'identique est un signal ; la même
+// phrase portée par les deux tiers du groupe vient de l'énoncé, et n'en est pas.
+func TestUnePhrasePartageeEstUnSignalJusquAUnCertainNombre(t *testing.T) {
+	const phrase = "Le total des valeurs saisies est de"
+	copies := func(porteurs int, total int) []similarity.Work {
+		works := make([]similarity.Work, 0, total)
+		sources := []string{original, honnete, gabarit}
+		for index := 0; index < total; index++ {
+			work := copie(t, "copie"+strconv.Itoa(index), "01",
+				map[string]string{"Solution.java": sources[index%len(sources)]})
+			if index < porteurs {
+				work.Extras.Literals = []string{phrase}
+			}
+			works = append(works, work)
+		}
+		return works
+	}
+
+	rapport := similarity.Compare(
+		similarity.Corpus{Works: copies(2, 3)}, similarity.Options{})
+	if !releve(rapport, similarity.SharedLiteral, phrase, 2) {
+		t.Fatalf("deux copies sur trois : %+v", rapport.Signals)
+	}
+
+	// Trois sur trois : c'est l'énoncé qui parle, pas les copies.
+	rapport = similarity.Compare(
+		similarity.Corpus{Works: copies(3, 3)}, similarity.Options{})
+	if releve(rapport, similarity.SharedLiteral, phrase, 3) {
+		t.Fatalf("une phrase portée par tout le groupe ne dit rien : %+v",
+			rapport.Signals)
+	}
+}
+
+// Ce que le gabarit distribué dit lui-même n'est jamais une coïncidence : c'est
+// l'outil qui l'a déposé chez tout le monde.
+func TestCeQueLeGabaritDitNEstPasUnSignal(t *testing.T) {
+	const phrase = "Complétez cette méthode sans modifier sa signature"
+	alice := copie(t, "alice", "01", map[string]string{"Solution.java": original})
+	bruno := copie(t, "bruno", "01", map[string]string{"Travail.java": honnete})
+	claire := copie(t, "claire", "01", map[string]string{"Autre.java": gabarit})
+	alice.Extras.Literals = []string{phrase}
+	bruno.Extras.Literals = []string{phrase}
+
+	corpusDuGroupe := similarity.Corpus{Works: []similarity.Work{alice, bruno, claire}}
+	rapport := similarity.Compare(corpusDuGroupe, similarity.Options{})
+	if !releve(rapport, similarity.SharedLiteral, phrase, 2) {
+		t.Fatalf("sans gabarit connu, la phrase doit remonter : %+v", rapport.Signals)
+	}
+
+	modele := similarity.Work{ID: "modele",
+		Extras: similarity.Signals{Literals: []string{phrase}}}
+	rapport = similarity.Compare(corpusDuGroupe, similarity.Options{
+		Ordinary: similarity.Ordinary(modele),
+	})
+	if releve(rapport, similarity.SharedLiteral, phrase, 2) {
+		t.Fatalf("le gabarit distribué ne produit pas de coïncidence : %+v",
+			rapport.Signals)
+	}
+}
+
+// releve dit si un signal de cette nature et de ce texte a été rapporté.
+func releve(rapport similarity.Report, nature, detail string, porteurs int) bool {
+	for _, signal := range rapport.Signals {
+		if signal.Kind == nature && signal.Detail == detail &&
+			len(signal.Works) == porteurs {
+			return true
+		}
+	}
+	return false
 }

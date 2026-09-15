@@ -1,6 +1,9 @@
 package similarity
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // Comparer, c'est trois choses : écarter ce qui est commun à tout le monde,
 // mesurer ce qui reste, et ne montrer que ce qui vaut d'être regardé.
@@ -50,12 +53,23 @@ const (
 	// MinSharedComment est la longueur en deçà de laquelle un commentaire
 	// partagé ne dit rien : « à faire », « constructeur » s'écrivent seuls.
 	MinSharedComment = 40
+	// MinSharedLiteral est la longueur en deçà de laquelle une chaîne partagée
+	// ne dit rien. Le seuil est plus bas que celui des commentaires parce
+	// qu'une phrase affichée est plus contrainte qu'un commentaire — mais il
+	// s'accompagne d'une exigence de forme : une chaîne ne compte que si elle
+	// contient une espace, donc si c'est une phrase et non une constante
+	// technique (« application/json », « SELECT », un nom de fichier).
+	MinSharedLiteral = 20
+	// MinSignalHolders est le nombre de porteurs en deçà duquel une coïncidence
+	// est toujours rapportée, quelle que soit la taille du corpus.
+	MinSignalHolders = 3
 )
 
 // Natures de signaux relevés hors de la mesure de similarité.
 const (
 	SharedSignature = "signature"
 	SharedComment   = "commentaire"
+	SharedLiteral   = "chaîne"
 )
 
 // Options règle une comparaison.
@@ -69,6 +83,9 @@ type Options struct {
 	MaxMatches    int
 	// Baseline porte les empreintes du gabarit distribué, écartées d'office.
 	Baseline map[uint64]struct{}
+	// Ordinary porte ce que le gabarit distribué dit lui-même : ses
+	// commentaires, ses chaînes. Aucun n'est rapporté comme coïncidence.
+	Ordinary Signals
 }
 
 func (o Options) normalized() Options {
@@ -299,6 +316,47 @@ func noiseLimit(works int, noise float64) int {
 	return limit
 }
 
+// signalLimit rend le nombre de porteurs à partir duquel une coïncidence cesse
+// d'en être une.
+//
+// La règle de bruit s'applique dès que le corpus est assez grand pour qu'elle
+// veuille dire quelque chose. En dessous, elle s'efface — et il faut bien une
+// borne quand même : une phrase que les deux tiers du groupe portent vient de
+// l'énoncé ou du gabarit, qu'ils soient six ou soixante.
+//
+// Jamais moins de MinSignalHolders : deux copies qui partagent une phrase sont
+// le cas que l'outil existe pour trouver.
+func signalLimit(works int, noise float64) int {
+	limit := 2*works/3 + 1
+	if bruit := noiseLimit(works, noise); bruit > 0 && bruit < limit {
+		limit = bruit
+	}
+	if limit < MinSignalHolders {
+		limit = MinSignalHolders
+	}
+	return limit
+}
+
+// ordinaire range ce que le gabarit distribué porte lui-même.
+func ordinaire(signals Signals) map[string]bool {
+	banal := make(map[string]bool, len(signals.Comments)+len(signals.Literals))
+	for _, texte := range signals.Comments {
+		banal[texte] = true
+	}
+	for _, texte := range signals.Literals {
+		banal[texte] = true
+	}
+	return banal
+}
+
+// phrase dit qu'une chaîne est une phrase, et non une constante technique.
+//
+// Une espace suffit à faire la différence : « Entrez un nombre entre 1 et 100 »
+// en porte, « application/json » et « SELECT * FROM inventaire » — non, la
+// seconde en porte aussi. Le critère n'est donc pas parfait ; il écarte le gros
+// du bruit, et la règle de majorité fait le reste.
+func phrase(texte string) bool { return strings.Contains(strings.TrimSpace(texte), " ") }
+
 // detail reconstitue les fragments d'une paire, fichier par fichier.
 func detail(match *Match, left, right Work, ignored map[uint64]struct{}) {
 	// Une empreinte peut revenir plusieurs fois dans un même fichier ; toutes
@@ -376,26 +434,44 @@ func signals(works []Work, options Options) []Signal {
 		}
 	}
 
-	// Un commentaire que tout le monde porte vient du gabarit ; un commentaire
-	// long que deux copies partagent n'a pas d'explication innocente.
-	limit := noiseLimit(len(works), options.Noise)
-	notes := map[string][]string{}
-	for _, work := range works {
-		seen := map[string]bool{}
-		for _, note := range work.Extras.Comments {
-			if len([]rune(note)) < MinSharedComment || seen[note] {
+	// Un commentaire que tout le monde porte vient du gabarit ou de l'énoncé ;
+	// un commentaire long que deux copies partagent n'a pas d'explication
+	// innocente. Il en va de même d'une phrase affichée.
+	limit := signalLimit(len(works), options.Noise)
+	banal := ordinaire(options.Ordinary)
+	for _, partage := range []struct {
+		kind    string
+		minimum int
+		of      func(Signals) []string
+		keep    func(string) bool
+	}{
+		{SharedComment, MinSharedComment,
+			func(s Signals) []string { return s.Comments }, nil},
+		{SharedLiteral, MinSharedLiteral,
+			func(s Signals) []string { return s.Literals }, phrase},
+	} {
+		porteurs := map[string][]string{}
+		for _, work := range works {
+			vus := map[string]bool{}
+			for _, texte := range partage.of(work.Extras) {
+				if len([]rune(texte)) < partage.minimum || vus[texte] || banal[texte] {
+					continue
+				}
+				if partage.keep != nil && !partage.keep(texte) {
+					continue
+				}
+				vus[texte] = true
+				porteurs[texte] = append(porteurs[texte], work.ID)
+			}
+		}
+		for texte, holders := range porteurs {
+			if len(holders) < 2 || len(holders) >= limit {
 				continue
 			}
-			seen[note] = true
-			notes[note] = append(notes[note], work.ID)
+			sort.Strings(holders)
+			found = append(found,
+				Signal{Kind: partage.kind, Detail: texte, Works: holders})
 		}
-	}
-	for note, holders := range notes {
-		if len(holders) < 2 || (limit > 0 && len(holders) >= limit) {
-			continue
-		}
-		sort.Strings(holders)
-		found = append(found, Signal{Kind: SharedComment, Detail: note, Works: holders})
 	}
 
 	sort.Slice(found, func(first, second int) bool {

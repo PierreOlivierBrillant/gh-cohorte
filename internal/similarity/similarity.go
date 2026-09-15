@@ -80,8 +80,25 @@ type Work struct {
 type Signals struct {
 	// Comments porte les commentaires du travail, déjà réduits.
 	Comments []string `json:"comments,omitempty"`
+	// Literals porte les chaînes de caractères assez longues pour être
+	// parlantes — un message d'erreur, une invite, une phrase affichée.
+	//
+	// Le flux comparé les réduit toutes à « STR », et c'est voulu : deux
+	// copies qui ne diffèrent que par une constante restent appariées. Mais ce
+	// qu'on jette là a de la valeur ailleurs — une phrase que deux personnes
+	// écrivent identique, faute comprise, ne s'écrit pas deux fois par hasard.
+	Literals []string `json:"literals,omitempty"`
 	// Signature est le jeton de la signature invisible, quand il y en a une.
 	Signature string `json:"signature,omitempty"`
+}
+
+// Merged rend l'union de deux jeux de signaux, sans la signature — celle-ci
+// désigne une copie, pas un ensemble.
+func (s Signals) Merged(other Signals) Signals {
+	return Signals{
+		Comments: append(append([]string(nil), s.Comments...), other.Comments...),
+		Literals: append(append([]string(nil), s.Literals...), other.Literals...),
+	}
 }
 
 // TokenCount rend le nombre de jetons de la copie entière.

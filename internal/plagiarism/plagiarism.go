@@ -338,31 +338,37 @@ func RunFrom(sources Sources, request Request,
 		Screened: len(publies),
 	}
 
-	baseline, issues := gabarit(sources.Client, request.Baseline, options)
+	baseline, ordinaire, issues := gabarit(sources.Client, request.Baseline, options)
 	report.Problems = append(report.Problems, issues...)
 
 	report.Result = similarity.Compare(built.Corpus, similarity.Options{
 		Noise: request.Noise, MinSimilarity: request.MinSimilarity,
-		MaxMatches: request.MaxMatches, Baseline: baseline,
+		MaxMatches: request.MaxMatches, Baseline: baseline, Ordinary: ordinaire,
 	})
 	return report, nil
 }
 
-// gabarit empreinte le modèle distribué.
+// gabarit empreinte le modèle distribué, et relève ce qu'il dit de lui-même.
+//
+// Deux choses en sortent, pour deux usages. Les empreintes sont retirées de la
+// mesure ; les commentaires et les chaînes du gabarit sont retirés des signaux,
+// où un en-tête imposé ou un message d'erreur fourni se retrouverait sinon
+// « partagé » par tout le groupe.
 //
 // Un gabarit qu'on n'arrive pas à lire n'arrête pas l'analyse : elle se fait
 // sans lui, le garde-fou statistique reprenant le travail. Mais cela se dit —
 // sans le retrait du gabarit, les scores sont tous gonflés de la même
 // quantité, et l'enseignant doit savoir qu'il les lit ainsi.
-func gabarit(client corpus.Client, targets []corpus.Target,
-	options corpus.Options) (map[uint64]struct{}, []corpus.Problem) {
+func gabarit(client corpus.Client, targets []corpus.Target, options corpus.Options) (
+	map[uint64]struct{}, similarity.Signals, []corpus.Problem) {
 
 	if len(targets) == 0 {
-		return nil, nil
+		return nil, similarity.Signals{}, nil
 	}
 	built := corpus.Build(client, targets, options, nil)
 	if len(built.Corpus.Works) == 0 {
-		return nil, built.Problems
+		return nil, similarity.Signals{}, built.Problems
 	}
-	return similarity.Baseline(built.Corpus.Works...), built.Problems
+	return similarity.Baseline(built.Corpus.Works...),
+		similarity.Ordinary(built.Corpus.Works...), built.Problems
 }

@@ -386,3 +386,38 @@ func TestUneMarqueInvisibleEstRelevee(t *testing.T) {
 		t.Fatalf("la marque a coûté des empreintes : %d contre %d", avec, sansMarque)
 	}
 }
+
+// La mesure réduit toutes les chaînes à « STR », et c'est voulu : deux copies
+// qui ne diffèrent que par une constante doivent rester appariées. Ce qu'elle
+// jette là est relevé à côté, parce qu'une phrase affichée mot pour mot par deux
+// personnes ne s'écrit pas deux fois par hasard.
+func TestLesPhrasesAfficheesSontRelevees(t *testing.T) {
+	const avecPhrase = `
+public class Message {
+    public void afficher(int total) {
+        System.out.println("Le total des valeurs saisies est de " + total);
+        System.out.println("ok");
+        System.out.println("application/json");
+    }
+}
+`
+	state := fakegh.NewState()
+	depot(state, "alice", map[string]string{
+		"src/Solution.java": solution, "src/Message.java": avecPhrase,
+	})
+
+	result := corpus.Build(client(t, state), []corpus.Target{cible("alice")},
+		options(t, inspect.Settings{}), nil)
+	if len(result.Corpus.Works) != 1 {
+		t.Fatalf("copies : %+v", result.Problems)
+	}
+	relevees := result.Corpus.Works[0].Extras.Literals
+
+	// La phrase est retenue, sans ses guillemets ; les deux constantes
+	// techniques ne le sont pas — l'une est trop courte, l'autre n'est pas une
+	// phrase, et toutes deux s'écrivent seules.
+	attendue := "Le total des valeurs saisies est de"
+	if len(relevees) != 1 || relevees[0] != attendue {
+		t.Fatalf("chaînes relevées : %q, attendue « %s »", relevees, attendue)
+	}
+}

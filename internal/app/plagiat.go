@@ -188,6 +188,7 @@ func (m *manageSession) plagiatCibles(cours classroom.Classroom, nom string,
 		envois[strings.ToLower(repo.Name)] = repo.PushedAt
 	}
 	set, _ := m.session.names(m.org)
+
 	for index := range cibles {
 		cibles[index].PushedAt = envois[strings.ToLower(cibles[index].Repo)]
 		cibles[index].Label = nomDeCopie(cours, set, cibles[index].Repo)
@@ -385,6 +386,13 @@ func montrerSignaux(console *ui.Console, rapport *plagiarism.Report,
 				strings.Join(signal.Works, ", "), porteur)
 		case similarity.SharedComment:
 			console.Warning("Commentaire identique dans %s : « %s »",
+				strings.Join(signal.Works, ", "), abrege(signal.Detail))
+		case similarity.SharedLiteral:
+			// La mesure réduit toutes les chaînes à « STR » pour que deux
+			// copies ne différant que par une constante restent appariées. Ce
+			// qu'elle jette là se retrouve ici : une phrase écrite à
+			// l'identique par deux personnes, faute comprise, se remarque.
+			console.Warning("Même phrase affichée dans %s : « %s »",
 				strings.Join(signal.Works, ", "), abrege(signal.Detail))
 		}
 	}

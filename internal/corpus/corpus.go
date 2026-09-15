@@ -11,6 +11,7 @@ package corpus
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
@@ -303,6 +304,8 @@ func Fingerprint(loose Loose, options Options) (similarity.Work, Inspected, *Pro
 		inspected.Prints += len(file.Prints)
 		work.Files = append(work.Files, file)
 		work.Extras.Comments = append(work.Extras.Comments, longComments(analysis)...)
+		work.Extras.Literals = append(work.Extras.Literals,
+			longLiterals(kept.Content, analysis)...)
 	}
 
 	if inspected.Prints == 0 {
@@ -344,6 +347,44 @@ func detailOf(selection inspect.Selection) string {
 		detail += " (racine retenue : " + selection.Root + ")"
 	}
 	return detail
+}
+
+// longLiterals relève les chaînes de caractères assez longues pour être
+// parlantes.
+//
+// Le flux comparé les a toutes réduites à « STR » — c'est ce qui fait que deux
+// copies ne différant que par une constante restent appariées —, mais les
+// jetons gardent leurs bornes en octets : le texte d'origine se relit dans le
+// fichier, sans que les analyseurs lexicaux aient à le conserver.
+//
+// Les délimiteurs sont retirés et les espaces resserrés, comme pour les
+// commentaires : deux chaînes qui ne diffèrent que par leurs guillemets sont la
+// même phrase.
+func longLiterals(content []byte, analysis tokens.Result) []string {
+	kept := make([]string, 0, 4)
+	seen := map[string]bool{}
+	for _, token := range analysis.Tokens {
+		if token.Kind != tokens.Text || token.Start < 0 || token.End > len(content) ||
+			token.Start >= token.End {
+			continue
+		}
+		texte := reduire(string(content[token.Start:token.End]))
+		if len([]rune(texte)) < similarity.MinSharedLiteral || seen[texte] {
+			continue
+		}
+		seen[texte] = true
+		kept = append(kept, texte)
+	}
+	sort.Strings(kept)
+	return kept
+}
+
+// reduire retire les délimiteurs d'une chaîne et resserre ses espaces.
+func reduire(texte string) string {
+	texte = strings.TrimFunc(texte, func(r rune) bool {
+		return r == '"' || r == '\'' || r == '`' || r == '@' || r == '$'
+	})
+	return strings.Join(strings.Fields(texte), " ")
 }
 
 // longComments ne garde que les commentaires assez longs pour qu'un partage

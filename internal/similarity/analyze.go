@@ -98,3 +98,17 @@ func Lines(stream []tokens.Token, start, end int) (from, to int) {
 	}
 	return from, to
 }
+
+// Ordinary rend les signaux que le gabarit distribué porte lui-même.
+//
+// Ils sont retirés d'office, exactement comme ses empreintes : un commentaire
+// d'en-tête imposé et un message d'erreur fourni dans le squelette se
+// retrouvent dans toutes les copies, et les rapporter comme des coïncidences
+// noierait les vraies sous les fausses.
+func Ordinary(works ...Work) Signals {
+	ordinary := Signals{}
+	for _, work := range works {
+		ordinary = ordinary.Merged(work.Extras)
+	}
+	return ordinary
+}
