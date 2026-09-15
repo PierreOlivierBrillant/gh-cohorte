@@ -4,9 +4,20 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 )
+
+// envoi met une date rendue par GitHub sous la forme que l'annuaire porte :
+// l'heure de la machine, à la minute.
+func envoi(iso string) string {
+	moment, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		panic(err)
+	}
+	return moment.Local().Format("2006-01-02 15:04")
+}
 
 // annuaireLigne est une personne de l'annuaire, telle que l'API la rend.
 type annuaireLigne struct {
@@ -105,7 +116,7 @@ func TestAnnuaireRassembleLesGroupesDeLOrganisation(t *testing.T) {
 		t.Fatalf("Émilie : %d inscription(s), %d dépôt(s)",
 			len(emilie.Enrollments), emilie.Repos)
 	}
-	if emilie.PushedAt != "2027-02-10" {
+	if emilie.PushedAt != envoi("2027-02-10T10:00:00Z") {
 		t.Fatalf("dernier envoi d'Émilie : %q", emilie.PushedAt)
 	}
 	// Chaque inscription porte ses propres dépôts : deux groupes ont chacun

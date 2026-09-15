@@ -17,8 +17,9 @@ import (
 //
 // Elle vit donc là où vivent déjà les noms que les dépôts ne disent pas : dans
 // le registre de l'organisation. Ce paquet ne la retient pas, il la demande —
-// « Schedule » est la seconde des deux questions qu'il pose au registre, et la
-// seule chose qu'il en connaisse avec « Lookup ».
+// « Schedule » est l'une des trois questions qu'il pose au registre, avec
+// « Lookup », qui dit qui se cache derrière un nom, et « Teaches », qui dit qui
+// enseigne. Rien d'autre du registre ne le concerne.
 //
 // Une date fixée ici vaut donc pour l'équipe entière et suit d'un poste à
 // l'autre, comme le nom derrière un compte.
@@ -140,7 +141,8 @@ func MoveDue(depart, arrivee Classroom, travaux []Relocation) []Deadline {
 type Review struct {
 	Repo    string `json:"repo"`
 	Commits int    `json:"commits"`
-	// Last est la date du commit le plus récent, au format RFC 3339.
+	// Last date la remise : c'est le commit le plus récent qui n'est pas d'un
+	// enseignant, au format RFC 3339. Vide, rien n'y a été remis.
 	Last string `json:"last,omitempty"`
 	// Late dit qu'un commit suit la date cible. Sans date cible, jamais.
 	Late bool `json:"late"`
@@ -170,12 +172,29 @@ func (c Classroom) Targets(repoName string, equipes []teams.Team) []roster.Perso
 	return nil
 }
 
+// HandedIn date la remise d'un dépôt : le commit le plus récent qui n'est pas
+// d'un enseignant.
+//
+// Un gabarit poussé à l'ouverture du travail, une correction déposée après
+// coup, une note ajoutée une fois l'échéance passée sont l'œuvre de qui
+// enseigne. Les compter daterait la remise du jour où l'enseignant y a touché,
+// et mettrait l'étudiant en retard pour cela.
+//
+// Un groupe qu'on n'a pas branché sur le registre — « Staffing » — ne sait pas
+// qui enseigne : la date du dernier commit est alors tout ce qu'il a.
+func (c Classroom) HandedIn(remise groups.Handin) string {
+	if c.enseignants == nil {
+		return remise.Last
+	}
+	return remise.LastBut(c.enseignants.Teaches)
+}
+
 // Review confronte ce qu'un dépôt a reçu à ce qu'on en attendait.
 func (c Classroom) Review(repoName string, remise groups.Handin, due time.Time,
 	equipes []teams.Team) Review {
-	bilan := Review{Repo: repoName, Commits: remise.Commits, Last: remise.Last}
-	if !due.IsZero() && remise.Last != "" {
-		if dernier, err := time.Parse(time.RFC3339, remise.Last); err == nil {
+	bilan := Review{Repo: repoName, Commits: remise.Commits, Last: c.HandedIn(remise)}
+	if !due.IsZero() && bilan.Last != "" {
+		if dernier, err := time.Parse(time.RFC3339, bilan.Last); err == nil {
 			bilan.Late = dernier.After(due)
 		}
 	}
@@ -231,4 +250,102 @@ func (c Classroom) WithHandins(travaux []Assignment, repos []groups.RepoInfo,
 		completes = append(completes, travail)
 	}
 	return completes
+}
+
+// ------------------------------------------------------ où en est une remise
+
+// HandinState dit où en est la remise d'un dépôt, d'un mot.
+//
+// Les états vivent ici plutôt que dans une interface : « en retard » doit
+// vouloir dire la même chose au navigateur, au terminal et à la ligne de
+// commande, et c'est aussi sur eux qu'on filtre.
+type HandinState string
+
+const (
+	// AnyHandin ne retient rien : tous les états passent.
+	AnyHandin HandinState = ""
+	// Unread dit qu'on n'a pas regardé. Ce n'est pas un dépôt vide : c'est un
+	// dépôt dont l'historique n'a pas été relevé, et rien ne s'en conclut.
+	Unread HandinState = "non relevé"
+	// Unaccepted dit que l'invitation n'a pas encore été acceptée. La personne
+	// n'a pas pu remettre — son dépôt ne lui est pas ouvert —, et lui
+	// reprocher son silence serait injuste.
+	Unaccepted HandinState = "non accepté"
+	// Unsent dit que rien n'a été remis.
+	Unsent HandinState = "non remis"
+	// Overdue dit que la remise suit la date cible.
+	Overdue HandinState = "en retard"
+	// Delivered dit que le travail est remis, et à temps.
+	Delivered HandinState = "remis"
+)
+
+// HandinStates énumère les états, dans l'ordre où les proposer : du plus
+// tranquille au plus alarmant, puis ce qu'on n'a pas encore regardé.
+var HandinStates = []HandinState{
+	AnyHandin, Delivered, Overdue, Unsent, Unaccepted, Unread,
+}
+
+// ParseHandinState valide un état saisi. Il se lit accentué comme non
+// accentué : « non relevé » se tape rarement avec ses accents au terminal.
+func ParseHandinState(value string) (HandinState, error) {
+	demande := valid.Slugify(value)
+	for _, candidat := range HandinStates {
+		if demande == valid.Slugify(string(candidat)) {
+			return candidat, nil
+		}
+	}
+	return AnyHandin, valid.Errorf(
+		"Remise : « %s » est inconnu (attendu : remis, en retard, non remis, "+
+			"non accepté, non relevé, ou rien).", value)
+}
+
+// Keep dit si une remise dans cet état répond au critère. Un critère vide ne
+// retient rien : il laisse simplement passer.
+func (s HandinState) Keep(etat HandinState) bool {
+	return s == AnyHandin || s == etat
+}
+
+// StateOf dit où en est la remise d'un dépôt.
+//
+// « releve » dit que l'historique a été lu. Sans lui, rien ne se conclut : un
+// dépôt qu'on n'a pas regardé n'est pas un dépôt vide, et c'est précisément ce
+// que l'écran doit pouvoir distinguer.
+//
+// « attend » dit qu'une personne visée a été invitée sans avoir encore accepté.
+// Il n'explique que l'absence de remise : une équipe qui a remis a remis, même
+// si l'un de ses membres n'a pas encore cliqué sur le courriel de GitHub.
+func StateOf(bilan Review, releve, attend bool) HandinState {
+	switch {
+	case !releve:
+		return Unread
+	case bilan.Late:
+		return Overdue
+	case bilan.Last != "":
+		return Delivered
+	case attend:
+		return Unaccepted
+	default:
+		return Unsent
+	}
+}
+
+// Awaiting dit qu'une personne que le dépôt vise a été invitée sans avoir
+// encore accepté.
+//
+// Les comptes invités sont donnés plutôt que cherchés ici : ils viennent des
+// accès du dépôt, que ce paquet n'a pas à savoir lire. Un dépôt d'équipe
+// s'ouvre autrement — c'est l'équipe GitHub qui donne l'accès, et c'est donc
+// son invitation qui compte.
+func (c Classroom) Awaiting(repoName string, equipes []teams.Team, invites []string) bool {
+	if equipe, appartient := c.TeamOf(repoName, equipes); appartient {
+		return len(equipe.Pending) > 0
+	}
+	for _, personne := range c.Targets(repoName, equipes) {
+		for _, compte := range personne.Accounts() {
+			if containsFold(invites, compte) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 )
@@ -119,8 +120,11 @@ func TestBuildGroupe(t *testing.T) {
 	if groupe.Repos[0].Suffix != "emilie-cote" || groupe.Repos[0].Visibility() != "public" {
 		t.Errorf("premier dépôt = %+v", groupe.Repos[0])
 	}
-	if groupe.Repos[1].PushedAt != "2026-08-19" {
-		t.Errorf("date = %q, attendu 2026-08-19", groupe.Repos[1].PushedAt)
+	// Le dernier envoi porte l'heure, et à celle de la machine : GitHub le
+	// date en UTC, et une remise du soir paraîtrait faite le lendemain.
+	attendu := time.Date(2026, 8, 19, 10, 11, 12, 0, time.UTC).Local().Format("2006-01-02 15:04")
+	if groupe.Repos[1].PushedAt != attendu {
+		t.Errorf("date = %q, attendu %q", groupe.Repos[1].PushedAt, attendu)
 	}
 	if _, index, ok := groupe.Find("JLPICARD"); !ok || index != 1 {
 		t.Errorf("Find par suffixe = %d, %v", index, ok)

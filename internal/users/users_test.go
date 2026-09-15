@@ -3,6 +3,7 @@ package users_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
@@ -40,6 +41,16 @@ func build(cours classroom.Classroom, repos []groups.RepoInfo) []users.Row {
 	return users.Build(cours, repos, nil)
 }
 
+// envoi met une date rendue par GitHub sous la forme que portent les lignes :
+// l'heure de la machine, à la minute.
+func envoi(iso string) string {
+	moment, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		panic(err)
+	}
+	return moment.Local().Format("2006-01-02 15:04")
+}
+
 // comptes rend les comptes d'une liste, dans l'ordre où elle les donne.
 func comptes(lignes []users.Row) string {
 	noms := make([]string, 0, len(lignes))
@@ -55,7 +66,7 @@ func TestLigneRetientLePlusRecentEnvoi(t *testing.T) {
 	for _, ligne := range lignes {
 		trouve[ligne.Username] = ligne
 	}
-	if picard := trouve["jlpicard"]; picard.PushedAt != "2026-10-15" || len(picard.Repos) != 2 {
+	if picard := trouve["jlpicard"]; picard.PushedAt != envoi("2026-10-15T10:00:00Z") || len(picard.Repos) != 2 {
 		t.Fatalf("Picard : %+v", picard)
 	}
 	// Un dépôt sans envoi ne donne pas de date : c'est ce qui distingue « muet »
@@ -228,8 +239,8 @@ func TestUnDepotDEquipeCompteChezChacunDeSesMembres(t *testing.T) {
 		}
 	}
 	// Aminata n'avait jamais rien envoyé : l'envoi de son équipe devient le sien.
-	if envoi := trouve["aminata-d"].PushedAt; envoi != "2026-10-02" {
-		t.Fatalf("dernier envoi d'Aminata attendu du dépôt d'équipe, trouvé %q", envoi)
+	if trouve := trouve["aminata-d"].PushedAt; trouve != envoi("2026-10-02T08:00:00Z") {
+		t.Fatalf("dernier envoi d'Aminata attendu du dépôt d'équipe, trouvé %q", trouve)
 	}
 	// Jean-Luc n'est dans aucune équipe : ses deux dépôts restent les siens.
 	if depots := trouve["jlpicard"].Repos; len(depots) != 2 {

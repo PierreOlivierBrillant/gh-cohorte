@@ -37,6 +37,14 @@ type Handin struct {
 	// Last est la date du commit le plus récent, au format RFC 3339. Elle est
 	// vide quand le dépôt n'a rien reçu.
 	Last string `json:"last,omitempty"`
+	// LastBy date le commit le plus récent de chaque compte, au même format.
+	// Les clés sont en minuscules, et la clé vide porte les commits qu'aucune
+	// adresse ne rattache à un compte.
+	//
+	// Elle ne couvre que les commits les plus récents de la branche, et cela
+	// suffit : un auteur qui n'y paraît pas a forcément commis plus tôt que le
+	// plus ancien de ceux-là, et ne peut donc être le dernier de personne.
+	LastBy map[string]string `json:"last_by,omitempty"`
 	// Authors compte les commits de chaque compte GitHub. Les clés sont en
 	// minuscules : GitHub ne distingue pas la casse d'un compte.
 	Authors map[string]int `json:"authors,omitempty"`
@@ -48,6 +56,34 @@ type Handin struct {
 
 // Empty dit qu'aucun commit n'a été relevé dans le dépôt.
 func (h Handin) Empty() bool { return h.Commits == 0 }
+
+// LastBut rend la date du commit le plus récent dont l'auteur n'est pas écarté.
+//
+// C'est ce qui date une remise. Un gabarit poussé à l'ouverture du travail, une
+// correction déposée après coup, une note ajoutée au dépôt une fois l'échéance
+// passée sont l'œuvre de qui enseigne : les compter daterait la remise du jour
+// où l'enseignant y a touché, et mettrait l'étudiant en retard pour cela.
+//
+// Sans auteurs relevés, la date du dernier commit est tout ce qu'on sait, et
+// c'est elle qui est rendue : mieux vaut une date trop tardive que pas de date
+// du tout.
+func (h Handin) LastBut(ignore func(login string) bool) string {
+	if ignore == nil || len(h.LastBy) == 0 {
+		return h.Last
+	}
+	dernier := ""
+	for login, quand := range h.LastBy {
+		if login != "" && ignore(login) {
+			continue
+		}
+		// Les dates sont en UTC et de forme fixe : les comparer comme du texte
+		// les range dans l'ordre du temps.
+		if quand > dernier {
+			dernier = quand
+		}
+	}
+	return dernier
+}
 
 // By compte les commits d'une personne, tous ses comptes confondus.
 func (h Handin) By(accounts []string) int {

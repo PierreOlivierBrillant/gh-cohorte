@@ -38,13 +38,13 @@ func (s *Server) placeAt(scope string) (classroom.Classroom, error) {
 	org := s.org()
 	set, _ := s.names(org)
 	if cours, trouve := s.classrooms.Find(org, scope); trouve {
-		return cours.Scheduling(set).Enrich(set, nil), nil
+		return cours.Scheduling(set).Staffing(set).Enrich(set, nil), nil
 	}
 	cours, err := classroom.AtScope(org, scope, classroom.DefaultsFrom(s.Settings()))
 	if err != nil {
 		return cours, err
 	}
-	return cours.Scheduling(set).Enrich(set, nil), nil
+	return cours.Scheduling(set).Staffing(set).Enrich(set, nil), nil
 }
 
 // enrichi verse dans un groupe ce que le registre de l'organisation sait de ses
@@ -55,9 +55,10 @@ func (s *Server) placeAt(scope string) (classroom.Classroom, error) {
 // l'enregistrement ce qui a été déduit plutôt que déclaré.
 func (s *Server) enrichi(cours classroom.Classroom, repos []groups.RepoInfo) classroom.Classroom {
 	set, _ := s.names(cours.Org)
-	// Le registre répond aux deux questions qu'un groupe lui pose : qui se
-	// cache derrière un nom de dépôt, et quand chaque travail est attendu.
-	return cours.Scheduling(set).Enrich(set, repos)
+	// Le registre répond aux trois questions qu'un groupe lui pose : qui se
+	// cache derrière un nom de dépôt, quand chaque travail est attendu, et qui
+	// enseigne — sans quoi un commit d'enseignant daterait la remise.
+	return cours.Scheduling(set).Staffing(set).Enrich(set, repos)
 }
 
 // apprendre confie au registre de l'organisation ce qu'on vient d'apprendre

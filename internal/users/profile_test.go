@@ -68,7 +68,7 @@ func TestLaChronologieVaDuPlusRecentAuPlusAncien(t *testing.T) {
 	if fiche.FullName != "Émilie Côté" || fiche.Courses != 3 || fiche.Taught != 0 {
 		t.Errorf("fiche = %+v", fiche)
 	}
-	if fiche.Repos != 3 || fiche.PushedAt != "2027-02-10" {
+	if fiche.Repos != 3 || fiche.PushedAt != envoi("2027-02-10T10:00:00Z") {
 		t.Errorf("dépôts = %d, dernier envoi = %q", fiche.Repos, fiche.PushedAt)
 	}
 	// Chaque étape porte de quoi se lire sans traduction : la session en
@@ -103,7 +103,7 @@ func TestChaqueEtapePorteSesDepots(t *testing.T) {
 	if automne.Assignments[0].Repo != "a26.5n6.01.tp2.emilie-cote" {
 		t.Errorf("dépôt = %q", automne.Assignments[0].Repo)
 	}
-	if automne.PushedAt != "2026-10-30" || automne.Silent {
+	if automne.PushedAt != envoi("2026-10-30T10:00:00Z") || automne.Silent {
 		t.Errorf("étape = %+v", automne)
 	}
 }

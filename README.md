@@ -210,8 +210,8 @@ déjà distribués continuent de fonctionner.
   une équipe déjà présente dans l'organisation s'adopte telle quelle.
 
 Ce que GitHub Classroom fait et que l'outil ne fait pas : pas de lien
-d'invitation à distribuer — les dépôts sont créés directement —, pas d'échéance,
-pas de correction automatique.
+d'invitation à distribuer — les dépôts sont créés directement —, pas de
+correction automatique.
 
 L'assistant du terminal ignore la notion de groupe et travaille par préfixe
 (`--manage tp1`). Déclarer un groupe, tenir sa liste d'étudiants ou déplacer une

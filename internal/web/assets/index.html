@@ -563,6 +563,21 @@
                 <option value="muet">jamais d’envoi</option>
               </select>
             </label>
+            <!-- L'état de la remise est ce qu'on vient chercher dans cet écran :
+                 qui a rendu, qui est en retard, qui n'a pas encore accepté son
+                 invitation. Les mots sont ceux du domaine, et le terminal les
+                 propose à l'identique. -->
+            <label class="champ-bloc">
+              <span class="etiquette">Remise</span>
+              <select id="detail-filtre-remise" class="champ">
+                <option value="">toutes</option>
+                <option value="remis">remis</option>
+                <option value="en retard">en retard</option>
+                <option value="non remis">non remis</option>
+                <option value="non accepté">non accepté</option>
+                <option value="non relevé">non relevé</option>
+              </select>
+            </label>
             <label class="champ-bloc">
               <span class="etiquette">Dernier envoi après</span>
               <input type="date" id="detail-filtre-apres" class="champ">

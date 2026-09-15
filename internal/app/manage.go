@@ -61,6 +61,10 @@ type manageSession struct {
 	filter   users.Filter
 	sortKey  users.Key
 	sortDesc bool
+	// handin ne garde que les dépôts dont la remise en est là. Il vit à part du
+	// filtre des personnes : ce qu'il regarde n'est pas une ligne d'annuaire,
+	// c'est ce qu'un historique et des accès déjà lus disent d'un dépôt.
+	handin classroom.HandinState
 	// Les équipes du groupe, lues une fois : elles disent à qui un dépôt
 	// d'équipe est destiné, et la liste s'affiche trop souvent pour les
 	// redemander à chaque fois.
@@ -77,6 +81,7 @@ func newManageSession(session *Session, initialPrefix string) *manageSession {
 		org:           session.Settings.Org,
 		initialPrefix: initialPrefix,
 		filter:        session.Options.Filter,
+		handin:        session.Options.Handin,
 		sortKey:       session.Options.Sort,
 		sortDesc:      session.Options.SortDesc,
 		resolver:      identity.New(session.Client, session.Cache, session.Options.Jobs),
@@ -267,14 +272,23 @@ func (m *manageSession) visible(group *groups.Group) []groups.Repo {
 	lignes := users.Apply(users.FromGroup(*group, m.names(group)),
 		m.filter, m.sortKey, m.sortDesc)
 
+	// L'état de la remise ne se lit pas dans une ligne d'annuaire : il vient
+	// des historiques et des accès déjà relevés, et n'est donc demandé que
+	// lorsqu'on filtre dessus.
+	var etats map[string]classroom.HandinState
+	if m.handin != classroom.AnyHandin {
+		etats = m.etats(group)
+	}
 	retenus := make([]groups.Repo, 0, len(lignes))
 	for _, ligne := range lignes {
 		if len(ligne.Repos) == 0 {
 			continue
 		}
-		if repo, connu := parNom[ligne.Repos[0].Name]; connu {
-			retenus = append(retenus, repo)
+		repo, connu := parNom[ligne.Repos[0].Name]
+		if !connu || !m.handin.Keep(etats[repo.Name]) {
+			continue
 		}
+		retenus = append(retenus, repo)
 	}
 	return retenus
 }
@@ -283,6 +297,9 @@ func (m *manageSession) visible(group *groups.Group) []groups.Repo {
 // ordonnée : un filtre qui ne se voit pas se retourne contre celui qui l'a posé.
 func (m *manageSession) criteria() string {
 	parts := []string{}
+	if m.handin != classroom.AnyHandin {
+		parts = append(parts, "remise : "+string(m.handin))
+	}
 	if m.filter.Text != "" {
 		parts = append(parts, "« "+m.filter.Text+" »")
 	}
@@ -317,6 +334,7 @@ func (m *manageSession) show(group *groups.Group) {
 	names := m.names(group)
 	visibles := m.visible(group)
 	bilans := m.bilans(group)
+	etats := m.etats(group)
 
 	titre := "Groupe « " + group.Prefix + " » — " + itoa(group.Len()) + " dépôt(s)"
 	if len(visibles) != group.Len() {
@@ -340,9 +358,8 @@ func (m *manageSession) show(group *groups.Group) {
 		}
 		ligne := []string{itoa(index + 1), repo.Name, fullName, repo.Visibility(), pushed}
 		if len(bilans) > 0 {
-			bilan, connu := bilans[repo.Name]
-			commits, etat := resumeDeRemise(console, bilan, connu)
-			ligne = append(ligne, commits, etat)
+			commits, verdict := resumeDeRemise(console, bilans[repo.Name], etats[repo.Name])
+			ligne = append(ligne, commits, verdict)
 		}
 		rows = append(rows, ligne)
 	}
@@ -411,6 +428,7 @@ func (m *manageSession) pickMany(group *groups.Group, question string) ([]groups
 // Menu du filtre et du tri.
 var filterMenu = ui.Options(
 	"chercher", "Chercher un nom ou un compte",
+	"remise", "N'afficher qu'un état de remise",
 	"apres", "Ne garder que les envois postérieurs à une date",
 	"avant", "Ne garder que les envois antérieurs à une date",
 	"muets", "N'afficher que les dépôts sans aucun envoi",
@@ -418,6 +436,22 @@ var filterMenu = ui.Options(
 	"vider", "Tout effacer",
 	"retour", "Revenir à la liste",
 )
+
+// États de remise proposés, dans l'ordre du domaine. « tous » dit qu'on ne
+// retient rien : un menu sans porte de sortie enfermerait dans son dernier choix.
+var handinMenu = handinOptions()
+
+func handinOptions() []ui.Option {
+	options := make([]ui.Option, 0, len(classroom.HandinStates))
+	for _, etat := range classroom.HandinStates {
+		libelle := string(etat)
+		if etat == classroom.AnyHandin {
+			libelle = "tous"
+		}
+		options = append(options, ui.Option{Value: string(etat), Label: libelle})
+	}
+	return options
+}
 
 // Colonnes de tri proposées.
 var sortMenu = ui.Options(
@@ -441,6 +475,7 @@ func (m *manageSession) filtrer(group *groups.Group) error {
 			return nil
 		case "vider":
 			m.filter = users.Filter{}
+			m.handin = classroom.AnyHandin
 			m.sortKey, m.sortDesc = users.ByName, false
 		case "chercher":
 			texte, err := m.session.Prompt.Ask(ui.Question{
@@ -452,6 +487,10 @@ func (m *manageSession) filtrer(group *groups.Group) error {
 				return err
 			}
 			m.filter.Text = texte
+		case "remise":
+			if err := m.askHandin(); err != nil {
+				return err
+			}
 		case "apres", "avant":
 			if err := m.askDate(action); err != nil {
 				return err
@@ -474,6 +513,22 @@ func (m *manageSession) filtrer(group *groups.Group) error {
 		}
 		m.show(group)
 	}
+}
+
+// askHandin recueille l'état de remise à ne garder. Les mots sont ceux du
+// domaine : le navigateur propose les mêmes, et « en retard » y veut dire la
+// même chose.
+func (m *manageSession) askHandin() error {
+	choix, err := m.session.Prompt.Choose("N'afficher que", handinMenu, string(m.handin))
+	if err != nil {
+		return err
+	}
+	etat, err := classroom.ParseHandinState(choix)
+	if err != nil {
+		return err
+	}
+	m.handin = etat
+	return nil
 }
 
 // askDate recueille une des deux bornes du dernier envoi.

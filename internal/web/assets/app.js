@@ -291,7 +291,7 @@ const etat = {
   filtre: { texte: '', travail: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false },
   // Ce que la liste d'un travail montre : les mêmes critères, appliqués aux
   // mêmes lignes — un dépôt par personne — par le même paquet du serveur.
-  filtreTravail: { texte: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false },
+  filtreTravail: { texte: '', activite: '', remise: '', apres: '', avant: '', tri: 'nom', desc: false },
   // L'annuaire de l'organisation : ses lignes, ses critères, et qui est déplié.
   annuaire: {
     lignes: [],
@@ -1268,7 +1268,7 @@ function dateLisible(due) {
   return heure ? `${jour} à ${heure}` : jour;
 }
 
-// Un instant relevé dans un historique — le dernier commit — se montre à
+// Un instant relevé dans un historique — la date d'une remise — se montre à
 // l'heure de cette machine : c'est dans ce fuseau que l'échéance a été fixée.
 function instantLisible(iso) {
   if (!iso) return '';
@@ -1423,6 +1423,7 @@ function adresseTravail(nom, force) {
   const parametres = new URLSearchParams();
   if (critere.texte) parametres.set('q', critere.texte);
   if (critere.activite) parametres.set('activity', critere.activite);
+  if (critere.remise) parametres.set('handin', critere.remise);
   if (critere.apres) parametres.set('after', critere.apres);
   if (critere.avant) parametres.set('before', critere.avant);
   if (critere.tri !== 'nom') parametres.set('sort', critere.tri);
@@ -1496,13 +1497,13 @@ const barreTravail = barreDeFiltre({
   menu: 'detail-filtre-menu',
   vider: 'detail-filtre-vider',
   champs: [
-    ['detail-filtre-activite', 'activite'],
+    ['detail-filtre-activite', 'activite'], ['detail-filtre-remise', 'remise'],
     ['detail-filtre-apres', 'apres'], ['detail-filtre-avant', 'avant'],
   ],
   criteres: () => etat.filtreTravail,
   effacer: () => {
     etat.filtreTravail = {
-      texte: '', activite: '', apres: '', avant: '', tri: 'nom', desc: false,
+      texte: '', activite: '', remise: '', apres: '', avant: '', tri: 'nom', desc: false,
     };
   },
   recharger: () => rechargerTravail(),
@@ -1603,30 +1604,52 @@ function dessinerTravail() {
   majSelection();
 }
 
-// pastillesDuDepot dit ce que l'historique d'un dépôt a révélé : un retard sur
-// la date cible, et les personnes visées dont rien ne porte la trace.
+// pastilleDEtat dit d'un mot où en est la remise. L'état vient du serveur, qui
+// le décide dans le domaine : le navigateur n'a plus qu'à choisir la couleur,
+// et le terminal dit les mêmes mots.
+const etatsDeRemise = {
+  'non relevé': { classe: 'vide', texte: '—', title: "L'historique n'a pas encore été relevé" },
+  // Orange, et non jaune : la personne n'a pas pu remettre, son dépôt ne lui
+  // est pas encore ouvert. Ce n'est pas le même reproche qu'un dépôt resté vide.
+  'non accepté': { classe: 'jeton orange', texte: 'Non accepté',
+    title: "L'invitation à ce dépôt n'a pas encore été acceptée" },
+  'non remis': { classe: 'jeton alerte', texte: 'Non remis',
+    title: 'Aucun commit qui soit une remise dans ce dépôt' },
+  'en retard': { classe: 'jeton non', texte: 'en retard' },
+  remis: { classe: 'jeton oui', texte: 'remis' },
+};
+
+// pastillesDuDepot dit ce que l'historique d'un dépôt a révélé : où en est la
+// remise, et — dans une équipe qui a remis — de qui rien ne porte la trace.
 function pastillesDuDepot(repo) {
-  if (!repo.seen) return [el('span', { classe: 'vide', texte: '—' })];
+  const etat = etatsDeRemise[repo.state] || etatsDeRemise['non relevé'];
   const jetons = [];
-  if (repo.late) {
+  if (repo.state === 'remis') {
+    // Une remise à temps se montre par sa date : c'est ce qu'on vient lire.
+    jetons.push(el('span', { classe: 'jeton oui', texte: instantLisible(repo.last) }));
+  } else if (repo.state === 'en retard') {
     jetons.push(el('span', {
-      classe: 'jeton non',
-      title: `Dernier commit le ${instantLisible(repo.last)}, après la date cible`,
-      texte: 'en retard',
+      classe: etat.classe, texte: etat.texte,
+      title: `Remis le ${instantLisible(repo.last)}, après la date cible`,
     }));
+  } else if (repo.state === 'non remis' && !repo.commits && !(repo.silent || []).length) {
+    // Un dépôt vide que personne n'était attendu à remplir n'est pas une
+    // faute — un dépôt hors liste en est —, mais il se voit.
+    jetons.push(el('span', { classe: 'jeton', texte: 'aucun commit' }));
+  } else {
+    jetons.push(el('span', { classe: etat.classe, texte: etat.texte, title: etat.title }));
   }
-  for (const personne of repo.silent || []) {
-    jetons.push(el('span', {
-      classe: 'jeton alerte', title: 'Aucun commit de sa part dans ce dépôt',
-      texte: personne.full_name || '@' + personne.username,
-    }));
-  }
-  if (jetons.length === 0) {
-    // Rien à signaler. Un dépôt qui n'a rien reçu le dit quand même : le cas
-    // n'est pas une faute — personne n'y était attendu —, mais il se voit.
-    jetons.push(repo.commits
-      ? el('span', { classe: 'jeton oui', texte: instantLisible(repo.last) })
-      : el('span', { classe: 'jeton', texte: 'aucun commit' }));
+  // Une équipe où l'un seulement se tait est un autre cas : le dépôt a reçu
+  // quelque chose, et savoir de qui il ne porte rien est tout ce qui compte.
+  // Quand rien n'a été remis, l'état l'a déjà dit — et la ligne porte déjà les
+  // noms.
+  if (repo.last) {
+    for (const personne of repo.silent || []) {
+      jetons.push(el('span', {
+        classe: 'jeton alerte', title: 'Aucun commit de sa part dans ce dépôt',
+        texte: personne.full_name || '@' + personne.username,
+      }));
+    }
   }
   return jetons;
 }

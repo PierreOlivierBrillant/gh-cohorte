@@ -225,7 +225,7 @@ func TestUnTravailAbsentEstRefuse(t *testing.T) {
 // commit du travail.
 func TestLInterfaceDevineLaPlaceDArrivee(t *testing.T) {
 	state := classroomOrg()
-	state.Repos["acme/tp1-lyonnais"].History = []string{"2027-02-03T10:00:00Z"}
+	state.Repos["acme/tp1-lyonnais"].History = fakegh.Commits("2027-02-03T10:00:00Z")
 	h := nouveau(t, state)
 
 	var place struct {

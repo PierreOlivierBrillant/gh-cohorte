@@ -105,6 +105,10 @@ type Classroom struct {
 	// écrit non plus : les dates vivent dans le registre de l'organisation, et
 	// les redire ici en ferait un second exemplaire libre de diverger.
 	horaire Schedule
+	// enseignants dit qui, dans l'organisation, enseigne. Comme l'horaire, il
+	// est branché plutôt que retenu : c'est ce qui permet de ne pas prendre
+	// pour une remise ce qu'un enseignant a poussé dans le dépôt d'un étudiant.
+	enseignants Teachers
 }
 
 // Validate met le groupe en forme et refuse ce qui ne peut pas nommer un dépôt.
@@ -495,7 +499,8 @@ type Assignment struct {
 	Others   int    `json:"others"`   // dépôts dont le destinataire est inconnu
 	// Kind vaut « équipe » dès qu'un dépôt du travail porte le nom d'une équipe
 	// du groupe, « individuel » sinon.
-	Kind     string `json:"kind"`
+	Kind string `json:"kind"`
+	// PushedAt est le plus récent envoi de ses dépôts, à l'heure de la machine.
 	PushedAt string `json:"pushed_at"`
 	// Due est la date cible du travail, sous sa forme normale. Vide, le
 	// travail n'a pas d'échéance et rien n'est jamais en retard.
@@ -555,8 +560,8 @@ func (c Classroom) Assignments(repos []groups.RepoInfo, equipes []teams.Team) []
 		default:
 			travail.Others++
 		}
-		if repo.PushedAt > travail.PushedAt {
-			travail.PushedAt = repo.PushedAt
+		if envoi := valid.Moment(repo.PushedAt); envoi > travail.PushedAt {
+			travail.PushedAt = envoi
 		}
 	}
 
@@ -650,13 +655,9 @@ func (c Classroom) Repos(assignmentID string, repos []groups.RepoInfo) []groups.
 		if !strings.EqualFold(id, assignmentID) {
 			continue
 		}
-		pushed := repo.PushedAt
-		if len(pushed) > 10 {
-			pushed = pushed[:10]
-		}
 		trouves = append(trouves, groups.Repo{
 			Name: repo.Name, Suffix: parts.Student, Private: repo.Private,
-			URL: repo.HTMLURL, PushedAt: pushed,
+			URL: repo.HTMLURL, PushedAt: valid.Moment(repo.PushedAt),
 		})
 	}
 	sort.Slice(trouves, func(i, j int) bool {

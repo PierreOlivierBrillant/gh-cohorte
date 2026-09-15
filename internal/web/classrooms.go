@@ -862,6 +862,11 @@ type assignmentRepo struct {
 	Last    string          `json:"last,omitempty"`
 	Late    bool            `json:"late"`
 	Silent  []roster.Person `json:"silent,omitempty"`
+	// State résume les champs ci-dessus d'un mot — « remis », « en retard »,
+	// « non accepté »… C'est ce qu'une pastille montre et ce sur quoi le
+	// filtre porte ; le décider ici plutôt qu'au navigateur est ce qui lui
+	// fait dire la même chose qu'au terminal.
+	State string `json:"state"`
 	// Access dit qui a accès au dépôt, quand on l'a déjà inspecté. Absent, on
 	// n'a pas encore regardé — ce qui n'est pas la même chose qu'aucun accès.
 	Access *identity.Access `json:"access,omitempty"`
@@ -943,6 +948,11 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 	remises := s.remisesConnues(cours.Org, tous)
 	acces := s.resolver(cours.Org).Accesses(cours.Org, tous, identity.Cached, nil)
 	echeance, _ := valid.ParseDue(cours.DueOf(id))
+	remiseVoulue, err := classroom.ParseHandinState(request.URL.Query().Get("handin"))
+	if err != nil {
+		fail(writer, err)
+		return
+	}
 
 	lignes := make([]assignmentRepo, 0, len(retenues))
 	for _, retenue := range retenues {
@@ -952,13 +962,23 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 			Visibility: repo.Visibility(), URL: s.urlOf(cours.Org, repo),
 			PushedAt: repo.PushedAt,
 		}
-		if remise, releve := remises[repo.Name]; releve {
-			bilan := cours.Review(repo.Name, remise, echeance, equipes)
+		var bilan classroom.Review
+		remise, releve := remises[repo.Name]
+		if releve {
+			bilan = cours.Review(repo.Name, remise, echeance, equipes)
 			ligne.Seen, ligne.Commits = true, bilan.Commits
 			ligne.Last, ligne.Late, ligne.Silent = bilan.Last, bilan.Late, bilan.Silent
 		}
-		if connu, inspecte := acces[repo.Name]; inspecte {
+		connu, inspecte := acces[repo.Name]
+		if inspecte {
 			ligne.Access = &connu
+		}
+		// Sans accès relevés, une invitation en attente ne se voit pas : l'état
+		// dit alors ce que l'historique seul permet de dire.
+		attend := cours.Awaiting(repo.Name, equipes, connu.Pending())
+		ligne.State = string(classroom.StateOf(bilan, releve, attend))
+		if !remiseVoulue.Keep(classroom.HandinState(ligne.State)) {
+			continue
 		}
 		if equipe, appartient := cours.TeamOf(repo.Name, equipes); appartient {
 			ligne.FullName, ligne.Team = equipe.Label(), equipe.Short

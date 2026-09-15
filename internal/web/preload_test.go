@@ -50,11 +50,11 @@ func (h *harnais) attendreLaPreparation(place, nom string) []ligneDeTravail {
 func TestLesCoursDeLaSessionEnCoursSePreparentEnArrierePlan(t *testing.T) {
 	state := fakegh.NewState()
 	recent := state.AddRepo("acme", "h27.5n6.01.tp1.emilie-cote", true)
-	recent.History = []string{"2027-02-05T14:00:00Z", "2027-02-01T09:00:00Z"}
+	recent.History = fakegh.Commits("2027-02-05T14:00:00Z", "2027-02-01T09:00:00Z")
 	state.AddCollaborator("acme/h27.5n6.01.tp1.emilie-cote", "ecote", "push")
 
 	ancien := state.AddRepo("acme", "a26.5n6.01.tp1.jean-luc-picard", true)
-	ancien.History = []string{"2026-10-05T14:00:00Z"}
+	ancien.History = fakegh.Commits("2026-10-05T14:00:00Z")
 	state.AddCollaborator("acme/a26.5n6.01.tp1.jean-luc-picard", "jlpicard", "push")
 
 	h := avantLeRegistre(t, state,
