@@ -35,15 +35,21 @@ const (
 
 // Settings rassemble les paramètres d'une campagne de génération.
 type Settings struct {
-	Org                string  `json:"org"`
-	Assignment         string  `json:"assignment"`
-	NamePattern        string  `json:"name_pattern"`
-	DescriptionPattern string  `json:"description_pattern"`
-	Template           string  `json:"template"` // « owner/repo » ; vide = dépôt neuf
-	Visibility         string  `json:"visibility"`
-	Permission         string  `json:"permission"`
-	AddCollaborator    bool    `json:"add_collaborator"`
-	VerifyAccounts     bool    `json:"verify_accounts"`
+	Org                string `json:"org"`
+	Assignment         string `json:"assignment"`
+	NamePattern        string `json:"name_pattern"`
+	DescriptionPattern string `json:"description_pattern"`
+	Template           string `json:"template"` // « owner/repo » ; vide = dépôt neuf
+	Visibility         string `json:"visibility"`
+	Permission         string `json:"permission"`
+	AddCollaborator    bool   `json:"add_collaborator"`
+	VerifyAccounts     bool   `json:"verify_accounts"`
+	// NoSign renonce à la marque invisible déposée dans le README de chaque
+	// dépôt. Le réglage est écrit à l'envers — « ne pas signer » plutôt que
+	// « signer » — pour qu'un fichier de réglages écrit avant qu'elle existe se
+	// relise avec la signature active : c'est ce qu'on veut par défaut, et un
+	// booléen absent vaut faux.
+	NoSign             bool    `json:"no_sign,omitempty"`
 	IncludeAllBranches bool    `json:"include_all_branches"`
 	DelaySeconds       float64 `json:"delay_seconds"` // marge entre deux créations
 	RosterPath         string  `json:"roster_path"`

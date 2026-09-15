@@ -16,6 +16,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -52,7 +53,11 @@ type Result struct {
 	URL          string `json:"url"`
 	Collaborator string `json:"collaborator"`
 	Starter      string `json:"starter"`
-	Error        string `json:"error"`
+	// Signature est la marque invisible déposée dans le dépôt, sous sa forme
+	// lisible. Vide, le dépôt n'a pas été signé — et le champ dit alors
+	// pourquoi dans Error, quand c'est un échec plutôt qu'un choix.
+	Signature string `json:"signature,omitempty"`
+	Error     string `json:"error"`
 }
 
 // Failed indique un traitement en échec.
@@ -136,6 +141,38 @@ func (r *Report) Save(directory string) (string, string, error) {
 	return jsonPath, csvPath, nil
 }
 
+// Signatures rend les marques délivrées, prêtes à monter au registre.
+//
+// Elles n'y montent pas d'elles-mêmes : c'est l'appelant qui décide, parce que
+// c'est lui qui sait dans quelle organisation et pour quel travail. Une marque
+// qu'on ne verserait pas resterait dans le dépôt sans que personne ne puisse
+// dire de qui elle est — la détection la verrait encore en double, mais
+// s'arrêterait là.
+func (r *Report) Signatures(assignment string) []signature.Issued {
+	delivrees := make([]signature.Issued, 0, len(r.Results))
+	for _, result := range r.Results {
+		if result.Signature == "" || result.Username == "" {
+			continue
+		}
+		delivrees = append(delivrees, signature.Issued{
+			Assignment: assignment, Username: result.Username,
+			Token: result.Signature, IssuedAt: r.StartedAt,
+		})
+	}
+	return delivrees
+}
+
+// Signed compte les dépôts signés.
+func (r *Report) Signed() int {
+	compte := 0
+	for _, result := range r.Results {
+		if result.Signature != "" {
+			compte++
+		}
+	}
+	return compte
+}
+
 // ProgressFunc est appelée après chaque dépôt traité.
 type ProgressFunc func(index, total int, result Result)
 
@@ -143,7 +180,11 @@ type ProgressFunc func(index, total int, result Result)
 type Options struct {
 	DryRun       bool
 	ForceStarter bool
-	OnProgress   ProgressFunc
+	// Sign dépose dans le README de chaque dépôt une marque invisible, propre à
+	// son destinataire. Deux travaux qui portent la même marque n'ont pas
+	// d'explication innocente ; l'absence de marque, elle, ne prouve rien.
+	Sign       bool
+	OnProgress ProgressFunc
 	// TeacherTeam est l'équipe enseignante du groupe, quand il est cloisonné.
 	// Chaque dépôt créé lui est accordé d'emblée : sans cela, un groupe
 	// cloisonné se décloisonnerait tout seul à la distribution suivante, et
@@ -295,6 +336,17 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 		}
 	}
 
+	// On ne signe que ce qu'on vient d'écrire : un dépôt créé à l'instant, ou
+	// un dépôt dont les fichiers de départ viennent d'être déposés. Un travail
+	// déjà remis n'est jamais réécrit — c'est l'invariant de tout le reste de
+	// l'outil, et une marque invisible n'est pas une raison d'y déroger.
+	ecrit := result.Status == Created ||
+		(e.starter != nil && result.Starter != StarterNone &&
+			result.Starter != StarterSkipped && result.Starter != StarterFailed)
+	if options.Sign && !options.DryRun && ecrit {
+		e.sign(item, &result, branch)
+	}
+
 	if !e.settings.AddCollaborator {
 		return result
 	}
@@ -413,3 +465,41 @@ func (e *Executor) create(item plan.PlannedRepo, templateOwner, templateRepo str
 	return e.client.CreateOrgRepo(e.settings.Org, item.Name, e.settings.Private(),
 		item.Description, e.starter == nil)
 }
+
+// sign dépose la marque invisible dans le README du dépôt.
+//
+// Elle est écrite dans le fichier qui existe, jamais dans un fichier créé pour
+// l'occasion : déposer un README que personne n'a demandé serait une
+// modification visible du travail, pour une marque qui se veut invisible. Un
+// dépôt sans README n'est donc pas signé, et le bilan le dit.
+//
+// Un échec n'arrête rien. Le dépôt est créé, l'étudiant peut travailler ; ce
+// qui manque est un signal de plus dans une détection qui n'en dépend pas.
+func (e *Executor) sign(item plan.PlannedRepo, result *Result, branch string) {
+	org := e.settings.Org
+	fichier, err := e.client.ReadFile(org, item.Name, signature.ReadmeFile, branch)
+	if err != nil || fichier == nil {
+		result.Signature = ""
+		return
+	}
+	token, err := signature.New()
+	if err != nil {
+		return
+	}
+	// L'API Git plutôt que celle des contenus : la seconde exige le « sha » du
+	// fichier qu'elle remplace, et le README existe forcément ici. La première
+	// superpose sur l'arbre du parent, ce que fait déjà le dépôt des fichiers
+	// de départ.
+	signe := signature.Sign(fichier.Content, token)
+	if _, err := e.client.PushFiles(org, item.Name, []ghapi.PushFile{{
+		Path: signature.ReadmeFile, Mode: "100644", Content: signe,
+	}}, SignMessage, branch); err != nil {
+		return
+	}
+	result.Signature = signature.Text(token)
+}
+
+// SignMessage est le message du commit qui dépose la marque. Il ne dit pas ce
+// qu'il fait : un message « ajoute une signature invisible » la rendrait
+// parfaitement visible dans l'historique.
+const SignMessage = "Prépare le dépôt"
