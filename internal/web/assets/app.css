@@ -1184,3 +1184,89 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 
 /* Une pile de cases à cocher qui respire, pour composer une équipe. */
 .pile-cases { display: flex; flex-direction: column; gap: .3rem; }
+
+/* ------------------------------------------------------------- plagiat */
+
+/* L'avertissement n'est pas décoratif. Un outil qui mesure des ressemblances
+   et qu'on prend pour un juge fait des dégâts réels sur des personnes réelles :
+   il tient donc la largeur, en haut, sur chaque écran, et ne se replie pas. */
+.avertissement {
+  margin: 0 0 1rem;
+  padding: .7rem .9rem;
+  border: 1px solid var(--alerte);
+  border-left-width: 4px;
+  border-radius: var(--rayon);
+  background: var(--alerte-fond);
+  color: var(--texte);
+  font-size: .875rem;
+}
+
+.souple { flex: 1 1 18rem; min-width: 0; }
+.pl-bascule { align-self: flex-end; padding-bottom: .4rem; }
+.pl-avance { margin-bottom: 1rem; }
+.pl-avance > summary {
+  padding: .6rem .9rem; cursor: pointer; font-weight: 600; font-size: .9rem;
+}
+.pl-graphiques > .boite { flex: 1 1 22rem; }
+.pl-curseur { width: 100%; }
+
+/* Les jetons de langage se cochent : une case par langage serait une colonne
+   de treize lignes, et l'écran en a déjà beaucoup. */
+.pl-jeton-case {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .2rem .5rem; border: 1px solid var(--bord); border-radius: 999px;
+  font-size: .8125rem; cursor: pointer; background: var(--fond-doux);
+}
+.pl-jeton-case.coche { border-color: var(--lien); background: var(--fond-creux); }
+
+/* Le tableau des paires et des fichiers écartés. */
+.pl-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.pl-table th, .pl-table td {
+  text-align: left; padding: .45rem .9rem; border-top: 1px solid var(--bord);
+  vertical-align: top;
+}
+.pl-table th { color: var(--texte-doux); font-weight: 600; border-top: 0; }
+.pl-table tbody tr.cliquable { cursor: pointer; }
+.pl-table tbody tr.cliquable:hover { background: var(--fond-doux); }
+.pl-table td.chiffre { text-align: right; font-variant-numeric: tabular-nums; }
+.pl-au-dessus { color: var(--erreur); font-weight: 600; }
+.pl-chemin { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8125rem; }
+
+/* Histogramme et nuage : du SVG écrit à la main. Aucune bibliothèque n'est
+   chargée depuis l'extérieur — l'interface doit fonctionner hors ligne. */
+.pl-graphique { width: 100%; height: auto; display: block; }
+.pl-barre { fill: var(--fond-creux); }
+.pl-barre.haute { fill: var(--orange); }
+.pl-seuil-trait { stroke: var(--erreur); stroke-width: 2; stroke-dasharray: 4 3; }
+.pl-axe { stroke: var(--bord); stroke-width: 1; }
+.pl-legende { fill: var(--texte-doux); font-size: 10px; }
+.pl-point { fill: var(--lien); fill-opacity: .65; }
+.pl-point.haute { fill: var(--erreur); fill-opacity: .8; }
+
+/* Deux fichiers côte à côte. Sur un écran étroit ils s'empilent : mieux vaut
+   faire défiler que lire deux colonnes de trente caractères. */
+.pl-cote-a-cote { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+@media (max-width: 60rem) { .pl-cote-a-cote { grid-template-columns: 1fr; } }
+
+.pl-code {
+  margin: 0; padding: .75rem .9rem; overflow: auto; max-height: 70vh;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .8125rem; line-height: 1.55; white-space: pre; tab-size: 4;
+}
+/* Ce qui est commun se surligne ; ce qui ne l'est pas se fane. Les deux
+   lectures existent parce qu'elles ne répondent pas à la même question :
+   « qu'est-ce qui se ressemble » et « qu'est-ce qui a été changé ». */
+.pl-commun { background: var(--alerte-fond); border-radius: 3px; }
+.pl-commun.vise { background: var(--orange-fond); outline: 2px solid var(--orange); }
+.pl-fane { opacity: .35; }
+.pl-jetons-flux { display: flex; flex-wrap: wrap; gap: .15rem; white-space: normal; }
+.pl-jeton-brut {
+  padding: 0 .2rem; border-radius: 3px; background: var(--fond-creux);
+  font-size: .75rem;
+}
+.pl-jeton-brut.identifiant { background: var(--fond-doux); color: var(--texte-doux); }
+.pl-jeton-brut.mot-cle { background: var(--fond-creux); font-weight: 600; }
+
+/* Une règle tient sur une ligne : un nom, ses équivalents, son libellé. */
+.pl-regle { align-items: flex-end; margin-bottom: .6rem; }
+.pl-regle .champ-bloc { min-width: 8rem; }

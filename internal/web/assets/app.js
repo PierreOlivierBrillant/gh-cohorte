@@ -326,6 +326,15 @@ const etat = {
   etape: 1,
 };
 
+// plagiat garde ce que l'écran de comparaison est en train de regarder : un
+// rapport, une paire, deux fichiers. Rien n'y est recalculé — le rapport est un
+// fichier, et l'écran n'en est qu'une lecture.
+etat.plagiat = {
+  options: null, rapport: '', donnees: null, apercu: null,
+  gauche: '', droite: '', cheminG: '', cheminD: '', archives: [], indexes: [],
+  paire: null, fichier: null, seuil: null, mode: 'commun', fragment: 0,
+};
+
 // ------------------------------------------------------- opérations et journal
 
 let operationCourante = null;
@@ -507,7 +516,7 @@ function demander(titre, contenu, libelle = 'Confirmer', preparer = null) {
 
 // Les vues d'un groupe partagent ses onglets.
 const ongletDeLaVue = {
-  travaux: 'travaux', travail: 'travaux', assistant: 'travaux',
+  travaux: 'travaux', travail: 'travaux', assistant: 'travaux', plagiat: 'travaux',
   etudiants: 'etudiants', equipes: 'equipes', 'groupe-reglages': 'groupe-reglages',
 };
 
@@ -567,6 +576,17 @@ function cheminDeLaVue(nom) {
     case 'groupe-reglages': return `/g/${groupe}/reglages`;
     case 'travail':
       return `/g/${groupe}/travaux/${encode(etat.travail ? etat.travail.name : '')}`;
+    case 'plagiat':
+      return `/g/${groupe}/travaux/${encode(etat.travail ? etat.travail.name : '')}/plagiat`;
+    case 'plagiat-regles': return '/plagiat/regles';
+    case 'plagiat-rapport': return `/plagiat/${encode(etat.plagiat.rapport || '')}`;
+    case 'plagiat-paire':
+      return `/plagiat/${encode(etat.plagiat.rapport || '')}/paire/`
+        + `${encode(etat.plagiat.gauche || '')}/${encode(etat.plagiat.droite || '')}`;
+    case 'plagiat-fichier':
+      return `/plagiat/${encode(etat.plagiat.rapport || '')}/fichier/`
+        + `${encode(etat.plagiat.gauche || '')}/${encode(etat.plagiat.droite || '')}/`
+        + `${encode(etat.plagiat.cheminG || '')}/${encode(etat.plagiat.cheminD || '')}`;
     default: {
       const { session, cours } = etat.parcours;
       if (!session) return '/';
@@ -586,8 +606,19 @@ function lireAdresse() {
       return { vue: 'parcours', session: morceaux[1] || '', cours: morceaux[2] || '' };
     case 'g':
       return {
-        vue: vueDuGroupe(morceaux[2]), groupe: morceaux[1] || '',
-        travail: morceaux[3] || '',
+        // Un cinquième niveau ne peut désigner que la préparation d'une
+        // analyse : elle appartient au travail, et son adresse le dit.
+        vue: morceaux[4] === 'plagiat' ? 'plagiat' : vueDuGroupe(morceaux[2]),
+        groupe: morceaux[1] || '', travail: morceaux[3] || '',
+      };
+    case 'plagiat':
+      if (morceaux[1] === 'regles') return { vue: 'plagiat-regles' };
+      return {
+        vue: morceaux[2] === 'paire' ? 'plagiat-paire'
+          : morceaux[2] === 'fichier' ? 'plagiat-fichier' : 'plagiat-rapport',
+        rapport: morceaux[1] || '',
+        gauche: morceaux[3] || '', droite: morceaux[4] || '',
+        cheminG: morceaux[5] || '', cheminD: morceaux[6] || '',
       };
     case 'utilisateurs':
       return { vue: 'annuaire' };
@@ -629,6 +660,13 @@ async function allerA(route) {
     afficherVue('fiche', true);
     return;
   }
+  // Un rapport de plagiat n'appartient à aucun groupe : c'est un fichier, et
+  // son adresse suffit à l'ouvrir — depuis un autre poste comme au retour d'un
+  // lien collé.
+  if (route.vue && route.vue.startsWith('plagiat-')) {
+    await allerAuPlagiat(route);
+    return;
+  }
   if (!ongletDeLaVue[route.vue]) {
     // Une adresse peut ouvrir un écran directement : il faut alors le remplir
     // comme le ferait le bouton qui y mène.
@@ -651,12 +689,15 @@ async function allerA(route) {
       return;
     }
   }
-  if (route.vue !== 'travail') { afficherVue(route.vue, true); return; }
+  if (route.vue !== 'travail' && route.vue !== 'plagiat') {
+    afficherVue(route.vue, true); return;
+  }
 
   const travail = (etat.groupe.assignments || []).find((item) =>
     item.name.toLowerCase() === (route.travail || '').toLowerCase());
   if (!travail) { afficherVue('travaux', true); return; }
   await ouvrirTravail(travail, false, true);
+  if (route.vue === 'plagiat') await preparerPlagiat(true);
 }
 
 // naviguer pose une adresse sans changer de vue : les déplacements internes à
@@ -820,6 +861,14 @@ function ficheDeLEntete(nom) {
       sousTitre: "Ce que l'outil retient d'une session à l'autre, et où il l'écrit." };
   }
 
+  // Les écrans de comparaison n'appartiennent à aucun groupe : un rapport est
+  // un fichier, et il se rouvre sans qu'un groupe soit ouvert. Leur donner le
+  // fil d'un groupe ferait afficher « 0 étudiant » sous un rapport de trois
+  // cents copies.
+  if (nom.startsWith('plagiat-')) {
+    return enteteDeComparaison(nom, racine);
+  }
+
   // Les vues d'un groupe : le fil remonte toute la hiérarchie.
   const groupe = etat.groupe || {};
   const fil = [racine];
@@ -892,6 +941,50 @@ $('accueil').addEventListener('click', () => {
   afficherVue('parcours');
 });
 $('ouvrir-reglages').addEventListener('click', () => afficherVue('reglages'));
+
+// enteteDeComparaison compose le fil d'Ariane des écrans de comparaison.
+function enteteDeComparaison(nom, racine) {
+  if (nom === 'plagiat-regles') {
+    return {
+      fil: [racine, { texte: 'Règles de comparaison' }],
+      titre: 'Règles de comparaison',
+      sousTitre: 'Ce que le département sait et que l’outil ne peut pas deviner.',
+    };
+  }
+
+  const rapport = etat.plagiat.donnees;
+  const travail = (rapport && rapport.assignment) || 'comparaison';
+  const auRapport = { texte: travail, action: () => afficherVue('plagiat-rapport') };
+  if (nom === 'plagiat-rapport') {
+    return {
+      fil: [racine, { texte: travail }], titre: `Comparaison — ${travail}`,
+      sousTitre: rapport
+        ? `${rapport.works.length} copie(s) · analyse du `
+          + `${(rapport.created_at || '').slice(0, 10)}`
+        : '',
+    };
+  }
+
+  const paire = etat.plagiat.paire;
+  const cotes = paire
+    ? `${nomDeCopie(paire.project.left)} et ${nomDeCopie(paire.project.right)}`
+    : 'deux copies';
+  if (nom === 'plagiat-paire') {
+    return {
+      fil: [racine, auRapport, { texte: cotes }], titre: cotes,
+      sousTitre: 'Les deux projets, et ce qui les relie.',
+    };
+  }
+  return {
+    fil: [racine, auRapport,
+      { texte: cotes, action: () => afficherVue('plagiat-paire') },
+      { texte: etat.plagiat.cheminG || 'fichiers' }],
+    titre: cotes,
+    sousTitre: etat.plagiat.fichier
+      ? `${etat.plagiat.fichier.left.path} et ${etat.plagiat.fichier.right.path}`
+      : 'Deux fichiers, passage par passage.',
+  };
+}
 
 // ------------------------------------------------ parcours de la hiérarchie
 
@@ -1711,6 +1804,14 @@ function commandeDuTravail(bouton, action) {
 // renomme : il n'y a pas à retourner à la liste pour le cocher.
 commandeDuTravail('detail-deplacer', (travail) => deplacerTravaux([travail]));
 commandeDuTravail('detail-renommer', (travail) => renommerTravail(travail));
+
+// Comparer les copies entre elles. L'écran de préparation vient d'abord : il
+// montre ce qui sera comparé et ce que cela coûtera, parce qu'une analyse
+// lancée à l'aveugle sur cinq ans de dépôts se termine mal.
+$('detail-plagiat').addEventListener('click', () => {
+  menuTravail.deplier(false);
+  tenter(() => preparerPlagiat(), 'Comparaison des copies');
+});
 
 // Relever les remises du seul travail ouvert : c'est le geste courant — on
 // regarde un travail la veille de sa date cible, pas un groupe entier.
@@ -6142,3 +6243,1443 @@ function ecrireReglagesGeneraux() {
 }
 
 demarrer();
+
+// ============================================================ plagiat
+//
+// Comparer les copies d'un travail entre elles. Quatre écrans, et chacun répond
+// à une question différente : qu'est-ce qui sera comparé, qu'est-ce qui ressort,
+// qu'ont ces deux projets en commun, et où exactement.
+//
+// Rien de ce qui suit ne décide quoi que ce soit. Le seuil, les motifs
+// d'écartement, l'avertissement, les langages : tout vient du serveur, qui le
+// tient des paquets du domaine. C'est ce qui garantit que l'assistant du
+// terminal dira la même chose, avec les mêmes mots.
+
+// ---------------------------------------------------------- préparation
+
+// chargerOptionsPlagiat va chercher une fois les profils, les langages et les
+// exclusions d'office. La page n'en code aucun : un profil ajouté par
+// l'organisation y paraîtra sans qu'on touche à ce fichier.
+async function chargerOptionsPlagiat() {
+  if (etat.plagiat.options) return etat.plagiat.options;
+  etat.plagiat.options = await api('GET', '/api/plagiat/options');
+  return etat.plagiat.options;
+}
+
+async function preparerPlagiat(sansHistorique) {
+  const options = await chargerOptionsPlagiat();
+  const travail = etat.travail;
+  if (!travail) return;
+
+  $('pl-titre').textContent = `Comparer les copies de « ${travail.name} »`;
+  $('pl-sous-titre').textContent = etat.groupe.label || etat.groupe.scope;
+  $('pl-avertissement').textContent = options.disclaimer;
+
+  const profil = $('pl-profil');
+  if (!profil.options.length) {
+    for (const item of options.profiles) {
+      profil.append(el('option', { value: item.id, texte: item.label }));
+    }
+    profil.value = options.defaults.profile;
+    profil.addEventListener('change', () => { dessinerNoteProfil(); videApercu(); });
+
+    const portee = $('pl-portee');
+    for (const item of options.reaches) {
+      portee.append(el('option', { value: item.id, texte: item.label }));
+    }
+    portee.value = options.defaults.reach;
+    portee.addEventListener('change', () => { dessinerNotePortee(); videApercu(); });
+
+    const langages = $('pl-langages');
+    for (const langue of options.languages) {
+      const case_ = el('input', { type: 'checkbox', value: langue.id });
+      case_.addEventListener('change', () => {
+        case_.parentElement.classList.toggle('coche', case_.checked);
+        videApercu();
+      });
+      langages.append(el('label', { classe: 'pl-jeton-case' }, case_,
+        el('span', { texte: langue.label })));
+    }
+    for (const champ of ['pl-only', 'pl-ignore', 'pl-kgram', 'pl-window', 'pl-noise']) {
+      $(champ).addEventListener('input', videApercu);
+    }
+    $('pl-noise').placeholder = String(Math.round(options.defaults.noise * 100));
+  }
+  dessinerNoteProfil();
+  dessinerNotePortee();
+  $('pl-ecarte-doffice').textContent = 'Écartés d’office, quoi qu’on choisisse : '
+    + resumeExclusions(options.excluded);
+  videApercu();
+  dessinerCollegues();
+  dessinerArchives();
+  vider($('pl-envoi-resultat'));
+  afficherVue('plagiat', sansHistorique);
+  dessinerAnalysesPassees();
+}
+
+// dessinerAnalysesPassees liste les rapports déjà produits sur ce poste.
+//
+// Un rapport est un fichier : le rouvrir ne relance rien, ne coûte aucune
+// requête à GitHub, et montre exactement ce qui avait été mesuré ce jour-là.
+async function dessinerAnalysesPassees() {
+  const zone = $('pl-apercu-resultat');
+  const liste = await api('GET', '/api/plagiat/reports').catch(() => null);
+  if (!liste || !(liste.reports || []).length) return;
+
+  const corps = el('div', { classe: 'boite-corps' });
+  for (const rapport of liste.reports) {
+    if (rapport.error) {
+      corps.append(el('p', { classe: 'note', texte: `${rapport.name} — ${rapport.error}` }));
+      continue;
+    }
+    corps.append(el('div', {},
+      el('button', {
+        type: 'button', classe: 'lien',
+        texte: `${rapport.assignment || rapport.name} — `
+          + `${(rapport.created_at || '').slice(0, 16).replace('T', ' à ')}`,
+        onclick: () => tenter(() => ouvrirRapportPlagiat(rapport.name), 'Rapport'),
+      }),
+      el('span', {
+        classe: 'note',
+        texte: ` — ${rapport.works} copie(s), ${rapport.matches} paire(s)`
+          + (rapport.problems ? `, ${rapport.problems} dépôt(s) non analysés` : ''),
+      })));
+  }
+  zone.append(el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-entete' },
+      el('strong', { texte: 'Analyses déjà faites sur ce poste' })), corps));
+}
+
+// resumeExclusions dit en une ligne ce qui ne sera jamais comparé. Le détail
+// tiendrait une page ; ce qu'il faut, c'est qu'on ne se demande pas pourquoi un
+// dossier manque.
+function resumeExclusions(exclus) {
+  const compte = (liste) => (liste || []).length;
+  return `${compte(exclus.directories)} dossiers d’outillage (node_modules, `
+    + `target, .git…), ${compte(exclus.locks)} fichiers de verrouillage, `
+    + `${compte(exclus.generated)} formes de fichiers engendrés, et tout binaire `
+    + `(${compte(exclus.binary)} extensions, plus ce que le contenu trahit).`;
+}
+
+function dessinerNoteProfil() {
+  const options = etat.plagiat.options;
+  const choisi = (options.profiles || []).find((item) => item.id === $('pl-profil').value);
+  $('pl-profil-note').textContent = choisi ? (choisi.note || '') : '';
+}
+
+// dessinerNotePortee dit ce qu'une portée large coûte, et ce dont elle dépend.
+//
+// Comparer plusieurs années trouve autre chose qu'un groupe comparé à lui-même
+// — le travail d'un ancien qui circule — mais cela ne marche que si les
+// changements de sigle ont été déclarés. Le dire ici évite de chercher pourquoi
+// une analyse « sur toutes les sessions » n'a rien ramené.
+function dessinerNotePortee() {
+  const regles = etat.plagiat.options.rules || {};
+  const cours = (regles.courses || []).length;
+  switch ($('pl-portee').value) {
+    case 'annees':
+      $('pl-portee-note').textContent = cours
+        ? `Les sigles équivalents déclarés par l'organisation sont appliqués `
+          + `(${cours} cours). Comparer plusieurs années coûte beaucoup plus `
+          + `cher : l'estimation le dira.`
+        : 'Aucune équivalence de sigle n’est déclarée : un cours qui a changé '
+          + 'de sigle ne sera pas retrouvé. Voyez « Règles de comparaison ».';
+      break;
+    case 'cours':
+      $('pl-portee-note').textContent =
+        'Tous les groupes de ce cours, cette session : de quoi voir ce qui '
+        + 'circule entre deux sections.';
+      break;
+    default:
+      $('pl-portee-note').textContent = '';
+  }
+}
+
+// videApercu efface un aperçu devenu faux. Montrer ce qu'un réglage précédent
+// retenait serait pire que ne rien montrer.
+function videApercu() {
+  etat.plagiat.apercu = null;
+  vider($('pl-apercu-resultat'));
+}
+
+// reglagePlagiat rassemble ce que l'écran demande.
+function reglagePlagiat() {
+  const langages = [...$('pl-langages').querySelectorAll('input:checked')]
+    .map((item) => item.value);
+  const decouper = (texte) => texte.split(',').map((item) => item.trim()).filter(Boolean);
+  const nombre = (id) => {
+    const valeur = Number($(id).value);
+    return Number.isFinite(valeur) && valeur > 0 ? valeur : 0;
+  };
+  return {
+    reach: $('pl-portee').value,
+    archives: etat.plagiat.archives || [],
+    indexes: etat.plagiat.indexes || [],
+    profile: $('pl-profil').value,
+    languages: langages,
+    include: decouper($('pl-only').value),
+    exclude: decouper($('pl-ignore').value),
+    kgram: nombre('pl-kgram'),
+    window: nombre('pl-window'),
+    noise: nombre('pl-noise') / 100,
+    baseline: $('pl-gabarit').checked,
+  };
+}
+
+function cheminTravail(suffixe) {
+  return `/api/classrooms/${encode(etat.groupe.scope)}`
+    + `/assignments/${encode(etat.travail.name)}/plagiat${suffixe}`;
+}
+
+$('pl-apercu').addEventListener('click', () => tenter(async () => {
+  const apercu = await api('POST', cheminTravail('/preview'), reglagePlagiat());
+  etat.plagiat.apercu = apercu;
+  dessinerApercu(apercu);
+}, 'Aperçu'));
+
+// dessinerApercu montre ce qui entre, ce qui sort, et ce que ça coûtera.
+//
+// Les trois vont ensemble. Voir qu'un profil ne retient rien avant de lancer
+// épargne dix minutes ; voir qu'une analyse demandera quatre gigaoctets avant
+// de la lancer sur un runner qui en offre sept épargne un échec sans résultat.
+function dessinerApercu(apercu) {
+  const zone = $('pl-apercu-resultat');
+  vider(zone);
+  const places = apercu.places || [];
+  if (places.length > 1) {
+    zone.append(el('p', {
+      classe: 'note',
+      texte: `${apercu.repos} copies, venues de ${places.length} places : `
+        + `${places.join(', ')}.`,
+    }));
+  }
+  $('pl-gabarit-nom').textContent = apercu.baseline
+    ? `Modèle du groupe : ${apercu.baseline}.`
+    : 'Aucun modèle n’est déclaré pour ce groupe : rien à écarter de ce côté.';
+
+  zone.append(boiteEstimation(apercu.estimate, apercu.repos));
+  for (const echantillon of apercu.samples) {
+    zone.append(boiteEchantillon(echantillon));
+  }
+}
+
+function boiteEstimation(estimation, depots) {
+  const corps = el('div', { classe: 'boite-corps' });
+  corps.append(el('p', {
+    classe: 'note',
+    texte: `Mesuré sur ${estimation.sampled} dépôt(s), rapporté à ${depots} : `
+      + `${estimation.pairs} paires, ${estimation.files} fichiers retenus, `
+      + `${octets(estimation.download)} à télécharger, ${octets(estimation.bytes)} `
+      + `de code analysé, ${octets(estimation.memory)} de mémoire, environ `
+      + `${duree(estimation.seconds)}.`,
+  }));
+  for (const avertissement of estimation.warnings || []) {
+    corps.append(el('p', { classe: 'avertissement', texte: avertissement }));
+  }
+  if ((estimation.remedies || []).length) {
+    corps.append(el('h3', { texte: 'Pour alléger' }));
+    const liste = el('div', { classe: 'liste-choix' });
+    for (const remede of estimation.remedies) {
+      const bouton = el('button', {
+        type: 'button', classe: 'bouton petit',
+        texte: `${remede.label} — ${Math.round(remede.saves * 100)} %`,
+        onclick: () => appliquerRemede(remede),
+      });
+      liste.append(el('div', {}, bouton,
+        el('span', { classe: 'aide', texte: ' ' + remede.detail })));
+    }
+    corps.append(liste);
+  }
+  const titre = estimation.fits
+    ? 'Ce que l’analyse coûtera'
+    : 'Ce que l’analyse coûterait — au-delà de ce qui est prévu';
+  return el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-entete' }, el('strong', { texte: titre })), corps);
+}
+
+// appliquerRemede applique un allègement proposé, puis efface l'aperçu : les
+// chiffres qu'il portait ne valent plus pour ce réglage-là.
+function appliquerRemede(remede) {
+  if (remede.profile) $('pl-profil').value = remede.profile;
+  if (remede.window) $('pl-window').value = String(remede.window);
+  if (remede.languages) {
+    const voulus = new Set(remede.languages);
+    for (const case_ of $('pl-langages').querySelectorAll('input')) {
+      case_.checked = voulus.has(case_.value);
+      case_.parentElement.classList.toggle('coche', case_.checked);
+    }
+  }
+  dessinerNoteProfil();
+  videApercu();
+  message('Réglage appliqué. Relancez l’aperçu pour le mesurer.', 'info');
+}
+
+function boiteEchantillon(echantillon) {
+  const entete = el('div', { classe: 'boite-entete' },
+    el('strong', { texte: echantillon.repo }));
+  if (echantillon.problem) {
+    return el('div', { classe: 'boite' }, entete,
+      el('div', { classe: 'boite-corps' },
+        el('p', { classe: 'avertissement', texte: `${echantillon.problem.reason} — `
+          + `${echantillon.problem.detail || ''}` })));
+  }
+  entete.append(el('span', { classe: 'espace' }));
+  entete.append(el('span', {
+    classe: 'note',
+    texte: `${echantillon.kept.length} retenu(s), ${echantillon.skipped.length} écarté(s)`
+      + (emballage(echantillon.root) ? ` — projet sous « ${emballage(echantillon.root)} »` : ''),
+  }));
+
+  const table = el('table', { classe: 'pl-table' },
+    el('thead', {}, el('tr', {},
+      el('th', { texte: 'Fichier' }), el('th', { texte: 'Sort' }))));
+  const corps = el('tbody');
+  for (const fichier of echantillon.kept) {
+    corps.append(el('tr', {},
+      el('td', { classe: 'pl-chemin', texte: fichier.path }),
+      el('td', { texte: `comparé (${fichier.language})` })));
+  }
+  for (const fichier of echantillon.skipped) {
+    corps.append(el('tr', { classe: 'pl-fane' },
+      el('td', { classe: 'pl-chemin', texte: fichier.path }),
+      el('td', { texte: fichier.reason + (fichier.rule ? ` — « ${fichier.rule} »` : '') })));
+  }
+  table.append(corps);
+  return el('details', { classe: 'boite' },
+    el('summary', {}, entete), el('div', { classe: 'tableau-defile' }, table));
+}
+
+$('pl-lancer').addEventListener('click', () => tenter(async () => {
+  const fiche = await api('POST', cheminTravail(''), reglagePlagiat());
+  const bilan = await suivre(fiche);
+  if (bilan && bilan.report) await ouvrirRapportPlagiat(bilan.report);
+}, 'Analyse'));
+
+function octets(valeur) {
+  const nombre = Number(valeur) || 0;
+  if (nombre >= 1 << 30) return `${(nombre / (1 << 30)).toFixed(1)} Go`;
+  if (nombre >= 1 << 20) return `${Math.round(nombre / (1 << 20))} Mo`;
+  if (nombre >= 1 << 10) return `${Math.round(nombre / (1 << 10))} Ko`;
+  return `${nombre} o`;
+}
+
+function duree(secondes) {
+  const valeur = Number(secondes) || 0;
+  if (valeur >= 3600) return `${(valeur / 3600).toFixed(1)} h`;
+  if (valeur >= 60) return `${Math.round(valeur / 60)} min`;
+  if (valeur >= 1) return `${Math.round(valeur)} s`;
+  return 'moins d’une seconde';
+}
+
+// ------------------------------------------------------------- rapport
+
+async function ouvrirRapportPlagiat(nom, sansHistorique) {
+  etat.plagiat.rapport = nom;
+  etat.plagiat.donnees = await api('GET', `/api/plagiat/reports/${encode(nom)}`);
+  etat.plagiat.seuil = null;
+  dessinerRapportPlagiat();
+  afficherVue('plagiat-rapport', sansHistorique);
+}
+
+function seuilCourant() {
+  if (etat.plagiat.seuil !== null) return etat.plagiat.seuil;
+  return etat.plagiat.donnees.result.threshold || 0;
+}
+
+// seuilActif dit qu'un seuil veut dire quelque chose. À zéro et jamais déplacé,
+// il n'en veut aucun : marquer alors toutes les paires « au-dessus » ferait
+// passer pour suspect ce qui n'a simplement pas été jugé.
+function seuilActif() {
+  return etat.plagiat.seuil !== null || (etat.plagiat.donnees.result.threshold || 0) > 0;
+}
+
+function dessinerRapportPlagiat() {
+  const rapport = etat.plagiat.donnees;
+  const resultat = rapport.result;
+  $('pl-rapport-resume').textContent =
+    `${rapport.works.length} copie(s) comparée(s), ${resultat.compared} paire(s) mesurée(s), `
+    + `${(resultat.matches || []).length} retenue(s). Profil : ${rapport.profile.label}. `
+    + `Analyse du ${(rapport.created_at || '').slice(0, 16).replace('T', ' à ')}.`;
+  $('pl-rapport-avertissement').textContent = rapport.disclaimer;
+
+  const curseur = $('pl-seuil');
+  curseur.value = String(Math.round(seuilCourant() * 100));
+  curseur.oninput = () => {
+    etat.plagiat.seuil = Number(curseur.value) / 100;
+    dessinerSeuil();
+    dessinerHistogramme();
+    dessinerNuage();
+    dessinerPaires();
+  };
+
+  dessinerSeuil();
+  dessinerHistogramme();
+  dessinerNuage();
+  dessinerPaires();
+  dessinerSoucisPlagiat();
+  dessinerSignauxPlagiat();
+  dessinerEcarte();
+}
+
+// dessinerSeuil dit ce que le seuil veut dire, en clair.
+//
+// Un curseur sans phrase est un curseur qu'on déplace au hasard. Ce qu'il faut
+// lire, c'est combien de paires il retient et ce que cela engage : il désigne
+// ce qu'on regarde en premier, il ne prononce rien.
+function dessinerSeuil() {
+  const resultat = etat.plagiat.donnees.result;
+  const seuil = seuilCourant();
+  const retenues = seuilActif()
+    ? (resultat.matches || []).filter((paire) => paire.similarity >= seuil) : [];
+  $('pl-seuil-libelle').textContent = seuilActif()
+    ? `${Math.round(seuil * 100)} %` : 'aucun';
+
+  // Ce que le seuil vaut est dit par le serveur, qui le tient du domaine : les
+  // trois interfaces doivent en dire la même chose.
+  const origine = etat.plagiat.seuil !== null
+    ? 'Seuil déplacé à la main.'
+    : resultat.threshold_note;
+  $('pl-seuil-aide').textContent = `${origine} ${retenues.length} paire(s) au-dessus.`;
+}
+
+// dessinerHistogramme dessine la distribution des similarités.
+//
+// C'est le graphique qui apprend le plus. Une masse à gauche et rien à droite :
+// personne n'a copié. Une masse à gauche et quelques barres isolées tout à
+// droite : ce sont celles-là qu'il faut ouvrir.
+function dessinerHistogramme() {
+  const tranches = etat.plagiat.donnees.result.histogram || [];
+  const seuil = seuilCourant();
+  const zone = $('pl-histogramme');
+  vider(zone);
+  if (!tranches.length) {
+    zone.append(el('p', { classe: 'note', texte: 'Aucune paire mesurée.' }));
+    return;
+  }
+
+  const large = 420;
+  const haut = 160;
+  const marge = { gauche: 28, bas: 22, haut: 8, droite: 6 };
+  const plus = Math.max(1, ...tranches.map((item) => item.count));
+  const largeurBarre = (large - marge.gauche - marge.droite) / tranches.length;
+
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${large} ${haut}`, classe: 'pl-graphique',
+    role: 'img', 'aria-label': 'Distribution des similarités entre les copies',
+  });
+  tranches.forEach((tranche, rang) => {
+    const hauteur = (tranche.count / plus) * (haut - marge.haut - marge.bas);
+    const barre = svgEl('rect', {
+      x: marge.gauche + rang * largeurBarre + 1,
+      y: haut - marge.bas - hauteur,
+      width: Math.max(1, largeurBarre - 2), height: hauteur,
+      classe: tranche.from >= seuil ? 'pl-barre haute' : 'pl-barre',
+    });
+    barre.append(svgEl('title', {}, `${Math.round(tranche.from * 100)} à `
+      + `${Math.round(tranche.to * 100)} % : ${tranche.count} paire(s)`));
+    svg.append(barre);
+  });
+
+  svg.append(svgEl('line', {
+    x1: marge.gauche, y1: haut - marge.bas, x2: large - marge.droite,
+    y2: haut - marge.bas, classe: 'pl-axe',
+  }));
+  const posSeuil = marge.gauche + seuil * (large - marge.gauche - marge.droite);
+  svg.append(svgEl('line', {
+    x1: posSeuil, y1: marge.haut, x2: posSeuil, y2: haut - marge.bas,
+    classe: 'pl-seuil-trait',
+  }));
+  for (const part of [0, 0.25, 0.5, 0.75, 1]) {
+    svg.append(svgEl('text', {
+      x: marge.gauche + part * (large - marge.gauche - marge.droite),
+      y: haut - 8, 'text-anchor': 'middle', classe: 'pl-legende',
+    }, `${Math.round(part * 100)} %`));
+  }
+  svg.append(svgEl('text', { x: 2, y: marge.haut + 8, classe: 'pl-legende' }, String(plus)));
+  zone.append(svg);
+}
+
+// dessinerNuage place chaque paire selon ce qu'elle partage : la similarité en
+// abscisse, le plus long passage commun en ordonnée.
+//
+// Les deux ensemble disent ce qu'aucune ne dit seule. Une similarité moyenne
+// avec un très long fragment, c'est un fichier recopié entier dans un travail
+// par ailleurs personnel — exactement ce qu'un classement par similarité seule
+// enterre au milieu de la liste.
+function dessinerNuage() {
+  const resultat = etat.plagiat.donnees.result;
+  const paires = resultat.matches || [];
+  const seuil = seuilCourant();
+  const zone = $('pl-nuage');
+  vider(zone);
+  if (!paires.length) {
+    zone.append(el('p', { classe: 'note', texte: 'Aucune paire retenue.' }));
+    return;
+  }
+
+  const large = 420;
+  const haut = 160;
+  const marge = { gauche: 34, bas: 22, haut: 8, droite: 8 };
+  const plusLong = Math.max(1, ...paires.map((paire) => paire.longest_fragment));
+  const svg = svgEl('svg', {
+    viewBox: `0 0 ${large} ${haut}`, classe: 'pl-graphique',
+    role: 'img', 'aria-label': 'Chaque paire, par sa similarité et son plus long passage commun',
+  });
+  svg.append(svgEl('line', {
+    x1: marge.gauche, y1: haut - marge.bas, x2: large - marge.droite,
+    y2: haut - marge.bas, classe: 'pl-axe',
+  }));
+  svg.append(svgEl('line', {
+    x1: marge.gauche, y1: marge.haut, x2: marge.gauche, y2: haut - marge.bas,
+    classe: 'pl-axe',
+  }));
+
+  const origines = [...new Set(paires.flatMap((paire) =>
+    [paire.left_origin, paire.right_origin]))].filter(Boolean);
+  for (const paire of paires) {
+    const x = marge.gauche + paire.similarity * (large - marge.gauche - marge.droite);
+    const y = haut - marge.bas
+      - (paire.longest_fragment / plusLong) * (haut - marge.haut - marge.bas);
+    const point = svgEl('circle', {
+      cx: x, cy: y, r: 4,
+      classe: paire.similarity >= seuil ? 'pl-point haute' : 'pl-point',
+      style: couleurOrigine(paire, origines),
+    });
+    point.append(svgEl('title', {}, `${paire.left_name} et ${paire.right_name} — `
+      + `${Math.round(paire.similarity * 100)} %, plus long passage : `
+      + `${paire.longest_fragment} jetons`));
+    point.addEventListener('click', () => ouvrirPairePlagiat(paire.left, paire.right));
+    point.style.cursor = 'pointer';
+    svg.append(point);
+  }
+  for (const part of [0, 0.5, 1]) {
+    svg.append(svgEl('text', {
+      x: marge.gauche + part * (large - marge.gauche - marge.droite),
+      y: haut - 8, 'text-anchor': 'middle', classe: 'pl-legende',
+    }, `${Math.round(part * 100)} %`));
+  }
+  svg.append(svgEl('text', { x: 2, y: marge.haut + 8, classe: 'pl-legende' },
+    String(plusLong)));
+  zone.append(svg);
+
+  $('pl-nuage-legende').textContent = origines.length > 1
+    ? `Couleur : provenance (${origines.join(', ')}). Rouge : au-dessus du seuil.`
+    : 'Abscisse : similarité. Ordonnée : plus long passage commun, en jetons.';
+}
+
+// couleurOrigine colore un point selon la provenance des deux copies. Deux
+// copies du même groupe qui se ressemblent, cela s'explique ; deux copies de
+// deux sessions séparées par trois ans, beaucoup moins.
+const palettePlagiat = ['#0969da', '#8250df', '#1f883d', '#bc4c00', '#cf222e', '#0f7b6c'];
+
+function couleurOrigine(paire, origines) {
+  if (origines.length < 2) return '';
+  if (paire.left_origin !== paire.right_origin) return 'fill: var(--erreur)';
+  const rang = origines.indexOf(paire.left_origin);
+  return `fill: ${palettePlagiat[rang % palettePlagiat.length]}`;
+}
+
+// svgEl fabrique un nœud SVG. Les graphiques sont écrits à la main, sans
+// bibliothèque : l'interface doit fonctionner hors ligne, et un histogramme de
+// vingt barres ne justifie pas d'en charger une.
+function svgEl(nom, attributs = {}, texte) {
+  const noeud = document.createElementNS('http://www.w3.org/2000/svg', nom);
+  for (const [cle, valeur] of Object.entries(attributs)) {
+    if (valeur === null || valeur === undefined || valeur === '') continue;
+    noeud.setAttribute(cle === 'classe' ? 'class' : cle, String(valeur));
+  }
+  if (texte !== undefined) noeud.textContent = texte;
+  return noeud;
+}
+
+// dessinerPaires liste les paires, de la plus suspecte à la moins suspecte.
+function dessinerPaires() {
+  const resultat = etat.plagiat.donnees.result;
+  const seuil = seuilCourant();
+  const actif = seuilActif();
+  const seulementAuDessus = actif && $('pl-paires-seuil').checked;
+  $('pl-paires-seuil').disabled = !actif;
+  const paires = (resultat.matches || [])
+    .filter((paire) => !seulementAuDessus || paire.similarity >= seuil);
+
+  const zone = $('pl-paires');
+  vider(zone);
+  $('pl-paires-titre').textContent = `${paires.length} paire(s)`;
+  if (!paires.length) {
+    zone.append(el('div', {
+      classe: 'boite-vide',
+      texte: seulementAuDessus
+        ? 'Aucune paire au-dessus du seuil. Baissez-le pour voir ce qui vient juste en dessous.'
+        : 'Aucune paire retenue : ces copies ne partagent rien de mesurable.',
+    }));
+    return;
+  }
+
+  const table = el('table', { classe: 'pl-table' },
+    el('thead', {}, el('tr', {},
+      el('th', { texte: 'Copie' }), el('th', { texte: 'Copie' }),
+      el('th', { classe: 'chiffre', texte: 'Similarité' }),
+      el('th', { classe: 'chiffre', texte: 'Couverture' }),
+      el('th', { classe: 'chiffre', texte: 'Plus long passage' }),
+      el('th', { texte: 'Provenance' }))));
+  const corps = el('tbody');
+  for (const paire of paires) {
+    const ligne = el('tr', {
+      classe: 'cliquable',
+      onclick: () => ouvrirPairePlagiat(paire.left, paire.right),
+    },
+      el('td', {}, el('span', { texte: paire.left_name || paire.left })),
+      el('td', {}, el('span', { texte: paire.right_name || paire.right })),
+      el('td', {
+        classe: 'chiffre' + (actif && paire.similarity >= seuil ? ' pl-au-dessus' : ''),
+        texte: `${Math.round(paire.similarity * 100)} %`,
+      }),
+      el('td', {
+        classe: 'chiffre',
+        texte: `${Math.round(paire.left_coverage * 100)} % / `
+          + `${Math.round(paire.right_coverage * 100)} %`,
+      }),
+      el('td', { classe: 'chiffre', texte: `${paire.longest_fragment} jetons` }),
+      el('td', {
+        classe: 'note',
+        texte: paire.left_origin === paire.right_origin
+          ? (paire.left_origin || '')
+          : `${paire.left_origin} et ${paire.right_origin}`,
+      }));
+    corps.append(ligne);
+  }
+  table.append(corps);
+  zone.append(el('div', { classe: 'tableau-defile' }, table));
+}
+
+$('pl-paires-seuil').addEventListener('change', dessinerPaires);
+$('pl-rapport-rejouer').addEventListener('click', () => {
+  if (etat.travail) preparerPlagiat();
+  else message('Ouvrez un travail pour lancer une nouvelle analyse.', 'info');
+});
+
+// dessinerSoucisPlagiat nomme les dépôts qui n'ont pas pu être analysés.
+//
+// En haut, jamais en note de bas de page. Un rapport qui tait un dépôt laisse
+// croire qu'il a été regardé, et c'est la pire chose qu'il puisse faire.
+function dessinerSoucisPlagiat() {
+  const soucis = etat.plagiat.donnees.problems || [];
+  const zone = $('pl-rapport-soucis');
+  vider(zone);
+  if (!soucis.length) return;
+
+  const table = el('table', { classe: 'pl-table' },
+    el('thead', {}, el('tr', {},
+      el('th', { texte: 'Dépôt' }), el('th', { texte: 'Motif' }),
+      el('th', { texte: 'Détail' }))));
+  const corps = el('tbody');
+  for (const souci of soucis) {
+    corps.append(el('tr', {},
+      el('td', { classe: 'pl-chemin', texte: souci.repo }),
+      el('td', { texte: souci.reason }),
+      el('td', { classe: 'note', texte: souci.detail || '' })));
+  }
+  table.append(corps);
+  zone.append(el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-entete' },
+      el('strong', { texte: `${soucis.length} dépôt(s) n’ont pas pu être analysés` })),
+    el('div', { classe: 'tableau-defile' }, table)));
+}
+
+// dessinerSignauxPlagiat rapporte ce que la mesure de similarité ne voit pas.
+function dessinerSignauxPlagiat() {
+  const signaux = etat.plagiat.donnees.result.signals || [];
+  const zone = $('pl-signaux');
+  vider(zone);
+  if (!signaux.length) return;
+
+  const corps = el('div', { classe: 'boite-corps' });
+  corps.append(el('p', {
+    classe: 'note',
+    texte: 'Ces coïncidences sont relevées à part, et ne comptent pas dans la '
+      + 'similarité. Un commentaire identique au mot près n’a pas d’explication '
+      + 'innocente aussi souvent qu’une ressemblance de code.',
+  }));
+  for (const signal of signaux) {
+    const quoi = signal.kind === 'signature'
+      ? 'Même signature invisible'
+      : 'Commentaire identique';
+    corps.append(el('p', {},
+      el('strong', { texte: quoi + ' : ' }),
+      el('span', { texte: signal.works.join(', ') }),
+      signal.detail && signal.kind !== 'signature'
+        ? el('span', { classe: 'note', texte: ` — « ${signal.detail} »` })
+        : null));
+  }
+  zone.append(el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-entete' },
+      el('strong', { texte: 'Signaux relevés hors de la mesure' })), corps));
+}
+
+// dessinerEcarte dit ce qui n'a pas été comparé, et pourquoi.
+//
+// C'est ce qui rend un score lisible. Trente copies parties du même gabarit se
+// ressemblent à quatre-vingts pour cent sans que personne n'ait rien copié :
+// savoir que ce squelette a été retiré change tout ce qu'on lit ensuite.
+function dessinerEcarte() {
+  const resultat = etat.plagiat.donnees.result;
+  const total = (resultat.ignored_baseline || 0) + (resultat.ignored_common || 0);
+  const zone = $('pl-ecarte');
+  vider(zone);
+  if (!total) return;
+  zone.append(el('p', {
+    classe: 'note',
+    texte: `${total} empreinte(s) écartée(s) avant comparaison : `
+      + `${resultat.ignored_baseline || 0} venant du gabarit distribué au travail, `
+      + `${resultat.ignored_common || 0} présentes chez trop de copies pour vouloir `
+      + 'dire quelque chose. Sans ce retrait, toutes les copies se ressembleraient.',
+  }));
+}
+
+// ------------------------------------------------------- deux projets
+
+async function ouvrirPairePlagiat(gauche, droite, sansHistorique) {
+  etat.plagiat.gauche = gauche;
+  etat.plagiat.droite = droite;
+  await tenter(async () => {
+    etat.plagiat.paire = await api('POST',
+      `/api/plagiat/reports/${encode(etat.plagiat.rapport)}/pair`,
+      { left: gauche, right: droite });
+    dessinerPairePlagiat();
+    afficherVue('plagiat-paire', sansHistorique);
+  }, 'Ouverture de la paire');
+}
+
+// dessinerPairePlagiat montre les deux projets : ce qui se correspond, et ce
+// qui n'a de correspondant nulle part.
+//
+// La seconde moitié compte autant que la première. Un travail recopié puis
+// complété n'a de fragments que sur une partie de ses fichiers ; voir laquelle
+// est ce qui permet de juger.
+function dessinerPairePlagiat() {
+  const vue = etat.plagiat.paire;
+  const projet = vue.project;
+  const match = vue.match;
+
+  $('pl-paire-resume').textContent =
+    `${Math.round(match.similarity * 100)} % de similarité — couverture `
+    + `${Math.round(match.left_coverage * 100)} % et `
+    + `${Math.round(match.right_coverage * 100)} % — plus long passage commun : `
+    + `${match.longest_fragment} jetons. Commits comparés : `
+    + `${projet.left.commit} et ${projet.right.commit}.`;
+  $('pl-paire-avertissement').textContent = vue.disclaimer;
+
+  const liens = $('pl-paire-liens');
+  vider(liens);
+  if (!(projet.links || []).length) {
+    liens.append(el('div', { classe: 'boite-vide', texte: 'Aucun fichier relié.' }));
+  } else {
+    const table = el('table', { classe: 'pl-table' },
+      el('thead', {}, el('tr', {},
+        el('th', { texte: nomDeCopie(projet.left) }),
+        el('th', { texte: nomDeCopie(projet.right) }),
+        el('th', { classe: 'chiffre', texte: 'Plus long passage' }),
+        el('th', { classe: 'chiffre', texte: 'Part recouverte' }),
+        el('th', { classe: 'chiffre', texte: 'Fragments' }))));
+    const corps = el('tbody');
+    for (const lien of projet.links) {
+      corps.append(el('tr', {
+        classe: 'cliquable',
+        onclick: () => ouvrirFichierPlagiat(lien.left_path, lien.right_path),
+      },
+        el('td', { classe: 'pl-chemin', texte: lien.left_path }),
+        el('td', { classe: 'pl-chemin', texte: lien.right_path },
+          lien.same_name ? null : el('span', { classe: 'note', texte: ' (renommé)' })),
+        el('td', { classe: 'chiffre', texte: `${lien.longest_fragment} jetons` }),
+        el('td', {
+          classe: 'chiffre',
+          texte: `${part(lien.left_covered, lien.left_tokens)} / `
+            + `${part(lien.right_covered, lien.right_tokens)}`,
+        }),
+        el('td', { classe: 'chiffre', texte: String(lien.fragments) })));
+    }
+    table.append(corps);
+    liens.append(el('div', { classe: 'tableau-defile' }, table));
+  }
+
+  dessinerSeuls('pl-paire-gauche-titre', 'pl-paire-gauche-seuls',
+    projet.left, projet.left_only);
+  dessinerSeuls('pl-paire-droite-titre', 'pl-paire-droite-seuls',
+    projet.right, projet.right_only);
+}
+
+function dessinerSeuls(idTitre, idListe, cote, seuls) {
+  $(idTitre).textContent = `${nomDeCopie(cote)} — fichiers sans correspondant`;
+  const zone = $(idListe);
+  vider(zone);
+  if (!(seuls || []).length) {
+    zone.append(el('div', {
+      classe: 'boite-vide',
+      texte: 'Tous les fichiers comparés de cette copie ont un correspondant.',
+    }));
+    return;
+  }
+  const liste = el('div', { classe: 'boite-corps' });
+  for (const seul of seuls) {
+    liste.append(el('div', {},
+      el('span', { classe: 'pl-chemin', texte: seul.path }),
+      el('span', { classe: 'note', texte: ` — ${seul.reason}` })));
+  }
+  zone.append(liste);
+}
+
+function nomDeCopie(cote) { return cote.label || cote.id; }
+
+// emballage rend le dossier qu'un dépôt met autour de son projet, sans le
+// préfixe que toute archive de GitHub porte : celui-là n'apprend rien, et
+// l'autre explique à lui seul pourquoi un profil trouve ou ne trouve pas.
+function emballage(racine) {
+  const coupe = (racine || '').indexOf('/');
+  return coupe < 0 ? '' : racine.slice(coupe + 1);
+}
+
+function part(couvert, total) {
+  if (!total) return '—';
+  return `${Math.round((couvert / total) * 100)} %`;
+}
+
+$('pl-paire-retour').addEventListener('click', () => {
+  afficherVue('plagiat-rapport');
+});
+
+// -------------------------------------------------------- deux fichiers
+
+async function ouvrirFichierPlagiat(cheminG, cheminD, sansHistorique) {
+  etat.plagiat.cheminG = cheminG;
+  etat.plagiat.cheminD = cheminD;
+  await tenter(async () => {
+    etat.plagiat.fichier = await api('POST',
+      `/api/plagiat/reports/${encode(etat.plagiat.rapport)}/file`, {
+        left: etat.plagiat.gauche, right: etat.plagiat.droite,
+        left_path: cheminG, right_path: cheminD,
+      });
+    etat.plagiat.fragment = 0;
+    dessinerFichiersPlagiat();
+    afficherVue('plagiat-fichier', sansHistorique);
+  }, 'Comparaison des fichiers');
+}
+
+// Ce que chaque mode fait, dit en une phrase. Un comparateur polyvalent qui ne
+// s'explique pas devient un comparateur qu'on n'ose plus toucher.
+const explicationsMode = {
+  commun: 'Les passages communs aux deux fichiers sont surlignés. C’est ce que '
+    + 'la mesure a trouvé, et rien d’autre : le reste peut se ressembler sans '
+    + 'avoir été reconnu, s’il a été réécrit.',
+  different: 'Les passages communs sont fanés : ce qui reste lisible est ce qui '
+    + 'diffère. C’est la lecture à faire pour voir comment une copie a été '
+    + 'maquillée — ce qui a été ajouté, déplacé, réécrit.',
+  jetons: 'Le flux réellement comparé, et non le texte. Tout nom choisi par '
+    + 'l’étudiant y est devenu « ID », tout nombre « NUM », toute chaîne « STR » : '
+    + 'c’est pourquoi renommer ses variables ne change rien au résultat.',
+};
+
+function dessinerFichiersPlagiat() {
+  const vue = etat.plagiat.fichier;
+  const mode = etat.plagiat.mode;
+  $('pl-fichier-resume').textContent =
+    `${vue.spans.length} passage(s) commun(s) — ${vue.left.lines} et `
+    + `${vue.right.lines} lignes.`;
+  $('pl-mode-explication').textContent = explicationsMode[mode];
+  $('pl-fichier-gauche-titre').textContent =
+    `${nomDeCopie(etat.plagiat.paire.project.left)} — ${vue.left.path}`;
+  $('pl-fichier-droite-titre').textContent =
+    `${nomDeCopie(etat.plagiat.paire.project.right)} — ${vue.right.path}`;
+
+  for (const bouton of document.querySelectorAll('.pl-modes button')) {
+    bouton.classList.toggle('actif', bouton.dataset.mode === mode);
+  }
+  rendreCote($('pl-fichier-gauche'), vue.left, vue.spans, 'left', mode);
+  rendreCote($('pl-fichier-droite'), vue.right, vue.spans, 'right', mode);
+  viserFragment(etat.plagiat.fragment, false);
+}
+
+// rendreCote pose le contenu d'un fichier, fragments surlignés.
+//
+// Les positions viennent du serveur en octets, parce que c'est ainsi qu'un
+// fichier est découpé en jetons. Une chaîne JavaScript, elle, se compte en
+// unités UTF-16 : trancher dedans avec des indices d'octets décalerait tout
+// surlignage dès le premier accent. Le texte est donc redécoupé en octets, puis
+// chaque morceau redécodé — les coupures tombent sur des frontières de jetons,
+// jamais au milieu d'un caractère.
+function rendreCote(pre, cote, spans, quel, mode) {
+  vider(pre);
+  pre.classList.toggle('pl-jetons-flux', mode === 'jetons');
+  if (mode === 'jetons') {
+    for (const jeton of cote.tokens) {
+      pre.append(el('span', { classe: 'pl-jeton-brut ' + genreDeJeton(jeton.kind),
+        texte: jeton.text }));
+    }
+    return;
+  }
+
+  const octetsTexte = new TextEncoder().encode(cote.text);
+  const decodeur = new TextDecoder();
+  const tranche = (debut, fin) => decodeur.decode(octetsTexte.subarray(debut, fin));
+
+  const zones = spans
+    .map((span, rang) => ({ rang, debut: span[`${quel}_start`], fin: span[`${quel}_end`] }))
+    .filter((zone) => zone.fin > zone.debut)
+    .sort((a, b) => a.debut - b.debut || b.fin - a.fin);
+
+  const classe = mode === 'different' ? 'pl-fane' : 'pl-commun';
+  let curseur = 0;
+  let dernier = null;
+  for (const zone of zones) {
+    const debut = Math.max(zone.debut, curseur);
+    if (debut >= zone.fin) {
+      // Deux fragments qui se recouvrent de ce côté-ci : le second n'ajoute
+      // rien à surligner, mais il doit rester atteignable à la navigation.
+      if (dernier) dernier.dataset.aussi = `${dernier.dataset.aussi || ''} ${zone.rang}`;
+      continue;
+    }
+    if (debut > curseur) pre.append(document.createTextNode(tranche(curseur, debut)));
+    dernier = el('span', { classe, 'data-fragment': String(zone.rang) },
+      document.createTextNode(tranche(debut, zone.fin)));
+    pre.append(dernier);
+    curseur = zone.fin;
+  }
+  if (curseur < octetsTexte.length) {
+    pre.append(document.createTextNode(tranche(curseur, octetsTexte.length)));
+  }
+}
+
+function genreDeJeton(kind) {
+  if (kind === 0) return 'mot-cle';
+  if (kind === 1) return 'identifiant';
+  return '';
+}
+
+// viserFragment met en évidence un passage des deux côtés à la fois, et l'amène
+// sous les yeux. Sauter de l'un à l'autre est le geste qu'on fait vraiment :
+// lire les deux fichiers en entier n'arrive jamais.
+function viserFragment(rang, defiler = true) {
+  const total = etat.plagiat.fichier.spans.length;
+  if (!total) return;
+  etat.plagiat.fragment = ((rang % total) + total) % total;
+  let premier = null;
+  for (const pre of [$('pl-fichier-gauche'), $('pl-fichier-droite')]) {
+    for (const noeud of pre.querySelectorAll('[data-fragment]')) {
+      const vise = Number(noeud.dataset.fragment) === etat.plagiat.fragment;
+      noeud.classList.toggle('vise', vise);
+      if (vise && !premier) premier = noeud;
+    }
+  }
+  $('pl-fichier-resume').textContent =
+    `Passage ${etat.plagiat.fragment + 1} sur ${total} — `
+    + `${etat.plagiat.fichier.left.lines} et `
+    + `${etat.plagiat.fichier.right.lines} lignes.`;
+  if (defiler && premier) premier.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+for (const bouton of document.querySelectorAll('.pl-modes button')) {
+  bouton.addEventListener('click', () => {
+    etat.plagiat.mode = bouton.dataset.mode;
+    dessinerFichiersPlagiat();
+  });
+}
+$('pl-fichier-suivant').addEventListener('click',
+  () => viserFragment(etat.plagiat.fragment + 1));
+$('pl-fichier-precedent').addEventListener('click',
+  () => viserFragment(etat.plagiat.fragment - 1));
+$('pl-fichier-retour').addEventListener('click', () => afficherVue('plagiat-paire'));
+
+// allerAuPlagiat ouvre un rapport, une paire ou deux fichiers depuis l'adresse.
+// Un lien collé doit mener exactement où il dit.
+async function allerAuPlagiat(route) {
+  if (route.vue === 'plagiat-regles') { await ouvrirReglesPlagiat(true); return; }
+  if (!route.rapport) { afficherVue('parcours', true); return; }
+  if (etat.plagiat.rapport !== route.rapport || !etat.plagiat.donnees) {
+    await ouvrirRapportPlagiat(route.rapport, true);
+  }
+  if (route.vue === 'plagiat-rapport') { afficherVue('plagiat-rapport', true); return; }
+
+  if (etat.plagiat.gauche !== route.gauche || etat.plagiat.droite !== route.droite
+    || !etat.plagiat.paire) {
+    await ouvrirPairePlagiat(route.gauche, route.droite, true);
+  }
+  if (route.vue === 'plagiat-paire') { afficherVue('plagiat-paire', true); return; }
+  await ouvrirFichierPlagiat(route.cheminG, route.cheminD, true);
+}
+
+// ------------------------------------------------------ règles partagées
+
+// Les équivalences de sigles ne sont pas un réglage : ce sont des faits que le
+// département connaît et que l'outil ne peut pas deviner. Elles vivent dans le
+// registre de l'organisation, déclarées une fois pour toute l'équipe.
+//
+// L'écran ne couvre que ce qui change vraiment d'une année à l'autre — les
+// sigles et les noms de travaux. Les profils d'inspection, eux, sont rares et
+// longs : ils se modifient dans le fichier, sur github.com, et l'écran dit
+// combien il y en a pour qu'on sache qu'ils existent.
+
+// Les deux listes ont la même forme — un nom, des équivalents — et partagent
+// donc leur affichage. Seuls leurs mots changent.
+const motsDeCours = {
+  nom: 'Cours', exempleNom: 'prog3', valeurs: 'Sigles', exemple: '5n6, 5m6',
+  libelle: true,
+};
+const motsDeTravail = {
+  nom: 'Travail', exempleNom: 'tp1', valeurs: 'Autres noms', exemple: 'tp-1, travail1',
+};
+
+async function ouvrirReglesPlagiat(sansHistorique) {
+  const reponse = await api('GET', `/api/orgs/${encode(etat.organisation)}/rules`);
+  etat.plagiat.regles = reponse;
+  dessinerReglesPlagiat();
+  afficherVue('plagiat-regles', sansHistorique);
+}
+
+function dessinerReglesPlagiat() {
+  const reponse = etat.plagiat.regles;
+  const declarees = reponse.declared || {};
+  $('pl-regles-sous-titre').textContent =
+    `Registre de « ${reponse.org} » — partagées par toute l'équipe enseignante.`;
+
+  const surcharge = $('pl-regles-surcharge');
+  surcharge.hidden = !reponse.override;
+  if (reponse.override) {
+    surcharge.textContent = 'Un fichier passé au lancement (--rules) surcharge '
+      + 'ces règles pour cette session. Ce que vous écrivez ici va au registre ; '
+      + 'ce qui s’applique vraiment est la superposition des deux.';
+  }
+
+  dessinerRangeesRegles('pl-regles-cours', declarees.courses || [], motsDeCours);
+  dessinerRangeesRegles('pl-regles-travaux', declarees.assignments || [], motsDeTravail);
+
+  const profils = (declarees.profiles || []).length;
+  $('pl-regles-profils').textContent = profils
+    ? `${profils} profil(s) d'inspection déclarés par l'organisation. Ils se `
+      + `modifient dans « regles.json », sur github.com.`
+    : 'Aucun profil d’inspection maison. On en déclare en modifiant '
+      + '« regles.json » dans le dépôt « .cohorte », sur github.com.';
+}
+
+// dessinerRangeesRegles dessine une liste de règles modifiables. Cours et
+// travaux ont la même forme — un nom, des équivalents — et partagent donc leur
+// affichage : les séparer ferait deux fois le même code, libre de diverger.
+function dessinerRangeesRegles(zoneID, items, mots) {
+  const zone = $(zoneID);
+  vider(zone);
+  if (!items.length) {
+    zone.append(el('p', { classe: 'note', texte: 'Rien de déclaré.' }));
+  }
+  for (const item of items) {
+    zone.append(rangeeDeRegle(item, mots));
+  }
+}
+
+function rangeeDeRegle(item, mots) {
+  const valeurs = item.codes || [item.id, ...(item.aliases || [])];
+  const rangee = el('div', { classe: 'ligne-champs pl-regle' },
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: mots.nom }),
+      el('input', {
+        type: 'text', classe: 'champ', value: item.id || '',
+        'data-role': 'id', placeholder: mots.exempleNom,
+      })),
+    el('label', { classe: 'champ-bloc souple' },
+      el('span', { classe: 'etiquette', texte: mots.valeurs }),
+      el('input', {
+        type: 'text', classe: 'champ', value: valeurs.join(', '),
+        'data-role': 'valeurs', placeholder: mots.exemple,
+      })),
+    // Un travail n'a pas de nom affiché : le registre n'en porte pas, et un
+    // champ qui ne va nulle part est pire qu'un champ absent.
+    mots.libelle
+      ? el('label', { classe: 'champ-bloc souple' },
+        el('span', { classe: 'etiquette', texte: 'Nom affiché' }),
+        el('input', {
+          type: 'text', classe: 'champ', value: item.label || '',
+          'data-role': 'label', placeholder: 'Programmation 3',
+        }))
+      : null);
+  rangee.append(el('button', {
+    type: 'button', classe: 'bouton petit pl-bascule',
+    texte: 'Retirer', onclick: () => rangee.remove(),
+  }));
+  return rangee;
+}
+
+function lireRangees(zoneID, cours) {
+  const items = [];
+  for (const rangee of $(zoneID).querySelectorAll('.pl-regle')) {
+    const lire = (role) => {
+      const champ = rangee.querySelector(`[data-role="${role}"]`);
+      return champ ? champ.value.trim() : '';
+    };
+    const id = lire('id');
+    const valeurs = lire('valeurs').split(',').map((item) => item.trim()).filter(Boolean);
+    if (!id && !valeurs.length) continue;
+    if (cours) {
+      items.push({ id, label: lire('label'), codes: valeurs });
+      continue;
+    }
+    items.push({ id, aliases: valeurs.filter((nom) => nom !== id) });
+  }
+  return items;
+}
+
+$('pl-regles-ouvrir').addEventListener('click',
+  () => tenter(() => ouvrirReglesPlagiat(), 'Règles de comparaison'));
+$('pl-regles-retour').addEventListener('click', () => afficherVue('plagiat'));
+$('pl-regles-cours-ajouter').addEventListener('click', () => {
+  const zone = $('pl-regles-cours');
+  if (zone.querySelector('.note')) vider(zone);
+  zone.append(rangeeDeRegle({}, motsDeCours));
+});
+$('pl-regles-travaux-ajouter').addEventListener('click', () => {
+  const zone = $('pl-regles-travaux');
+  if (zone.querySelector('.note')) vider(zone);
+  zone.append(rangeeDeRegle({}, motsDeTravail));
+});
+
+$('pl-regles-ecrire').addEventListener('click', () => tenter(async () => {
+  const declarees = etat.plagiat.regles.declared || {};
+  const corps = {
+    version: declarees.version || 1,
+    courses: lireRangees('pl-regles-cours', true),
+    assignments: lireRangees('pl-regles-travaux', false),
+    // Les profils et les bornes ne sont pas touchés par cet écran : les
+    // renvoyer tels quels évite qu'un formulaire qui ne les montre pas les
+    // efface au passage.
+    profiles: declarees.profiles || [],
+    defaults: declarees.defaults || {},
+  };
+  etat.plagiat.regles = await api('PUT',
+    `/api/orgs/${encode(etat.organisation)}/rules`, corps);
+  // Les options portent les profils et les équivalences : elles ne valent plus.
+  etat.plagiat.options = null;
+  dessinerReglesPlagiat();
+  message('Règles écrites dans le registre de l’organisation.', 'succes');
+}, 'Écriture des règles'));
+
+// ------------------------------------------------- échanger avec un collègue
+
+// Un collègue d'une autre organisation, ou qui n'utilise pas l'outil, ne peut
+// ni publier d'index ni ouvrir ses dépôts. Le seul chemin praticable est qu'il
+// envoie les copies — et dans ce cas, ce sont des copies anonymisées qui
+// voyagent, jamais une liste de noms.
+
+const menuEchange = menuDeroulant('pl-menu-ouvrir', 'pl-menu');
+
+$('pl-envoyer').addEventListener('click', () => {
+  menuEchange.deplier(false);
+  demanderEnvoi();
+});
+$('pl-recevoir').addEventListener('click', () => {
+  menuEchange.deplier(false);
+  ajouterArchive();
+});
+$('pl-regles-ouvrir').addEventListener('click', () => {
+  menuEchange.deplier(false);
+  tenter(() => ouvrirReglesPlagiat(), 'Règles de comparaison');
+});
+
+// demanderEnvoi demande où écrire l'archive, puis la produit.
+async function demanderEnvoi() {
+  const defaut = `${etat.travail ? etat.travail.name : 'travail'}-anonymise.zip`;
+  const { zone, champ } = zoneDepot({ valeur: defaut, titre: 'Fichier ZIP à écrire' });
+  const fragments = document.createDocumentFragment();
+  fragments.append(
+    el('p', {
+      texte: 'Les noms, les comptes GitHub et les matricules seront remplacés '
+        + 'par des jetons de longueur égale. La table de correspondance sera '
+        + 'écrite à côté de l’archive — jamais dedans : c’est elle seule qui dit '
+        + 'qui se cache derrière un jeton, et elle ne doit pas partir avec.',
+    }),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Fichier ZIP à écrire' }), zone),
+    el('label', { classe: 'case', style: 'margin-top:.6rem' },
+      el('input', { type: 'checkbox', id: 'pl-envoi-parts' }),
+      el('span', {},
+        el('span', { texte: 'Anonymiser aussi les noms de famille et prénoms isolés' }),
+        el('span', {
+          classe: 'aide',
+          texte: 'Plus sûr, mais abîme le texte ordinaire : « Côté » est aussi '
+            + 'un mot français. Ce qui n’est pas remplacé est de toute façon '
+            + 'signalé au contrôle.',
+        }))),
+    el('p', {
+      classe: 'note',
+      texte: 'Seuls les fichiers que l’inspection retient sont envoyés : ce sont '
+        + 'ceux qui seront comparés, et les seuls qu’on sache anonymiser.',
+    }));
+
+  const parts = { valeur: false };
+  const suite = await demander('Envoyer ces copies à un collègue', fragments,
+    'Préparer l’archive', () => {
+      const case_ = $('pl-envoi-parts');
+      if (case_) case_.addEventListener('change', () => { parts.valeur = case_.checked; });
+    });
+  if (!suite || !champ.value.trim()) return;
+
+  const fiche = await tenter(() => api('POST', cheminTravail('/export'),
+    { ...reglagePlagiat(), destination: champ.value.trim(), parts: parts.valeur }),
+    'Envoi anonymisé');
+  if (!fiche) return;
+  const bilan = await suivre(fiche);
+  if (bilan) dessinerEnvoi(bilan);
+}
+
+// dessinerEnvoi montre ce qui a été écrit, et surtout ce qui a résisté.
+//
+// Écrire un fichier ici n'est pas le geste risqué : c'est l'envoyer qui l'est,
+// et c'est une personne qui le fera, hors de l'outil. Ce que l'écran doit donc
+// faire, c'est montrer ce qui reste avant qu'elle n'attache le fichier à un
+// courriel.
+function dessinerEnvoi(bilan) {
+  const zone = $('pl-envoi-resultat');
+  vider(zone);
+  const corps = el('div', { classe: 'boite-corps' });
+
+  corps.append(el('p', {},
+    el('strong', { texte: `${bilan.copies} copie(s) anonymisées. ` }),
+    el('span', { texte: 'Archive : ' }),
+    el('code', { texte: bilan.path })));
+  corps.append(el('p', { classe: 'note' },
+    el('span', { texte: 'Table de correspondance, restée ici : ' }),
+    el('code', { texte: bilan.table_csv }),
+    el('span', { texte: ' et ' }),
+    el('code', { texte: bilan.table_json }),
+    el('span', {
+      texte: '. Elle n’est pas dans l’archive, et ne doit pas l’accompagner.',
+    })));
+
+  for (const souci of bilan.problems || []) {
+    corps.append(el('p', { classe: 'avertissement',
+      texte: `${souci.repo} : ${souci.reason}` }));
+  }
+
+  const residues = bilan.residues || [];
+  if (!residues.length) {
+    corps.append(el('p', {
+      classe: 'note',
+      texte: 'Le contrôle n’a rien relevé. Cela ne prouve pas que rien n’a '
+        + 'survécu : une capture d’écran, un nom écrit autrement ou un PDF lui '
+        + 'échappent.',
+    }));
+  } else {
+    corps.append(el('p', {
+      classe: 'avertissement',
+      texte: `${residues.length} chose(s) ressemblent encore à quelqu’un, dans `
+        + `${(bilan.files || []).length} fichier(s). Regardez-les avant d’envoyer `
+        + `l’archive : une anonymisation n’est jamais complète.`,
+    }));
+    const table = el('table', { classe: 'pl-table' },
+      el('thead', {}, el('tr', {},
+        el('th', { texte: 'Fichier' }), el('th', { classe: 'chiffre', texte: 'Ligne' }),
+        el('th', { texte: 'Nature' }), el('th', { texte: 'Vu' }))));
+    const lignes = el('tbody');
+    for (const residue of residues) {
+      lignes.append(el('tr', {},
+        el('td', { classe: 'pl-chemin', texte: residue.path }),
+        el('td', { classe: 'chiffre', texte: String(residue.line) }),
+        el('td', { texte: residue.kind }),
+        el('td', { classe: 'pl-chemin', texte: residue.text })));
+    }
+    table.append(lignes);
+    corps.append(el('div', { classe: 'tableau-defile' }, table));
+  }
+
+  zone.append(el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-entete' },
+      el('strong', { texte: 'Archive anonymisée' })), corps));
+}
+
+// ajouterArchive verse dans l'analyse des copies reçues d'un collègue.
+async function ajouterArchive() {
+  const { zone, champ } = zoneDepot({ titre: 'Archive reçue (.zip)' });
+  const suite = await demander('Ajouter des copies reçues',
+    el('div', {},
+      el('p', {
+        texte: 'Un ZIP de copies anonymisées, tel que « gh cohorte » le produit '
+          + '— ou un ZIP ordinaire, un dossier par copie. Les copies reçues '
+          + 'entrent dans l’analyse par le même chemin que les vôtres.',
+      }),
+      el('label', { classe: 'champ-bloc' },
+        el('span', { classe: 'etiquette', texte: 'Archive' }), zone)),
+    'Ajouter');
+  if (!suite || !champ.value.trim()) return;
+
+  etat.plagiat.archives = [...(etat.plagiat.archives || []), champ.value.trim()];
+  dessinerArchives();
+  videApercu();
+}
+
+function dessinerArchives() {
+  const archives = etat.plagiat.archives || [];
+  const zone = $('pl-archives');
+  vider(zone);
+  if (!archives.length) return;
+
+  const corps = el('div', { classe: 'boite-corps' });
+  corps.append(el('p', {
+    classe: 'note',
+    texte: 'Ces copies n’ont ni dépôt ni nom : seul leur expéditeur sait qui '
+      + 'elles sont. Elles paraîtront sous leur jeton.',
+  }));
+  for (const chemin of archives) {
+    corps.append(el('div', {},
+      el('code', { texte: chemin }),
+      el('button', {
+        type: 'button', classe: 'bouton petit', texte: 'Retirer',
+        onclick: () => {
+          etat.plagiat.archives = archives.filter((item) => item !== chemin);
+          dessinerArchives();
+          videApercu();
+        },
+      })));
+  }
+  zone.append(el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-entete' },
+      el('strong', { texte: `${archives.length} archive(s) reçue(s)` })), corps));
+}
+
+// ------------------------------------------------ comparer avec un collègue
+
+// Deux enseignants ne voient pas les étudiants l'un de l'autre, et c'est voulu.
+// Mais un travail qui circule entre deux sections circule quand même, et aucun
+// des deux ne peut le voir seul.
+//
+// Ce qui traverse est un index d'empreintes : des hachés, sous des jetons
+// opaques. On mesure les ressemblances avec les copies d'en face sans en lire
+// une ligne — le cloisonnement tient pendant tout le dépistage.
+
+$('pl-contre').addEventListener('click', () => {
+  menuEchange.deplier(false);
+  tenter(() => choisirCollegue(), 'Catalogue');
+});
+
+async function choisirCollegue() {
+  const catalogue = await api('GET', `/api/orgs/${encode(etat.organisation)}/catalog`);
+  const disponibles = (catalogue.teaching || []).filter((ligne) => !ligne.mine);
+  if (!disponibles.length) {
+    message('Aucun collègue n’a encore annoncé de travail dans cette organisation.',
+      'info');
+    return;
+  }
+
+  const choisis = new Set(etat.plagiat.indexes || []);
+  const liste = el('div', { classe: 'liste-choix' });
+  for (const ligne of disponibles) {
+    const case_ = el('input', {
+      type: 'checkbox', value: ligne.id, checked: choisis.has(ligne.id),
+      disabled: !ligne.indexed,
+    });
+    liste.append(el('label', { classe: 'case' }, case_,
+      el('span', {},
+        el('span', { texte: `${ligne.id} — ${ligne.copies} copie(s)` }),
+        el('span', {
+          classe: 'aide',
+          texte: ligne.indexed
+            ? `Donné par ${ligne.teacher_name || '@' + ligne.teacher}`
+              + (ligne.last_handin ? `, dernière remise le ${ligne.last_handin}.` : '.')
+            : `Donné par ${ligne.teacher_name || '@' + ligne.teacher}, mais son `
+              + `index n’est pas publié : demandez-lui de le publier.`,
+        }))));
+  }
+
+  const suite = await demander('Comparer avec un collègue',
+    el('div', {},
+      el('p', {
+        texte: 'Ce qui traverse est un index d’empreintes : des hachés de '
+          + 'fragments, sous des jetons opaques. Vous mesurerez les '
+          + 'ressemblances sans lire une ligne du code d’en face, et sans '
+          + 'savoir de qui il s’agit.',
+      }),
+      liste),
+    'Ajouter à l’analyse');
+  if (!suite) return;
+
+  etat.plagiat.indexes = [...liste.querySelectorAll('input:checked')]
+    .map((item) => item.value);
+  etat.plagiat.catalogue = catalogue;
+  dessinerCollegues();
+  videApercu();
+}
+
+function dessinerCollegues() {
+  const indexes = etat.plagiat.indexes || [];
+  const zone = $('pl-collegues');
+  vider(zone);
+  if (!indexes.length) return;
+
+  const catalogue = etat.plagiat.catalogue || { teaching: [] };
+  const corps = el('div', { classe: 'boite-corps' });
+  corps.append(el('p', {
+    classe: 'note',
+    texte: 'Des empreintes, jamais du code. Les copies d’en face paraîtront '
+      + 'sous un jeton : pour savoir de qui il s’agit, il faudra le demander à '
+      + 'qui les a publiées.',
+  }));
+  for (const id of indexes) {
+    const ligne = (catalogue.teaching || []).find((item) => item.id === id) || {};
+    corps.append(el('div', {},
+      el('code', { texte: id }),
+      el('span', {
+        classe: 'note',
+        texte: ligne.teacher ? ` — ${ligne.teacher_name || '@' + ligne.teacher}` : '',
+      }),
+      el('button', {
+        type: 'button', classe: 'bouton petit', texte: 'Retirer',
+        onclick: () => {
+          etat.plagiat.indexes = indexes.filter((item) => item !== id);
+          dessinerCollegues();
+          videApercu();
+        },
+      })));
+  }
+  zone.append(el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-entete' },
+      el('strong', { texte: `${indexes.length} travail(aux) d’un collègue` })), corps));
+}
+
+// --------------------------------------------------------- publier l'index
+
+// Publier, c'est annoncer deux choses qui ne disent pas la même chose : que le
+// travail existe, et — si on le veut — de quoi le comparer. La première suffit
+// à ce qu'un collègue sache à qui s'adresser ; la seconde lui évite d'avoir à
+// demander.
+$('pl-rapport-publier').addEventListener('click', () => tenter(async () => {
+  const rapport = etat.plagiat.donnees;
+  const avecIndex = { valeur: true };
+  const suite = await demander('Publier ce travail',
+    el('div', {},
+      el('p', {
+        texte: `Vos collègues verront que vous avez donné « ${rapport.assignment} » `
+          + `à ${rapport.works.length} personnes. Aucun nom d’étudiant, aucun nom `
+          + `de dépôt : une place, un nom de travail, un décompte.`,
+      }),
+      el('label', { classe: 'case' },
+        el('input', { type: 'checkbox', id: 'pl-publier-index', checked: true }),
+        el('span', {},
+          el('span', { texte: 'Publier aussi l’index d’empreintes' }),
+          el('span', {
+            classe: 'aide',
+            texte: 'Des hachés de fragments, sous des jetons tirés au hasard. '
+              + 'Vos collègues pourront y comparer leurs copies sans lire une '
+              + 'ligne des vôtres. La table qui relie les jetons aux personnes '
+              + 'reste sur ce poste.',
+          })))),
+    'Publier', () => {
+      const case_ = $('pl-publier-index');
+      if (case_) case_.addEventListener('change', () => { avecIndex.valeur = case_.checked; });
+    });
+  if (!suite) return;
+
+  const bilan = await api('POST',
+    `/api/plagiat/reports/${encode(etat.plagiat.rapport)}/publish`,
+    { index: avecIndex.valeur });
+  if (!bilan.indexed) {
+    message(`« ${bilan.assignment} » est annoncé au catalogue. Son index n’est `
+      + `pas publié : un collègue devra vous le demander.`, 'succes');
+    return;
+  }
+  message(`Index publié : ${bilan.copies} copie(s), ${bilan.prints} empreinte(s). `
+    + `La table de correspondance est restée ici.`, 'succes');
+}, 'Publication'));
