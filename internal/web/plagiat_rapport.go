@@ -121,6 +121,7 @@ func (s *Server) handlePlagiarismReport(writer http.ResponseWriter, request *htt
 // works rend les copies analysées, sans leurs empreintes : de quoi dessiner un
 // nuage de points et une arborescence, pas de quoi recalculer quoi que ce soit.
 func works(report *plagiarism.Report) []map[string]any {
+	depistees := report.Screening()
 	liste := make([]map[string]any, 0, len(report.Index.Works))
 	for _, work := range report.Index.Works {
 		chemins := make([]string, 0, len(work.Files))
@@ -130,6 +131,10 @@ func works(report *plagiarism.Report) []map[string]any {
 		liste = append(liste, map[string]any{
 			"id": work.ID, "label": work.Name(), "origin": work.Origin,
 			"files": chemins, "tokens": work.TokenCount(), "prints": work.PrintCount(),
+			// Le travail dont l'index a fourni cette copie, quand elle vient
+			// d'un index : la page en tire à qui la demander, et qu'elle ne
+			// s'ouvrira pas.
+			"screened": depistees[work.ID],
 		})
 	}
 	return liste

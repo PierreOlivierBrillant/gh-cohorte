@@ -10,9 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 )
 
@@ -890,5 +892,126 @@ func TestOnPeutAnnoncerUnTravailSansEnPublierLIndex(t *testing.T) {
 	h.json(http.MethodGet, "/api/orgs/acme/catalog", nil, &catalogue)
 	if len(catalogue.Teaching) != 1 || catalogue.Teaching[0].Indexed {
 		t.Fatalf("catalogue : %+v", catalogue.Teaching)
+	}
+}
+
+// -------------------------------------------------- demandes et levée du voile
+
+// Le voile se lève sur un geste, jamais tout seul : une demande nommée, une
+// décision, et l'envoi d'une seule copie — celle qui était demandée.
+func TestUneDemandeSeDeposeSeTrancheEtProduitUnEnvoi(t *testing.T) {
+	h, scope := groupeAvecCopies(t)
+
+	// Le travail est analysé, son index publié, son annonce faite.
+	bilan := h.travail(http.MethodPost,
+		"/api/classrooms/"+scope+"/assignments/tp1/plagiat",
+		map[string]any{"profile": "tout", "baseline": true})
+	resultat, _ := bilan["result"].(map[string]any)
+	nom, _ := resultat["report"].(string)
+
+	var publie struct {
+		Assignment string `json:"assignment"`
+	}
+	h.json(http.MethodPost, "/api/plagiat/reports/"+nom+"/publish",
+		map[string]any{"index": true}, &publie)
+
+	// Le jeton d'une des copies, tel qu'un collègue le verrait.
+	fichiers := h.State.Files("acme/"+exchange.IndexRepo, exchange.IndexBranch)
+	index, err := exchange.DecodePublished([]byte(fichiers[exchange.IndexPath(publie.Assignment)]))
+	if err != nil {
+		t.Fatalf("index publié : %v", err)
+	}
+	vise := index.Corpus.Works[0].ID
+
+	// Une demande s'adresse à quelqu'un d'autre : ici, le compte connecté est
+	// celui qui a publié, donc il ne peut pas se demander à lui-même.
+	reponse, contenu := h.requete(http.MethodPost, "/api/orgs/acme/asks",
+		map[string]any{"assignment": publie.Assignment, "token": vise})
+	if reponse.StatusCode < 400 || !strings.Contains(string(contenu), "soi-même") {
+		t.Fatalf("on ne se demande pas à soi-même : %s", contenu)
+	}
+
+	// La demande vient donc d'ailleurs : on l'écrit au registre comme le ferait
+	// le collègue.
+	depose := exchange.Ask{
+		ID: "K7DM2X", From: "collegue", To: h.State.Viewer,
+		Assignment: publie.Assignment, Token: vise, Similarity: 0.94,
+		Note: "Une de mes copies lui ressemble beaucoup.",
+	}
+	if err := h.Serveur.RegistryApply("acme", registry.AskFor(depose)); err != nil {
+		t.Fatalf("dépôt de la demande : %v", err)
+	}
+
+	var demandes struct {
+		Received []struct {
+			ID         string  `json:"id"`
+			From       string  `json:"from"`
+			Assignment string  `json:"assignment"`
+			Token      string  `json:"token"`
+			Similarity float64 `json:"similarity"`
+			State      string  `json:"state"`
+		} `json:"received"`
+		Waiting int `json:"waiting"`
+	}
+	h.json(http.MethodGet, "/api/orgs/acme/asks", nil, &demandes)
+	if demandes.Waiting != 1 || len(demandes.Received) != 1 {
+		t.Fatalf("demandes reçues : %+v", demandes)
+	}
+	if demandes.Received[0].Token != vise || demandes.Received[0].Similarity != 0.94 {
+		t.Fatalf("demande : %+v", demandes.Received[0])
+	}
+
+	// Accorder prépare l'envoi de cette seule copie, sous le même jeton.
+	destination := filepath.Join(t.TempDir(), "accorde.zip")
+	var accorde struct {
+		State  string `json:"state"`
+		Copies int    `json:"copies"`
+		Path   string `json:"path"`
+		Table  string `json:"table_csv"`
+	}
+	h.json(http.MethodPost, "/api/orgs/acme/asks/K7DM2X/grant",
+		map[string]any{"destination": destination}, &accorde)
+	if accorde.State != exchange.AskGranted || accorde.Copies != 1 {
+		t.Fatalf("levée du voile : %+v", accorde)
+	}
+
+	archive, err := os.ReadFile(accorde.Path)
+	if err != nil {
+		t.Fatalf("archive : %v", err)
+	}
+	recu, err := anonymize.Import(archive)
+	if err != nil {
+		t.Fatalf("relecture : %v", err)
+	}
+	if len(recu.Copies) != 1 || recu.Copies[0].Work != vise {
+		t.Fatalf("une seule copie, sous le jeton demandé : %+v", recu.Copies)
+	}
+	if strings.Contains(string(archive), "Martin") ||
+		strings.Contains(string(archive), "Tanguay") {
+		t.Fatal("un nom se trouve dans l'envoi")
+	}
+
+	// La demande est tranchée, et ne se tranche pas deux fois.
+	reponse, contenu = h.requete(http.MethodPost, "/api/orgs/acme/asks/K7DM2X/grant",
+		map[string]any{"destination": destination})
+	if reponse.StatusCode < 400 || !strings.Contains(string(contenu), "accordée") {
+		t.Fatalf("une demande tranchée ne se retranche pas : %s", contenu)
+	}
+}
+
+// Une demande adressée à quelqu'un d'autre ne se tranche pas par mégarde.
+func TestOnNeTranchePasLaDemandeDUnAutre(t *testing.T) {
+	h, _ := groupeAvecCopies(t)
+	autre := exchange.Ask{
+		ID: "ZZ99ZZ", From: "collegue", To: "quelquun-dautre",
+		Assignment: "a26.5n6.02.tp1", Token: "K7DM2X",
+	}
+	if err := h.Serveur.RegistryApply("acme", registry.AskFor(autre)); err != nil {
+		t.Fatalf("dépôt : %v", err)
+	}
+	reponse, contenu := h.requete(http.MethodPost, "/api/orgs/acme/asks/ZZ99ZZ/deny",
+		map[string]any{"reason": "non"})
+	if reponse.StatusCode < 400 || !strings.Contains(string(contenu), "s'adresse à") {
+		t.Fatalf("la demande d'un autre doit être refusée : %s", contenu)
 	}
 }

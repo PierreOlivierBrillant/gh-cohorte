@@ -6320,6 +6320,7 @@ async function preparerPlagiat(sansHistorique) {
   vider($('pl-envoi-resultat'));
   afficherVue('plagiat', sansHistorique);
   dessinerAnalysesPassees();
+  dessinerDemandes();
 }
 
 // dessinerAnalysesPassees liste les rapports déjà produits sur ce poste.
@@ -6829,12 +6830,15 @@ function dessinerPaires() {
       el('th', { texte: 'Provenance' }))));
   const corps = el('tbody');
   for (const paire of paires) {
-    const ligne = el('tr', {
+    // Une copie venue d'un index n'existe ici qu'en empreintes : la paire ne
+    // s'ouvre pas. Laisser la ligne cliquable ferait cliquer dans le vide.
+    const depistee = depisteeDe(paire.left) || depisteeDe(paire.right);
+    const ligne = el('tr', depistee ? {} : {
       classe: 'cliquable',
       onclick: () => ouvrirPairePlagiat(paire.left, paire.right),
     },
-      el('td', {}, el('span', { texte: paire.left_name || paire.left })),
-      el('td', {}, el('span', { texte: paire.right_name || paire.right })),
+      el('td', {}, celluleDeCopie(paire.left, paire.left_name, paire.similarity)),
+      el('td', {}, celluleDeCopie(paire.right, paire.right_name, paire.similarity)),
       el('td', {
         classe: 'chiffre' + (actif && paire.similarity >= seuil ? ' pl-au-dessus' : ''),
         texte: `${Math.round(paire.similarity * 100)} %`,
@@ -6855,6 +6859,29 @@ function dessinerPaires() {
   }
   table.append(corps);
   zone.append(el('div', { classe: 'tableau-defile' }, table));
+}
+
+// depisteeDe dit de quel index publié une copie vient, quand elle en vient.
+function depisteeDe(id) {
+  const copie = (etat.plagiat.donnees.works || []).find((item) => item.id === id);
+  return copie ? (copie.screened || '') : '';
+}
+
+// celluleDeCopie nomme une copie, et propose de la demander quand elle n'a été
+// que mesurée.
+function celluleDeCopie(id, nom, similarite) {
+  const travail = depisteeDe(id);
+  if (!travail) return el('span', { texte: nom || id });
+  return el('span', {},
+    el('span', { texte: id }),
+    el('span', { classe: 'aide', texte: `mesurée dans l’index de ${travail}` }),
+    el('button', {
+      type: 'button', classe: 'lien', texte: 'Demander à voir…',
+      onclick: (evenement) => {
+        evenement.stopPropagation();
+        tenter(() => demanderUneCopie(id, travail, similarite), 'Demande');
+      },
+    }));
 }
 
 $('pl-paires-seuil').addEventListener('change', dessinerPaires);
@@ -7659,6 +7686,179 @@ function dessinerCollegues() {
   zone.append(el('div', { classe: 'boite' },
     el('div', { classe: 'boite-entete' },
       el('strong', { texte: `${indexes.length} travail(aux) d’un collègue` })), corps));
+}
+
+// ------------------------------------------------------ lever le voile
+
+// Le dépistage par index s'arrête là où il devient utile : une paire sort du
+// lot, et l'une des deux copies n'est qu'un jeton. Pour juger, il faut lire les
+// passages communs — donc du code d'en face.
+//
+// Il ne se lit pas tout seul. On dépose une demande nommée ; le propriétaire la
+// voit ici et décide. S'il accorde, l'outil lui prépare l'archive anonymisée de
+// cette seule copie, et c'est lui qui l'envoie. Rien ne traîne dans
+// l'organisation à la vue de toute l'équipe, et rien ne part dans son dos.
+
+async function dessinerDemandes() {
+  const zone = $('pl-demandes');
+  vider(zone);
+  if (!etat.organisation) return;
+  const reponse = await api('GET', `/api/orgs/${encode(etat.organisation)}/asks`)
+    .catch(() => null);
+  if (!reponse) return;
+  etat.plagiat.demandes = reponse;
+
+  const recues = reponse.received || [];
+  const faites = reponse.sent || [];
+  if (!recues.length && !faites.length) return;
+  const attente = recues.filter((item) => item.state === 'en attente');
+
+  const corps = el('div', { classe: 'boite-corps' });
+  if (attente.length) {
+    corps.append(el('p', {
+      classe: 'note',
+      texte: 'Accorder prépare l’archive anonymisée de cette seule copie, sous '
+        + 'le jeton que le collègue a mesuré. C’est vous qui la lui envoyez : '
+        + 'l’outil ne la met nulle part où il pourrait la prendre seul.',
+    }));
+  }
+  // Les demandes tranchées restent affichées : elles disent ce qu'on a décidé,
+  // et quelle archive on avait à envoyer. Les faire disparaître laisserait
+  // croire qu'on n'a rien reçu.
+  for (const demande of recues) corps.append(ligneDeDemandeRecue(demande));
+  for (const demande of faites) corps.append(ligneDeDemandeFaite(demande));
+
+  zone.append(el('div', { classe: 'boite' },
+    el('div', { classe: 'boite-entete' },
+      el('strong', {
+        texte: attente.length
+          ? `${attente.length} demande(s) attendent votre décision`
+          : 'Demandes de copies',
+      })), corps));
+}
+
+function ligneDeDemandeRecue(demande) {
+  const attend = demande.state === 'en attente';
+  const dit = attend
+    ? `demande à voir la copie ${demande.token} de ${demande.assignment}`
+      + (demande.similarity ? `, mesurée à ${Math.round(demande.similarity * 100)} %.` : '.')
+    : `a demandé la copie ${demande.token} de ${demande.assignment} : `
+      + `${demande.state}${demande.decided_at ? ', le ' + demande.decided_at.slice(0, 10) : ''}.`;
+  return el('div', { classe: 'pl-demande' },
+    el('span', {},
+      el('strong', { texte: demande.from_name || '@' + demande.from }),
+      el('span', { texte: ' ' + dit }),
+      demande.note ? el('span', { classe: 'aide', texte: `« ${demande.note} »` }) : null),
+    attend ? el('span', { classe: 'actions' },
+      el('button', {
+        type: 'button', classe: 'bouton petit vert', texte: 'Accorder…',
+        onclick: () => tenter(() => accorderDemande(demande), 'Demande'),
+      }),
+      el('button', {
+        type: 'button', classe: 'bouton petit', texte: 'Refuser…',
+        onclick: () => tenter(() => refuserDemande(demande), 'Demande'),
+      })) : null);
+}
+
+function ligneDeDemandeFaite(demande) {
+  const suite = {
+    'accordée': 'Le collègue vous enverra l’archive de cette copie ; '
+      + '« Ajouter des copies reçues… » la versera dans l’analyse.',
+    'refusée': demande.reason ? `Motif : « ${demande.reason} »` : 'Sans motif donné.',
+  }[demande.state] || 'En attente de sa décision.';
+  return el('div', { classe: 'pl-demande' },
+    el('span', {},
+      el('span', {
+        texte: `Votre demande ${demande.id} à `
+          + `${demande.to_name || '@' + demande.to} — copie ${demande.token} `
+          + `de ${demande.assignment} : ${demande.state}.`,
+      }),
+      el('span', { classe: 'aide', texte: suite })));
+}
+
+// demanderUneCopie dépose une demande pour une copie qu'on a mesurée sans
+// pouvoir la lire. Le jeton vient du rapport ; le destinataire, du catalogue.
+async function demanderUneCopie(id, travail, similarite) {
+  const suite = await demander('Demander à voir cette copie',
+    el('div', {},
+      el('p', {
+        texte: `Cette copie vient de l’index publié de « ${travail} ». Vous en `
+          + `connaissez la ressemblance avec la vôtre, et rien d’autre : ni son `
+          + `code, ni son auteur.`,
+      }),
+      el('p', {
+        classe: 'note',
+        texte: 'Votre demande sera lisible par qui a donné ce travail. S’il '
+          + 'accorde, il vous enverra l’archive anonymisée de cette seule copie.',
+      }),
+      el('label', { classe: 'champ-bloc souple' },
+        el('span', { classe: 'etiquette' }, 'Ce que vous lui dites'),
+        el('input', {
+          type: 'text', id: 'pl-demande-mot', classe: 'champ',
+          placeholder: 'deux TP quasi identiques, je voudrais lire les passages communs',
+        }))),
+    'Déposer la demande');
+  if (!suite) return;
+
+  const bilan = await api('POST', `/api/orgs/${encode(etat.organisation)}/asks`, {
+    assignment: travail, token: id, similarity: similarite,
+    note: ($('pl-demande-mot') || {}).value || '',
+  });
+  message(`Demande ${bilan.id} déposée auprès de `
+    + `${bilan.to_name || '@' + bilan.to}.`, 'succes');
+}
+
+async function accorderDemande(demande) {
+  const suite = await demander(`Accorder la demande ${demande.id}`,
+    el('div', {},
+      el('p', {
+        texte: `Une seule copie partira — celle du jeton ${demande.token} —, `
+          + `anonymisée comme un envoi ordinaire. Ni les autres copies, ni les `
+          + `noms, ni la table qui relie les jetons aux personnes.`,
+      }),
+      el('label', { classe: 'champ-bloc souple' },
+        el('span', { classe: 'etiquette' }, 'Fichier ZIP à écrire'),
+        el('input', {
+          type: 'text', id: 'pl-demande-zip', classe: 'champ',
+          value: `demande-${demande.id.toLowerCase()}.zip`,
+        }),
+        el('span', {
+          classe: 'aide',
+          texte: 'Écrit sur ce poste. C’est vous qui l’envoyez ensuite : '
+            + 'l’outil ne le fait pas pour vous, et c’est voulu.',
+        }))),
+    'Accorder et écrire');
+  if (!suite) return;
+
+  const bilan = await api('POST',
+    `/api/orgs/${encode(etat.organisation)}/asks/${encode(demande.id)}/grant`,
+    { destination: ($('pl-demande-zip') || {}).value || '' });
+  message(`Demande accordée. Envoyez « ${bilan.path} » à `
+    + `${demande.from_name || '@' + demande.from}.`, 'succes');
+  await dessinerDemandes();
+}
+
+async function refuserDemande(demande) {
+  const suite = await demander(`Refuser la demande ${demande.id}`,
+    el('div', {},
+      el('p', {
+        texte: `${demande.from_name || '@' + demande.from} verra votre refus et `
+          + `ce que vous répondez. Rien d’autre ne change : il garde ses mesures.`,
+      }),
+      el('label', { classe: 'champ-bloc souple' },
+        el('span', { classe: 'etiquette' }, 'Ce que vous répondez'),
+        el('input', {
+          type: 'text', id: 'pl-demande-motif', classe: 'champ',
+          placeholder: 'le dossier est déjà entre les mains de la direction',
+        }))),
+    'Refuser');
+  if (!suite) return;
+
+  await api('POST',
+    `/api/orgs/${encode(etat.organisation)}/asks/${encode(demande.id)}/deny`,
+    { reason: ($('pl-demande-motif') || {}).value || '' });
+  message('Demande refusée.', 'info');
+  await dessinerDemandes();
 }
 
 // --------------------------------------------------------- publier l'index

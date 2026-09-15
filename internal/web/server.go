@@ -148,6 +148,16 @@ func (s *Server) URL() string {
 // Address est l'adresse sans jeton, pour les messages du terminal.
 func (s *Server) Address() string { return "http://127.0.0.1:" + s.port }
 
+// RegistryApply écrit au registre d'une organisation.
+//
+// Il n'existe que pour les épreuves : elles ont besoin d'y déposer ce qu'un
+// collègue y aurait écrit depuis son poste, et le faux serveur n'a pas de
+// second client.
+func (s *Server) RegistryApply(org string, change registry.Change) error {
+	_, err := s.registryOf(org).Apply(change)
+	return err
+}
+
 // Settings renvoie les réglages tels que l'interface les a laissés : la session
 // du terminal les mémorise en quittant.
 func (s *Server) Settings() config.Settings {
@@ -297,6 +307,10 @@ func (s *Server) routes() http.Handler {
 
 	// --- travaux en arrière-plan
 	mux.HandleFunc("GET /api/orgs/{org}/catalog", s.handleCatalog)
+	mux.HandleFunc("GET /api/orgs/{org}/asks", s.handleAsks)
+	mux.HandleFunc("POST /api/orgs/{org}/asks", s.handleAsk)
+	mux.HandleFunc("POST /api/orgs/{org}/asks/{id}/grant", s.handleGrantAsk)
+	mux.HandleFunc("POST /api/orgs/{org}/asks/{id}/deny", s.handleDenyAsk)
 	mux.HandleFunc("GET /api/orgs/{org}/rules", s.handleRules)
 	mux.HandleFunc("PUT /api/orgs/{org}/rules", s.handleSetRules)
 

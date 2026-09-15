@@ -1232,6 +1232,17 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 .pl-au-dessus { color: var(--erreur); font-weight: 600; }
 .pl-chemin { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8125rem; }
 
+/* Une demande de levée du voile : ce qu'on demande d'un côté, les deux
+   décisions de l'autre. Elles restent côte à côte — accorder et refuser se
+   valent, et un bouton mis en avant tout seul pèserait sur la décision. */
+.pl-demande {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; padding: .5rem 0; border-top: 1px solid var(--bord);
+}
+.pl-demande:first-of-type { border-top: 0; }
+.pl-demande > span:first-child { display: flex; flex-direction: column; gap: .15rem; }
+.pl-demande .actions { display: flex; gap: .4rem; flex: 0 0 auto; }
+
 /* Histogramme et nuage : du SVG écrit à la main. Aucune bibliothèque n'est
    chargée depuis l'extérieur — l'interface doit fonctionner hors ligne. */
 .pl-graphique { width: 100%; height: auto; display: block; }
