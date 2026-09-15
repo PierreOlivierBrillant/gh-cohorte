@@ -68,9 +68,18 @@ func (s *Server) handleCatalog(writer http.ResponseWriter, request *http.Request
 			"mine": strings.EqualFold(ligne.Teacher, s.deps.Viewer),
 		})
 	}
+	// Ce qui manque est nommé par le domaine plutôt que déduit de la liste :
+	// « manquant » doit vouloir dire la même chose ici, au terminal et dans une
+	// passe automatisée.
+	manquants := make([]string, 0, 4)
+	for _, ligne := range catalogue.Unindexed(s.deps.Viewer) {
+		manquants = append(manquants, ligne.ID())
+	}
+
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"org": org, "teaching": rendues, "teachers": catalogue.Teachers(),
-		"viewer": s.deps.Viewer, "warning": avis,
+		"unindexed": manquants,
+		"viewer":    s.deps.Viewer, "warning": avis,
 	})
 }
 

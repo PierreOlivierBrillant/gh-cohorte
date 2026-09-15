@@ -7887,6 +7887,83 @@ async function refuserDemande(demande) {
   await dessinerDemandes();
 }
 
+// ------------------------------------------- rattraper les index manquants
+
+// Un travail annoncé au catalogue sans index publié ne sert qu'à moitié : un
+// collègue voit qu'il existe, et ne peut rien y mesurer — il ne peut que
+// demander qu'on le publie. Les rattraper un par un est le genre de corvée
+// qu'on remet.
+//
+// Ce qui est « manquant » vient du serveur, qui le tient du catalogue : le
+// terminal et la passe automatisée en ont la même idée, au travail près.
+
+$('pl-rattraper').addEventListener('click', () => {
+  menuEchange.deplier(false);
+  tenter(() => rattraperLesIndex(), 'Index manquants');
+});
+
+async function rattraperLesIndex() {
+  const catalogue = await api('GET', `/api/orgs/${encode(etat.organisation)}/catalog`);
+  const manquants = catalogue.unindexed || [];
+  if (!manquants.length) {
+    message('Tous les travaux que vous avez annoncés ont leur index.', 'info');
+    return;
+  }
+
+  const liste = el('div', { classe: 'liste-choix' });
+  for (const id of manquants) liste.append(el('code', { texte: id }));
+  const suite = await demander(
+    `Publier ${manquants.length} index manquant(s)`,
+    el('div', {},
+      el('p', {
+        texte: 'Chacun de ces travaux est annoncé sans index : vos collègues '
+          + 'voient qu’il existe sans pouvoir y comparer quoi que ce soit.',
+      }),
+      liste,
+      el('p', {
+        classe: 'note',
+        texte: 'Chaque travail sera analysé puis publié. Ce qui part : des '
+          + 'empreintes et des jetons. Ni code, ni nom — les tables qui relient '
+          + 'les jetons aux personnes restent sur ce poste.',
+      })),
+    'Analyser et publier');
+  if (!suite) return;
+
+  // Un travail qui échoue n'arrête pas les autres : sans cela, un seul dépôt
+  // supprimé empêcherait de rattraper tous les suivants.
+  let publies = 0;
+  const echecs = [];
+  for (const id of manquants) {
+    try {
+      await publierUnIndexManquant(id);
+      publies++;
+    } catch (erreur) {
+      echecs.push(`${id} — ${erreur.message || erreur}`);
+    }
+  }
+  if (echecs.length) {
+    message(`${publies} index publié(s) ; ${echecs.length} en échec : `
+      + echecs.join(' ; '), 'erreur');
+    return;
+  }
+  message(`${publies} index publié(s).`, 'succes');
+}
+
+// publierUnIndexManquant analyse un travail puis publie son index — la suite
+// exacte qu'on ferait à la main, écran après écran.
+async function publierUnIndexManquant(id) {
+  const coupe = id.lastIndexOf('.');
+  const place = id.slice(0, coupe);
+  const nom = id.slice(coupe + 1);
+  const fiche = await api('POST',
+    `/api/classrooms/${encode(place)}/assignments/${encode(nom)}/plagiat`,
+    { profile: 'tout', baseline: true });
+  const bilan = await suivre(fiche);
+  const rapport = bilan && bilan.report;
+  if (!rapport) throw new Error('aucun rapport produit');
+  await api('POST', `/api/plagiat/reports/${encode(rapport)}/publish`, { index: true });
+}
+
 // --------------------------------------------------------- publier l'index
 
 // Publier, c'est annoncer deux choses qui ne disent pas la même chose : que le

@@ -1091,3 +1091,35 @@ func TestLaVueDePaireDitQuiARemisEnPremier(t *testing.T) {
 		t.Fatalf("la phrase doit dire ce qu'elle ne prouve pas : %q", vue.Chronology.Note)
 	}
 }
+
+// Le navigateur doit avoir la même idée que le terminal de ce qui « manque » :
+// c'est le catalogue qui le dit, et la page ne le déduit pas elle-même.
+func TestLeCatalogueNommeLesIndexQuiManquent(t *testing.T) {
+	h, scope := groupeAvecCopies(t)
+
+	// Un travail annoncé sans index : c'est ce que voit un collègue à qui l'on
+	// n'a publié que le catalogue.
+	bilan := h.travail(http.MethodPost,
+		"/api/classrooms/"+scope+"/assignments/tp1/plagiat",
+		map[string]any{"profile": "tout", "baseline": true})
+	resultat, _ := bilan["result"].(map[string]any)
+	nom, _ := resultat["report"].(string)
+	h.json(http.MethodPost, "/api/plagiat/reports/"+nom+"/publish",
+		map[string]any{"index": false}, nil)
+
+	var catalogue struct {
+		Unindexed []string `json:"unindexed"`
+	}
+	h.json(http.MethodGet, "/api/orgs/acme/catalog", nil, &catalogue)
+	if len(catalogue.Unindexed) != 1 || catalogue.Unindexed[0] != "a26.5n6.01.tp1" {
+		t.Fatalf("index manquants : %v", catalogue.Unindexed)
+	}
+
+	// Une fois l'index publié, il ne manque plus rien.
+	h.json(http.MethodPost, "/api/plagiat/reports/"+nom+"/publish",
+		map[string]any{"index": true}, nil)
+	h.json(http.MethodGet, "/api/orgs/acme/catalog", nil, &catalogue)
+	if len(catalogue.Unindexed) != 0 {
+		t.Fatalf("plus rien ne devrait manquer : %v", catalogue.Unindexed)
+	}
+}
