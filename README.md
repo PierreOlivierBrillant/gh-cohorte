@@ -181,6 +181,14 @@ accès sans en fermer aucun : pour que le cloisonnement tienne, les enseignants
 doivent être membres de l'organisation et non propriétaires, et sa permission de
 base doit être `none`.
 
+**Comparer avec un collègue ne demande pas de percer ce cloisonnement.** Ce qui
+circule est un **index d'empreintes** (`--publish-index`, `--against`) : des
+hachés de fragments, sous des jetons tirés au hasard, dans un second dépôt privé
+`.cohorte-empreintes`. On mesure les ressemblances avec les copies d'en face
+sans en lire une ligne ni savoir de qui elles sont. Un catalogue — dans le
+registre — dit qui a donné quel travail, à combien de personnes : de quoi savoir
+à qui s'adresser, sans qu'aucune liste de classe ne soit publiée.
+
 Un groupe se déplace d'une place à l'autre — une autre session, un autre cours,
 un autre numéro — en renommant ses dépôts, avec un aperçu avant écriture.
 GitHub garde une redirection depuis chaque ancien nom : les clones et les liens
@@ -208,6 +216,21 @@ déjà distribués continuent de fonctionner.
   plutôt qu'avec chacun de ses membres — changer sa composition suffit donc à
   changer qui y accède. Les équipes se créent, se renomment, se suppriment, et
   une équipe déjà présente dans l'organisation s'adopte telle quelle.
+- **Comparer les copies d'un travail entre elles** (`--plagiarism`) : elles sont
+  mesurées deux à deux et classées par ordre de suspicion, le gabarit distribué
+  étant retiré d'office puisque l'outil sait lequel il a déposé. **Ce n'est pas
+  un détecteur de plagiat** : une ressemblance forte n'est pas une preuve — elle
+  se vérifie en lisant les passages communs, et elle s'explique parfois. L'outil
+  le redit sur chaque écran, et ce n'est pas une formule de politesse.
+  La comparaison porte sur le groupe, sur le cours, ou sur toutes les sessions
+  (`--reach`). Un cours qui a changé de sigle n'est retrouvé que si on l'a dit :
+  les équivalences — « 5N6 est devenu 5M6 » — se déclarent une fois dans le
+  registre de l'organisation, et valent alors pour toute l'équipe.
+  Avec un collègue d'une autre organisation, ce sont des **copies anonymisées**
+  qui s'échangent (`--export-zip`, `--import-zip`) : noms, comptes et matricules
+  y sont remplacés par des jetons de longueur égale, et la table de
+  correspondance reste chez l'expéditeur. L'anonymisation n'est jamais
+  complète — ce qui lui a résisté est montré avant que l'archive ne parte.
 
 Ce que GitHub Classroom fait et que l'outil ne fait pas : pas de lien
 d'invitation à distribuer — les dépôts sont créés directement —, pas de
@@ -217,7 +240,10 @@ L'assistant du terminal ignore la notion de groupe et travaille par préfixe
 (`--manage tp1`). Déclarer un groupe, tenir sa liste d'étudiants ou déplacer une
 personne n'existent donc que dans l'interface web. Les équipes, elles,
 appartiennent à un groupe : au terminal, c'est la place du groupe qui en tient
-lieu (`--manage a26.5n6.01 --teams`). Tout le reste est disponible partout.
+lieu (`--manage a26.5n6.01 --teams`). La comparaison des copies se lance des
+trois façons, mais ses deux vues côte à côte — deux projets, deux fichiers —
+n'existent que dans l'interface web : surligner un passage commun et sauter au
+suivant n'a pas d'équivalent scriptable. Tout le reste est disponible partout.
 
 ## Fiabilité
 
@@ -263,6 +289,11 @@ Les plus courantes :
 | `--roster FICHIER` | liste « nom complet, compte GitHub » au format CSV |
 | `--assignment NOM` | identifiant du travail |
 | `--manage [PREFIXE]` | gérer un groupe existant au lieu d'en créer un |
+| `--plagiarism` | comparer entre elles les copies du travail géré |
+| `--reach PORTEE` | jusqu'où comparer : `groupe`, `cours`, `annees` |
+| `--export-zip FICHIER` | archive anonymisée des copies, à envoyer à un collègue |
+| `--publish-index` | publier l'index d'empreintes du travail géré |
+| `--against TRAVAUX` | travaux d'un collègue à comparer, par leur identifiant |
 | `--teams` | travail d'équipe ; avec `--manage`, les équipes du groupe |
 | `--team NOM` | équipe visée, ou équipes à servir |
 | `--import [TRAVAIL]` | reprendre des dépôts nommés « travail-compte » |
