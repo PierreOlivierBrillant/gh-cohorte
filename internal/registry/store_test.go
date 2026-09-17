@@ -729,3 +729,46 @@ func TestUnCacheDeLaFormeCouranteEviteDeRelireLeFichier(t *testing.T) {
 		t.Errorf("%d lecture(s) du fichier, %d avant : le cache ne sert plus", apres, lectures)
 	}
 }
+
+// Ce que la lecture a dû signaler se redit à chaque fois, cache ou non.
+//
+// Un registre écrit par une version ultérieure se lit au mieux en partie, au
+// pire pas du tout : le renommage de « students » en « users » a rendu, aux
+// versions d'avant, une organisation entière sans un seul nom. L'outil le
+// disait — une fois. La lecture suivante venait du cache, qui ne retenait que
+// les fiches, et l'avertissement se taisait pour la durée du sceau : trois
+// mois d'une organisation qui paraît vide sans que rien ne l'explique.
+func TestUnAvertissementDuRegistreSurvitAuCache(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", registry.RepoName, true)
+	state.SeedCommit("acme/"+registry.RepoName, map[string]string{
+		// Une version que cet outil ne connaît pas, et des fiches rangées là
+		// où il ne les cherche pas : c'est exactement ce qu'il a fait subir à
+		// ses propres versions antérieures.
+		registry.UsersFile: `{"version":99,"personnes":[{"username":"1680229"}]}`,
+	}, registry.Branch)
+	store, _ := cacheEt(t, state)
+
+	premiere, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load : %v", err)
+	}
+	if len(premiere.Issues) == 0 {
+		t.Fatalf("première lecture : aucun avis sur une version inconnue")
+	}
+	if premiere.Set.Len() != 0 {
+		t.Fatalf("Len = %d : le fichier n'est pourtant pas lisible ici", premiere.Set.Len())
+	}
+
+	seconde, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load : %v", err)
+	}
+	if len(seconde.Issues) != len(premiere.Issues) {
+		t.Fatalf("seconde lecture : %d avis contre %d à la première — le cache les a perdus",
+			len(seconde.Issues), len(premiere.Issues))
+	}
+	if !strings.Contains(strings.Join(seconde.Issues, " "), "version 99") {
+		t.Errorf("avis relus : %v", seconde.Issues)
+	}
+}
