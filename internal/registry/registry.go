@@ -850,10 +850,18 @@ func Decode(content []byte) (*Set, []string) {
 		return Empty(), []string{"Registre illisible : " + err.Error()}
 	}
 	var soucis []string
+	// Une version qu'on ne connaît pas ne se devine pas : ce qu'elle range
+	// ailleurs, ou nomme autrement, se lit comme absent. L'avertissement porte
+	// donc d'abord sur ce qui est affiché — un registre qui paraît vide alors
+	// qu'il est plein —, et seulement ensuite sur l'écriture. C'est arrivé : le
+	// renommage de « students » en « users » a rendu, aux versions d'avant, une
+	// organisation entière sans un seul nom, et sans un mot.
 	if lu.Version > Version {
 		soucis = append(soucis, fmt.Sprintf(
-			"Le registre est en version %d, l'outil en connaît %d : mettez-le à jour "+
-				"avant d'y écrire.", lu.Version, Version))
+			"Le registre est en version %d, l'outil en connaît %d : ce qui s'affiche "+
+				"peut être incomplet, ou vide alors que le fichier ne l'est pas. "+
+				"Mettez l'outil à jour avant de vous y fier et avant d'y écrire.",
+			lu.Version, Version))
 	}
 	lues := lu.entries()
 	fiches := make([]User, 0, len(lues))

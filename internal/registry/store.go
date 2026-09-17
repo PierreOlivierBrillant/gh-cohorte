@@ -102,8 +102,9 @@ type Snapshot struct {
 // C'est arrivé au renommage de « students » en « users ». Une entrée d'une
 // forme qu'on ne reconnaît pas n'est donc plus lue du tout : relire GitHub
 // coûte une requête, se tromper coûtait bien davantage.
-// La version 6 ajoute les demandes de levée du voile.
-const keptSchema = 6
+// La version 6 ajoute les demandes de levée du voile, la 7 ce que la lecture a
+// dû signaler.
+const keptSchema = 7
 
 // keptSet est ce que le cache local retient : le registre, et le commit qui le
 // scelle. Tant que la branche pointe sur ce commit, ce contenu vaut toujours.
@@ -121,6 +122,13 @@ type keptSet struct {
 	Catalog     exchange.Catalog `json:"catalog,omitzero"`
 	Marks       signature.Book   `json:"marks,omitzero"`
 	Asks        exchange.Asks    `json:"asks,omitzero"`
+	// Issues redit ce que la lecture avait dû signaler. Sans lui, un registre
+	// écrit par une version ultérieure — dont cette version-ci ne sait relire
+	// qu'une partie, parfois rien — s'affichait sans un mot dès la deuxième
+	// fois : l'avertissement ne tenait que le temps de la lecture qui l'avait
+	// produit, et le sceau vaut trois mois. C'est un avertissement dont le
+	// silence coûte cher, puisqu'il dit justement de mettre l'outil à jour.
+	Issues []string `json:"issues,omitempty"`
 }
 
 // Load lit le registre.
@@ -221,7 +229,7 @@ func (s *Store) load(offline bool) (Snapshot, error) {
 		demandes, soucis = lues, append(soucis, ennuis...)
 	}
 	set := newSet(fiches, dates, regles, catalogue, marques, demandes)
-	s.keep(head, set)
+	s.keep(head, set, soucis)
 	return Snapshot{Set: set, Head: head, Issues: soucis, Seeded: utilisateurs != nil}, nil
 }
 
@@ -238,17 +246,18 @@ func (s *Store) kept() (Snapshot, bool) {
 	return Snapshot{
 		Set: newSet(garde.Users, garde.Assignments, garde.Rules, garde.Catalog,
 			garde.Marks, garde.Asks),
-		Head: garde.Head,
+		Head: garde.Head, Issues: garde.Issues,
 	}, true
 }
 
-// keep scelle sur le disque ce qu'on vient de lire.
-func (s *Store) keep(head string, set *Set) {
+// keep scelle sur le disque ce qu'on vient de lire, avis compris : ce que le
+// fichier a de fâcheux ne disparaît pas parce qu'on ne le retélécharge plus.
+func (s *Store) keep(head string, set *Set, soucis []string) {
 	if s.local == nil || head == "" {
 		return
 	}
 	s.local.Set(cache.RegistryKey(s.org), keptSet{
-		Schema: keptSchema, Head: head,
+		Schema: keptSchema, Head: head, Issues: soucis,
 		Users: set.All(), Assignments: set.Assignments(), Rules: set.Rules(),
 		Catalog: set.Catalog(), Marks: set.Marks(), Asks: set.Asks(),
 	})
@@ -290,7 +299,8 @@ func (s *Store) Apply(change Change) (*Set, error) {
 		}
 		commit, err := s.commit(suivant, snapshot, change.message())
 		if err == nil {
-			s.keep(commit, suivant)
+			// Ce qu'on vient d'écrire est de notre main : rien à signaler.
+			s.keep(commit, suivant, nil)
 			return suivant, nil
 		}
 		if !errors.Is(err, ghapi.ErrNotFastForward) {
