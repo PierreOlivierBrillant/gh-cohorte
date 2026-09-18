@@ -409,6 +409,13 @@ func (s *Set) Name(username string) string {
 // pareil.
 func (s *Set) Resolve(slug string) (User, bool) {
 	fragment := strings.ToLower(strings.TrimSpace(slug))
+	// Un fragment vide ne désigne personne. La question se pose depuis qu'une
+	// liste peut porter quelqu'un dont on ne connaît pas encore le compte : le
+	// prendre pour une clé reviendrait à lui attribuer la première fiche venue,
+	// et à effacer le seul nom qu'on ait de lui.
+	if fragment == "" {
+		return User{}, false
+	}
 	if position, connu := s.bySlug[fragment]; connu {
 		return s.users[position], true
 	}

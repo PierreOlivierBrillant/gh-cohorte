@@ -174,8 +174,11 @@ func (s *Session) collectPeople() ([]roster.Person, error) {
 // reviewRoster affiche le résultat du chargement et décide de la suite.
 // Un retour nil sans erreur invite à redemander un fichier.
 func (s *Session) reviewRoster(list roster.Roster, source string) ([]roster.Person, error) {
+	// Tout le monde, compte GitHub ou non : une liste du collège n'en porte
+	// aucun, et la compter sur les seuls comptes la disait vide.
+	lues := list.Everyone()
 	s.Console.Printf("  %s personne(s) valide(s) lue(s) depuis %s.",
-		s.Console.OK(itoa(len(list.People))), s.Console.Dim(source))
+		s.Console.OK(itoa(len(lues))), s.Console.Dim(source))
 
 	if len(list.Issues) > 0 {
 		s.Console.Warning("%d ligne(s) rejetée(s) :", len(list.Issues))
@@ -192,7 +195,7 @@ func (s *Session) reviewRoster(list roster.Roster, source string) ([]roster.Pers
 		}
 	}
 
-	if len(list.People) == 0 {
+	if len(lues) == 0 {
 		if !s.Interactive() {
 			return nil, valid.Errorf("Aucune personne valide dans la liste fournie.")
 		}
@@ -200,11 +203,23 @@ func (s *Session) reviewRoster(list roster.Roster, source string) ([]roster.Pers
 		return nil, nil
 	}
 
-	rows := make([][]string, 0, len(list.People))
-	for _, person := range list.People {
-		rows = append(rows, []string{person.FullName, "@" + person.Username})
+	rows := make([][]string, 0, len(lues))
+	sansCompte := 0
+	for _, person := range lues {
+		compte := "@" + person.Username
+		// Une case vide se lit comme un oubli d'affichage ; ici c'est un fait,
+		// et c'est celui dont dépend l'invitation au dépôt.
+		if person.Username == "" {
+			compte, sansCompte = s.Console.Dim("à rattacher"), sansCompte+1
+		}
+		rows = append(rows, []string{person.FullName, compte})
 	}
 	s.Console.Table([]string{"Nom complet", "Compte GitHub"}, rows, 15)
+	if sansCompte > 0 {
+		s.Console.Note("%d personne(s) sans compte GitHub : leur dépôt sera créé, "+
+			"mais personne n'y sera invité tant que le compte n'est pas rattaché.",
+			sansCompte)
+	}
 
 	if len(list.Issues) > 0 {
 		if !s.Interactive() {
@@ -213,7 +228,7 @@ func (s *Session) reviewRoster(list roster.Roster, source string) ([]roster.Pers
 					"%d ligne(s) invalide(s) dans la liste : corrigez le fichier "+
 						"ou ajoutez --yes pour les ignorer.", len(list.Issues))
 			}
-			return list.People, nil
+			return lues, nil
 		}
 		confirmed, err := s.Prompt.Confirm("Poursuivre en ignorant les lignes rejetées ?", false)
 		if err != nil {
@@ -223,7 +238,7 @@ func (s *Session) reviewRoster(list roster.Roster, source string) ([]roster.Pers
 			return nil, nil
 		}
 	}
-	return list.People, nil
+	return lues, nil
 }
 
 // promptPeople guide une saisie manuelle, deux champs par personne.
@@ -301,9 +316,15 @@ func (s *Session) verifyAccounts(people []roster.Person) ([]roster.Person, error
 	if s.Options.NoVerifyAccounts {
 		return people, nil
 	}
+	// Seuls les comptes connus se vérifient : une personne qu'on n'a pas encore
+	// rattachée n'a pas de compte introuvable, elle n'en a pas du tout.
+	aVerifier := roster.WithAccounts(people)
+	if len(aVerifier) == 0 {
+		return people, nil
+	}
 	if s.Interactive() {
 		wanted, err := s.Prompt.Confirm(
-			plural("Vérifier l'existence des %d comptes GitHub ?", len(people)),
+			plural("Vérifier l'existence des %d comptes GitHub ?", len(aVerifier)),
 			s.Settings.VerifyAccounts)
 		if err != nil {
 			return nil, err
@@ -315,9 +336,9 @@ func (s *Session) verifyAccounts(people []roster.Person) ([]roster.Person, error
 	}
 	s.Settings.VerifyAccounts = true
 
-	progress := ui.NewProgress(s.Console, "Comptes GitHub", len(people))
+	progress := ui.NewProgress(s.Console, "Comptes GitHub", len(aVerifier))
 	var missing []roster.Person
-	for index, person := range people {
+	for index, person := range aVerifier {
 		exists, err := s.Client.UserExists(person.Username)
 		progress.Update(index+1, "@"+person.Username)
 		if err != nil {
@@ -330,7 +351,7 @@ func (s *Session) verifyAccounts(people []roster.Person) ([]roster.Person, error
 		}
 	}
 	progress.Finish("")
-	s.Console.Success("%d compte(s) vérifié(s).", len(people))
+	s.Console.Success("%d compte(s) vérifié(s).", len(aVerifier))
 
 	if len(missing) == 0 {
 		return people, nil

@@ -467,13 +467,30 @@ func (c Classroom) Add(person roster.Person) (Classroom, error) {
 	return c, nil
 }
 
-// Find retrouve un étudiant du groupe par son compte GitHub.
+// Find retrouve un étudiant du groupe par ce qui le désigne : son compte
+// GitHub, ou à défaut son matricule.
+//
 // Le matricule réunit les lignes d'une même personne : c'est elle qui est
 // rendue, avec tous ses comptes, et non la ligne qui portait celui qu'on
 // cherchait.
-func (c Classroom) Find(username string) (roster.Person, bool) {
-	for _, identite := range c.Identities() {
-		if identite.Has(username) {
+//
+// Le compte passe d'abord, et le matricule ne sert qu'ensuite. Sans quoi la
+// seule façon de désigner quelqu'un dont on ne connaît pas encore le compte
+// serait de connaître son compte — et c'est précisément à ces personnes-là
+// qu'on veut en rattacher un, puisqu'une liste du collège n'en donne aucun.
+func (c Classroom) Find(handle string) (roster.Person, bool) {
+	identites := c.Identities()
+	for _, identite := range identites {
+		if identite.Has(handle) {
+			return identite.Person(), true
+		}
+	}
+	matricule := strings.TrimSpace(handle)
+	if matricule == "" {
+		return roster.Person{}, false
+	}
+	for _, identite := range identites {
+		if strings.EqualFold(strings.TrimSpace(identite.StudentID), matricule) {
 			return identite.Person(), true
 		}
 	}
@@ -716,10 +733,11 @@ func dedupe(people []roster.Person) []roster.Person {
 	for _, person := range people {
 		person.Username = strings.TrimSpace(person.Username)
 		person.FullName = strings.TrimSpace(person.FullName)
-		if person.Username == "" {
+		cle := designation(person)
+		if cle == "" {
 			continue
 		}
-		if position, connu := vus[person.Key()]; connu {
+		if position, connu := vus[cle]; connu {
 			if uniques[position].FullName == "" && person.FullName != "" {
 				uniques[position].FullName = person.FullName
 			}
@@ -730,10 +748,30 @@ func dedupe(people []roster.Person) []roster.Person {
 			}
 			continue
 		}
-		vus[person.Key()] = len(uniques)
+		vus[cle] = len(uniques)
 		uniques = append(uniques, person)
 	}
 	return uniques
+}
+
+// designation dit ce qui, dans une liste de classe, désigne une personne.
+//
+// Le compte GitHub s'impose quand il est là. À défaut, le matricule suffit :
+// c'est lui qui identifie vraiment quelqu'un, et une liste sortie d'Omnivox n'a
+// que lui — l'écarter revenait à jeter la cohorte entière au moment de
+// l'enregistrer, en silence.
+//
+// Une ligne qui n'a ni l'un ni l'autre, en revanche, ne peut être rapprochée de
+// rien. Deux homonymes y seraient confondus, et leur donner un seul dépôt pour
+// deux est précisément ce que le refus des homonymes empêche ailleurs.
+func designation(person roster.Person) string {
+	if compte := strings.TrimSpace(person.Username); compte != "" {
+		return "@" + strings.ToLower(compte)
+	}
+	if matricule := strings.TrimSpace(person.StudentID); matricule != "" {
+		return "#" + strings.ToLower(matricule)
+	}
+	return ""
 }
 
 // sansMarque ramène à leur compte les personnes qu'une marque de doublon a fait
@@ -844,6 +882,18 @@ func (c Classroom) Rename(username string, person roster.Person) (Classroom, err
 		if student.Owns(username) {
 			position = index
 			break
+		}
+	}
+	// À défaut d'un compte, le matricule désigne la ligne. C'est le seul moyen
+	// d'atteindre quelqu'un qu'une liste du collège a inscrit sans compte.
+	if position < 0 {
+		if matricule := strings.TrimSpace(username); matricule != "" {
+			for index, student := range c.Students {
+				if strings.EqualFold(strings.TrimSpace(student.StudentID), matricule) {
+					position = index
+					break
+				}
+			}
 		}
 	}
 	if position < 0 {
