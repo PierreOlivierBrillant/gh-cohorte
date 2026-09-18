@@ -388,7 +388,11 @@ func (s *Server) handleSetStudents(writer http.ResponseWriter, request *http.Req
 			fail(writer, err)
 			return
 		}
-		people, issues = liste.People, liste.Issues
+		// Everyone et non People : une liste du collège ne porte aucun compte
+		// GitHub, et n'en retenir que les personnes qui en ont un revenait à
+		// refuser la cohorte entière — « Aucun étudiant dans la liste fournie »
+		// devant un fichier de vingt-trois noms.
+		people, issues = liste.Everyone(), liste.Issues
 		if chemin, err := roster.ExpandPath(body.Path); err == nil {
 			cours.RosterPath = chemin
 		}
@@ -563,10 +567,18 @@ func (s *Server) handleAttachAccount(writer http.ResponseWriter, request *http.R
 	}
 
 	augmente := personne
-	augmente.Also = append(append([]string(nil), personne.Also...), compte)
+	handle := personne.Username
+	if strings.TrimSpace(personne.Username) == "" {
+		// Son premier compte. Jusqu'ici seul son matricule la désignait — c'est
+		// le cas de toute cohorte importée du collège —, et c'est ce matricule
+		// qui permet encore de retrouver sa ligne.
+		augmente.Username, handle = compte, personne.StudentID
+	} else {
+		augmente.Also = append(append([]string(nil), personne.Also...), compte)
+	}
 	// Le compte pouvait être inscrit à part : le rattacher le retire de là,
 	// sans quoi la même personne y figurerait deux fois.
-	modifie, err := cours.Without(compte).Rename(personne.Username, augmente)
+	modifie, err := cours.Without(compte).Rename(handle, augmente)
 	if err != nil {
 		fail(writer, err)
 		return

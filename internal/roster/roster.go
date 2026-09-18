@@ -186,6 +186,40 @@ type Roster struct {
 // n'est pas fautive : elle demande un rapprochement avant de servir.
 func (r Roster) Named() bool { return len(r.People) > 0 }
 
+// WithAccounts ne retient d'une liste que les personnes dont on connaît le
+// compte GitHub.
+//
+// C'est ce qu'il faut à qui interroge GitHub à leur sujet. Vérifier l'existence
+// d'un compte qu'on n'a pas revient à demander « @ » à l'API, qui répond non :
+// une cohorte fraîchement importée du collège paraissait alors n'avoir que des
+// comptes inexistants, et la création s'arrêtait là.
+func WithAccounts(people []Person) []Person {
+	nommees := make([]Person, 0, len(people))
+	for _, person := range people {
+		if strings.TrimSpace(person.Username) != "" {
+			nommees = append(nommees, person)
+		}
+	}
+	return nommees
+}
+
+// Everyone rend toutes les personnes de la liste, celles dont le compte GitHub
+// manque comprises.
+//
+// C'est ce qu'il faut à qui inscrit une cohorte, et « People » ne peut pas y
+// servir : un export d'Omnivox ne connaît aucun compte, si bien que « People »
+// n'en retiendrait personne — une liste de vingt-trois noms se lisait alors
+// comme une liste vide, sans un mot pour le dire, puisque rien dans ce fichier
+// n'est fautif. Le matricule désigne déjà chacun ; le compte se rattache
+// quand on le connaît.
+func (r Roster) Everyone() []Person {
+	people := make([]Person, 0, len(r.Entries))
+	for _, entree := range r.Entries {
+		people = append(people, entree.Person())
+	}
+	return people
+}
+
 // IsValid indique une liste exploitable sans aucun rejet.
 func (r Roster) IsValid() bool { return len(r.Issues) == 0 && len(r.Entries) > 0 }
 

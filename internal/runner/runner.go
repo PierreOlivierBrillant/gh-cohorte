@@ -40,6 +40,12 @@ const (
 	// accordé à l'équipe entière : personne n'est invité individuellement, et
 	// changer sa composition suffit à changer qui voit le dépôt.
 	TeamShared = "équipe"
+	// CollaboratorUnknown dit qu'il n'y avait personne à inviter : la liste du
+	// groupe connaît cette personne, mais pas encore son compte GitHub — c'est
+	// le cas de toute cohorte importée du collège avant qu'on les rattache.
+	// Le dépôt est créé, et lui seul y accède pour l'instant. La case restait
+	// vide, ce qui se lit comme un oubli plutôt que comme un fait.
+	CollaboratorUnknown = "compte à rattacher"
 )
 
 // Result est l'issue du traitement d'un dépôt.
@@ -298,6 +304,9 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 		result.URL = fmt.Sprintf("https://github.com/%s/%s", org, item.Name)
 		if e.settings.AddCollaborator {
 			result.Collaborator = CollaboratorYes
+			if !item.ForTeam() && len(comptesDe(item)) == 0 {
+				result.Collaborator = CollaboratorUnknown
+			}
 		}
 		if e.starter != nil {
 			result.Starter = fmt.Sprintf("%d fichier(s) prévus", len(e.starter.Files))
@@ -372,8 +381,13 @@ func (e *Executor) process(item plan.PlannedRepo, templateOwner, templateRepo st
 	// Une personne qui travaille sous deux comptes n'a qu'un dépôt : elle y est
 	// invitée sous chacun d'eux, faute de quoi la moitié de son travail se
 	// ferait depuis un compte sans accès.
+	comptes := comptesDe(item)
+	if len(comptes) == 0 {
+		result.Collaborator = CollaboratorUnknown
+		return result
+	}
 	etats := make([]string, 0, 2)
-	for _, compte := range comptesDe(item) {
+	for _, compte := range comptes {
 		state, err := e.client.AddCollaborator(org, item.Name, compte, e.settings.Permission)
 		if err != nil {
 			previous := result.Status

@@ -66,6 +66,10 @@ func main() {
 				{FullName: "Aminata Diallo", Username: "aminata-d"},
 				{FullName: "Bruno Tanguay", Username: "btanguay"},
 				{FullName: "Claire Otis", Username: "cotis"},
+				// Inscrite depuis la liste du collège : on a son matricule,
+				// pas encore son compte. C'est l'état de toute une cohorte au
+				// lendemain d'un import de Léa.
+				{FullName: "Naomi Chéry", StudentID: "2100456"},
 			}},
 		{Org: "acme", Session: "a26", Course: "4w6", Group: "01", Students: []roster.Person{
 			{FullName: "Émilie Côté", Username: "emilie-cote", StudentID: "2100123"},

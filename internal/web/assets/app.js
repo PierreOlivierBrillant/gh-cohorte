@@ -2586,8 +2586,14 @@ async function chargerEtudiants(force) {
       el('td', {}, lienVersLaFiche(ligne)),
       // Une personne travaille parfois sous deux comptes : les montrer tous
       // les deux évite de la croire absente d'un dépôt qui est le sien.
-      el('td', {}, (ligne.accounts || [ligne.username]).map((compte, rang) =>
-        el('span', {}, rang > 0 ? ' ' : null, lienDeProfil(compte)))),
+      //
+      // Et parfois aucun : une cohorte importée du collège n'en donne pas. Un
+      // « @ » tout seul se lirait comme un bogue d'affichage, alors que c'est
+      // un fait — et celui dont dépend l'accès à ses dépôts.
+      el('td', {}, (ligne.accounts || []).filter(Boolean).length === 0
+        ? el('span', { classe: 'vide', texte: 'à rattacher' })
+        : ligne.accounts.filter(Boolean).map((compte, rang) =>
+            el('span', {}, rang > 0 ? ' ' : null, lienDeProfil(compte)))),
       el('td', ligne.team
         ? { texte: ligne.team }
         : { classe: 'vide', texte: 'aucune' }),
@@ -3917,12 +3923,19 @@ async function inscrireUnMembre(personne) {
   // Le même nom porté par deux comptes, ce n'est pas toujours deux personnes :
   // le dire ici évite de les traiter comme des homonymes, ce qui arrêterait
   // toute distribution.
+  // Sans compte, c'est le matricule qui désigne quelqu'un : une cohorte
+  // importée du collège n'a que lui, et l'option porterait sinon une valeur
+  // vide — impossible à choisir, donc impossible à rattacher, alors que ce
+  // sont précisément les personnes à qui l'on veut rattacher un compte.
   const rattache = el('select', { classe: 'champ' },
     el('option', { value: '', texte: '— une personne de plus —' }),
-    gens(etat.groupe).map((autre) => el('option', {
-      value: autre.username,
-      texte: (autre.full_name || '@' + autre.username) + ' (@' + autre.username + ')',
-    })));
+    gens(etat.groupe)
+      .filter((autre) => autre.username || autre.student_id)
+      .map((autre) => el('option', {
+        value: autre.username || autre.student_id,
+        texte: (autre.full_name || '@' + autre.username)
+          + (autre.username ? ' (@' + autre.username + ')' : ' (' + autre.student_id + ')'),
+      })));
   const corps = el('div', {},
     el('p', {}, el('code', { texte: '@' + personne.username }),
       " est dans une équipe sans être dans la liste du groupe."),

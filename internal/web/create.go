@@ -37,7 +37,10 @@ func (s *Server) handleParseRoster(writer http.ResponseWriter, request *http.Req
 	if len(body.Content) > 0 {
 		list = roster.ParseBytes(body.Content)
 	}
-	writeJSON(writer, http.StatusOK, rosterPayload{People: list.People, Issues: list.Issues})
+	// Toutes les personnes lues, compte ou non : c'est la page qui montrera
+	// lesquelles restent à rattacher, et elle ne le peut pas si on les lui tait.
+	writeJSON(writer, http.StatusOK, rosterPayload{
+		People: list.Everyone(), Issues: list.Issues})
 }
 
 // handleLoadRoster lit une liste depuis un fichier de la machine.
@@ -59,7 +62,7 @@ func (s *Server) handleLoadRoster(writer http.ResponseWriter, request *http.Requ
 		path = body.Path
 	}
 	writeJSON(writer, http.StatusOK, rosterPayload{
-		Path: path, People: list.People, Issues: list.Issues,
+		Path: path, People: list.Everyone(), Issues: list.Issues,
 	})
 }
 
@@ -306,7 +309,9 @@ func (s *Server) handleVerifyAccounts(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	people := body.People
+	// Seuls les comptes connus se vérifient : une personne qu'on n'a pas encore
+	// rattachée n'a pas de compte introuvable, elle n'en a pas du tout.
+	people := roster.WithAccounts(body.People)
 	job := s.jobs.Start("comptes", "Vérification de "+itoa(len(people))+" compte(s)",
 		func(job *Job) (any, error) {
 			missing := make([]roster.Person, 0)

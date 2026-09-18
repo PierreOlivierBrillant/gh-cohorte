@@ -107,9 +107,15 @@ sont reconnus. Dans Léa : *Liste des étudiants › Paramètres d'affichage*, m
 « Pour Excel », séparateur `;`, et cochez **Numéro d'étudiant**, **Nom de
 l'étudiant** et **Code permanent**.
 
-Elle ne dit pas les comptes GitHub. Ajoutez-lui une colonne `GitHub` si vous les
-connaissez ; sinon l'outil les rapproche des noms et des numéros d'étudiant, et
-montre chaque rapprochement — avec ce qui l'a produit — avant d'écrire.
+Elle ne dit pas les comptes GitHub, et ce n'est pas un obstacle : la cohorte
+s'inscrit telle quelle, chacun désigné par son matricule. Son dépôt est créé —
+c'est son nom qui le nomme —, et le bilan dit qu'il reste un compte à rattacher.
+Ajoutez-lui une colonne `GitHub` si vous les connaissez ; sinon, reprendre des
+dépôts existants rapproche les comptes des noms et des matricules, et montre
+chaque rapprochement — avec ce qui l'a produit — avant d'écrire.
+
+Rattacher un compte à quelqu'un qui n'en avait pas ne se fait que dans
+l'interface web : le terminal et la ligne de commande n'offrent pas ce geste.
 
 ## Reprendre des dépôts existants
 
