@@ -2146,14 +2146,24 @@ function telecharger(nom, contenu, type) {
   URL.revokeObjectURL(adresse);
 }
 
+// destinationProposee reprend le dossier retenu la dernière fois, sinon celui
+// que le serveur propose, et y range le travail. Le séparateur suit celui du
+// chemin reçu : c'est un humain qui lit le champ, et un défaut Windows
+// donnerait sinon « C:\Users\…\Downloads/tp1 ».
+function destinationProposee() {
+  const parent = (etat.reglages.clone_dir || etat.contexte.clone_parent || '.')
+    .replace(/[\\/]+$/, '');
+  const separateurs = parent.match(/[\\/]/g);
+  const separateur = separateurs ? separateurs[separateurs.length - 1] : '/';
+  return `${parent}${separateur}${etat.travail.id}`;
+}
+
 $('detail-cloner').addEventListener('click', async () => {
   const choisis = selectionnes();
   if (!choisis.length) { message('Aucun dépôt sélectionné.', 'alerte'); return; }
 
-  const parent = etat.reglages.clone_dir || '.';
   const { zone, champ: destination } = zoneDepot({
-    dossier: true, titre: 'Choisir où cloner',
-    valeur: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.id}`,
+    dossier: true, titre: 'Choisir où cloner', valeur: destinationProposee(),
   });
   const confirme = await demander(`Cloner ${choisis.length} dépôt(s)`, el('div', {},
     el('label', { classe: 'champ-bloc' },
@@ -2177,10 +2187,8 @@ $('detail-cloner').addEventListener('click', async () => {
 });
 
 $('detail-pull').addEventListener('click', async () => {
-  const parent = etat.reglages.clone_dir || '.';
   const { zone, champ: dossier } = zoneDepot({
-    dossier: true, titre: 'Choisir le dossier des clones',
-    valeur: `${parent.replace(/[\\/]+$/, '')}/${etat.travail.id}`,
+    dossier: true, titre: 'Choisir le dossier des clones', valeur: destinationProposee(),
   });
   const trouve = await demander('Mettre à jour des clones', el('div', {},
     el('label', { classe: 'champ-bloc' },
@@ -6374,6 +6382,10 @@ function ecrireReglagesGeneraux() {
   // marque active. La case, elle, dit ce qu'on fait.
   $('reglage-signature').checked = !etat.reglages.no_sign;
   $('reglage-clone-dir').value = etat.reglages.clone_dir || '';
+  // Un réglage vide n'est pas un manque : le serveur propose alors un dossier,
+  // et l'écran doit dire lequel.
+  $('reglage-clone-dir-aide').textContent = 'Là où « Cloner » proposera de déposer les dépôts' +
+    (contexte.clone_parent ? ` ; laissé vide, ce sera ${contexte.clone_parent}.` : '.');
   $('reglages-selecteur').textContent = contexte.native_picker
     ? `« Parcourir… » ouvre la fenêtre du système (${contexte.native_picker}).`
     : "Cette machine n'a pas de fenêtre de sélection : « Parcourir… » ouvre " +
