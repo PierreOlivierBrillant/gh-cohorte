@@ -256,6 +256,37 @@ func (s *Store) Trim(org string, names Names) (int, error) {
 	return retires, s.saveLocked()
 }
 
+// Unname retire, de tous les groupes d'une organisation, le nom complet qu'ils
+// donnent à un compte. Rend le nombre de noms retirés.
+//
+// C'est le geste qui suit un nom donné ou corrigé au registre. Une liste qui
+// nomme quelqu'un l'emporte sur le registre — c'est ce qui permet de
+// travailler hors ligne —, si bien qu'un nom resté ici masquerait celui qu'on
+// vient d'écrire. Le retirer ne perd rien : le registre porte le nouveau nom,
+// et le slug de l'ancien avec lui.
+func (s *Store) Unname(org, username string) (int, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	retires := 0
+	for groupe, item := range s.items {
+		if !strings.EqualFold(item.Org, org) {
+			continue
+		}
+		for position, student := range item.Students {
+			if strings.TrimSpace(student.FullName) == "" || !student.Owns(username) {
+				continue
+			}
+			s.items[groupe].Students[position].FullName = ""
+			retires++
+		}
+	}
+	if retires == 0 {
+		return 0, nil
+	}
+	return retires, s.saveLocked()
+}
+
 // nommes compte les personnes dont le nom complet est écrit ici.
 func nommes(people []roster.Person) int {
 	total := 0

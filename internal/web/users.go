@@ -299,7 +299,7 @@ func (s *Server) newcomer(username string) (registry.User, error) {
 	return fiche, nil
 }
 
-// handleUserName donne son nom complet à quelqu'un qui n'en a pas.
+// handleUserName donne son nom complet à quelqu'un, ou corrige celui qu'il a.
 //
 // Le nom vit au registre, pas dans un groupe : c'est une propriété de la
 // personne, et la lui donner depuis sa fiche doit valoir partout — y compris
@@ -347,11 +347,14 @@ func (s *Server) handleUserName(writer http.ResponseWriter, request *http.Reques
 		}
 	}
 
-	publie, err := s.registryOf(org).Apply(registry.Change{
-		Learn:  []registry.User{registry.From(roster.Person{FullName: nom, Username: compte})},
-		Reason: "Nomme @" + compte + " : " + nom,
-	})
+	publie, err := s.registryOf(org).Apply(
+		registry.Name(roster.Person{FullName: nom, Username: compte},
+			s.classrooms.People(org)...))
 	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if _, err := s.classrooms.Unname(org, compte); err != nil {
 		fail(writer, err)
 		return
 	}

@@ -46,6 +46,7 @@ var manageMenu = ui.Options(
 	"renommer", "Renommer ce travail",
 	"deplacer", "Déplacer ce travail vers un groupe",
 	"enseignants", "Régler l'équipe enseignante du groupe",
+	"etudiant", "Corriger un étudiant du groupe : son nom, son compte, ses dépôts",
 	"filtrer", "Filtrer ou trier la liste",
 	"rafraichir", "Recharger la liste",
 	"changer", "Changer de groupe",
@@ -1374,13 +1375,7 @@ func (m *manageSession) appliquerRenommage(lignes []classroom.Move, succes strin
 func (s *Session) renommerDepots(org string, lignes []classroom.Move, succes string) (
 	[]groups.Renamed, int, error) {
 	console := s.Console
-	rows := make([][]string, 0, len(lignes))
-	for index, ligne := range lignes {
-		rows = append(rows, []string{itoa(index + 1), ligne.Repo, ligne.Target})
-	}
-	console.Table([]string{"#", "Dépôt actuel", "Nouveau nom"}, rows, 40)
-	console.Note("GitHub garde une redirection depuis chaque ancien nom.")
-
+	s.montrerRenommages(lignes)
 	if s.Options.DryRun {
 		console.Warning("Simulation : aucun dépôt n'a été renommé.")
 		return nil, ExitOK, nil
@@ -1393,7 +1388,24 @@ func (s *Session) renommerDepots(org string, lignes []classroom.Move, succes str
 			return nil, ExitOK, err
 		}
 	}
+	return s.executerRenommages(org, lignes, succes)
+}
 
+// montrerRenommages écrit le plan : chaque dépôt, et le nom qu'il prendra.
+func (s *Session) montrerRenommages(lignes []classroom.Move) {
+	rows := make([][]string, 0, len(lignes))
+	for index, ligne := range lignes {
+		rows = append(rows, []string{itoa(index + 1), ligne.Repo, ligne.Target})
+	}
+	s.Console.Table([]string{"#", "Dépôt actuel", "Nouveau nom"}, rows, 40)
+	s.Console.Note("GitHub garde une redirection depuis chaque ancien nom.")
+}
+
+// executerRenommages renomme, sans rien demander : le plan a déjà été montré et
+// accepté. Elle rend ce qui a été renommé, pour que l'inventaire le suive.
+func (s *Session) executerRenommages(org string, lignes []classroom.Move, succes string) (
+	[]groups.Renamed, int, error) {
+	console := s.Console
 	progress := ui.NewProgress(console, "Renommage", len(lignes))
 	renommes, echecs := 0, 0
 	var suivis []groups.Renamed
@@ -1629,7 +1641,8 @@ func (m *manageSession) run() (int, error) {
 
 			// « filtrer » a déjà remontré la liste à chaque changement.
 			showList = action == "ajouter" || action == "supprimer" ||
-				action == "rafraichir" || action == "deplacer" || action == "renommer"
+				action == "rafraichir" || action == "deplacer" || action == "renommer" ||
+				action == "etudiant"
 			if showList {
 				repos, err := m.loadRepos(false)
 				if err != nil {
@@ -1691,6 +1704,8 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		// appartient à ce groupe-là.
 		_, err := m.session.teachingMode(group.Prefix)
 		return err
+	case "etudiant":
+		return m.corriger(group)
 	case "filtrer":
 		return m.filtrer(group)
 	case "rafraichir":

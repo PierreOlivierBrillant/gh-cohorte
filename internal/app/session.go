@@ -285,6 +285,9 @@ func (s *Session) run() (int, error) {
 	if mode == "fiche" {
 		return s.showProfile(s.Options.User)
 	}
+	if mode == "etudiant" {
+		return s.correctionMode()
+	}
 	// L'équipe enseignante d'un groupe n'est pas une de ses équipes : on ne
 	// lui distribue rien, elle reçoit l'accès aux dépôts. Elle a donc son
 	// propre chemin.
@@ -336,6 +339,11 @@ func (s *Session) chooseMode() (string, error) {
 	// dire « cet utilisateur-là », et non « la liste, plus lui ».
 	if strings.TrimSpace(s.Options.User) != "" {
 		return "fiche", nil
+	}
+	// « --student » corrige une ligne de la liste d'un groupe : « --manage » n'y
+	// désigne que le groupe, et il n'y a rien d'autre à gérer.
+	if strings.TrimSpace(s.Options.Student) != "" {
+		return "etudiant", nil
 	}
 	if s.Options.StudentsRequested {
 		return "etudiants", nil

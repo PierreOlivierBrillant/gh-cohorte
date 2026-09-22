@@ -324,6 +324,52 @@ func TestMagasinSuitUnGroupeQuiChangeDePlace(t *testing.T) {
 	}
 }
 
+// Un nom corrigé au registre ne doit pas rester masqué par celui qu'une liste
+// de ce poste donnait : il est retiré de toutes les listes de l'organisation,
+// et d'elles seules.
+func TestMagasinCedeUnNomAuRegistre(t *testing.T) {
+	chemin := filepath.Join(t.TempDir(), "groupes.json")
+	magasin := classroom.Open(chemin)
+	for _, cours := range []classroom.Classroom{
+		groupe("a26", "5n6", "01", personnes("Emlie Côté", "emilie-cote", "Jean-Luc Picard", "jlpicard")),
+		groupe("h27", "5n6", "02", personnes("Emilie Coté", "Emilie-Cote")),
+	} {
+		if _, err := magasin.Save(cours); err != nil {
+			t.Fatalf("enregistrement : %v", err)
+		}
+	}
+	ailleurs := groupe("a26", "5n6", "01", personnes("Emlie Côté", "emilie-cote"))
+	ailleurs.Org = "autre"
+	if _, err := magasin.Save(ailleurs); err != nil {
+		t.Fatalf("enregistrement : %v", err)
+	}
+
+	retires, err := magasin.Unname("acme", "EMILIE-COTE")
+	if err != nil || retires != 2 {
+		t.Fatalf("retirés = %d, %v", retires, err)
+	}
+
+	relu := classroom.Open(chemin)
+	for _, personne := range relu.People("acme") {
+		voulu := ""
+		if personne.Username == "jlpicard" {
+			voulu = "Jean-Luc Picard"
+		}
+		if personne.FullName != voulu {
+			t.Errorf("@%s : nom = %q, attendu %q", personne.Username, personne.FullName, voulu)
+		}
+	}
+	// Une autre organisation a son propre registre : rien n'y est cédé.
+	if gens := relu.People("autre"); len(gens) != 1 || gens[0].FullName != "Emlie Côté" {
+		t.Errorf("autre organisation : %+v", gens)
+	}
+
+	// Un compte qu'aucune liste ne nomme n'écrit rien.
+	if retires, err := relu.Unname("acme", "emilie-cote"); err != nil || retires != 0 {
+		t.Errorf("second retrait : %d, %v", retires, err)
+	}
+}
+
 func TestMagasinNePartagePasSesTranches(t *testing.T) {
 	magasin := classroom.Open(filepath.Join(t.TempDir(), "groupes.json"))
 	if _, err := magasin.Save(groupe("a26", "5n6", "01", personnes("", "emilie-cote"))); err != nil {

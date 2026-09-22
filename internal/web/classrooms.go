@@ -640,23 +640,15 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 	}
 	cours = s.enrichi(cours, repos)
 
-	avant, inscrit := cours.Find(body.Username)
-	if !inscrit {
-		fail(writer, valid.Errorf("@%s n'est pas dans « %s ».",
-			strings.TrimSpace(body.Username), cours.Label()))
-		return
-	}
-	compte := strings.TrimSpace(body.NewUsername)
-	if compte == "" {
-		compte = avant.Username
-	}
-	modifie, err := cours.Rename(avant.Username,
-		roster.Person{FullName: body.FullName, Username: compte})
+	// Le plan se compose en entier avant la première écriture, et sur le groupe
+	// tel qu'il est encore : c'est l'ancien nom qui retrouve ses dépôts.
+	correction, err := classroom.PlanCorrection(cours, body.Username,
+		roster.Person{FullName: body.FullName, Username: body.NewUsername}, body.Repos, repos)
 	if err != nil {
 		fail(writer, err)
 		return
 	}
-	apres, _ := modifie.Find(compte)
+	avant, apres, renommages := correction.Before, correction.After, correction.Moves
 
 	// Un compte qui n'existe pas sur GitHub ne sert à rien dans une liste :
 	// aucun dépôt ne pourra lui être remis. Celui qui ne change pas a déjà été
@@ -668,26 +660,21 @@ func (s *Server) handleRenameStudent(writer http.ResponseWriter, request *http.R
 		}
 	}
 
-	// Le plan se compose en entier avant la première écriture, et sur le groupe
-	// tel qu'il est encore : c'est l'ancien nom qui retrouve ses dépôts.
-	var renommages []classroom.Move
-	if body.Repos {
-		if renommages, err = classroom.PlanRenameStudent(cours, avant, apres, repos); err != nil {
-			fail(writer, err)
-			return
-		}
-	}
-
-	// Le registre retient le nouveau nom sans oublier l'ancien slug : les
-	// dépôts déjà créés restent rattachés à leur personne, qu'on les renomme
-	// ou non.
-	if err := s.apprendre(cours.Org, apres); err != nil {
+	// Le registre retient le nouveau nom sans oublier l'ancien slug — celui que
+	// les listes de ce poste lui donnaient compris : les dépôts déjà créés
+	// restent rattachés à leur personne, qu'on les renomme ou non.
+	if _, err := s.registryOf(cours.Org).Apply(
+		registry.Name(apres, s.classrooms.People(cours.Org)...)); err != nil {
 		fail(writer, err)
 		return
 	}
-
-	enregistre, err := s.classrooms.Save(modifie)
+	enregistre, err := s.classrooms.Save(correction.Classroom)
 	if err != nil {
+		fail(writer, err)
+		return
+	}
+	// Une autre liste qui la nommait encore autrement masquerait la correction.
+	if _, err := s.classrooms.Unname(cours.Org, apres.Username); err != nil {
 		fail(writer, err)
 		return
 	}

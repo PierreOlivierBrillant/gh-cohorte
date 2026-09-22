@@ -34,8 +34,17 @@ type Options struct {
 	User string
 	// FullName donne son nom complet au compte visé par User. Il ne renomme
 	// aucun dépôt : le slug qu'il produit s'ajoute à ceux que la personne
-	// portait déjà, et ce qui existe reste à elle.
+	// portait déjà, et ce qui existe reste à elle. Avec Student, il corrige le
+	// nom de l'étudiant dans la liste du groupe.
 	FullName string
+	// Student désigne un étudiant dans la liste du groupe géré, pour corriger
+	// sa fiche : son nom complet (FullName), son compte (StudentAccount), et,
+	// avec RenameRepos, le nom de ses dépôts pour qu'ils portent le nouveau.
+	// C'est le seul chemin qui renomme les dépôts d'une personne : corriger un
+	// nom depuis sa fiche ne le fait pas.
+	Student        string
+	StudentAccount string
+	RenameRepos    bool
 	// Teacher reconnaît le compte visé comme enseignant, ou l'en défait.
 	// TeacherSet distingue « drapeau absent » de « --teacher=false » : sans
 	// lui, la fiche se contente de s'afficher.
@@ -251,6 +260,7 @@ Utilisation :
   gh cohorte --user ecote                     la fiche de @ecote et son passage
   gh cohorte --user jdupont --teacher         reconnaître @jdupont comme enseignant
   gh cohorte --user aleksilepaj --full-name "Aleksi Lepaj"
+  gh cohorte --manage a26.5n6.01 --student ecote --full-name "Émilie Côté" --rename-repos -y
   gh cohorte --manage a26.5n6.01 --teachers "prof,jdupont" -y
   gh cohorte --import                         reprendre des dépôts nommés autrement
   gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
@@ -285,7 +295,13 @@ Drapeaux :
   --manage [PREFIXE]       gérer un groupe existant au lieu d'en créer un
   --students               lister les utilisateurs de l'organisation et ce qu'ils ont suivi
   --user COMPTE            fiche d'un utilisateur : son rôle, ses comptes, son passage
-  --full-name NOM          donner son nom complet au compte de --user (ne renomme aucun dépôt)
+  --full-name NOM          donner son nom complet au compte de --user (ne renomme aucun
+                           dépôt), ou corriger celui de l'étudiant de --student
+  --student COMPTE         corriger la fiche d'un étudiant du groupe de --manage :
+                           son nom (--full-name), son compte (--student-account)
+  --student-account COMPTE nouveau compte GitHub de l'étudiant de --student
+  --rename-repos           renommer aussi les dépôts de l'étudiant de --student pour
+                           qu'ils portent son nom (aperçu avec --dry-run)
   --teacher[=false]        reconnaître le compte de --user comme enseignant, ou l'en défaire
   --teachers COMPTES       composition de l'équipe enseignante du groupe de --manage ;
                            elle reçoit ses dépôts, et elle seule les voit
@@ -447,7 +463,13 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"lister les utilisateurs de l'organisation")
 	set.StringVar(&options.User, "user", "", "ouvrir la fiche d'un compte")
 	set.StringVar(&options.FullName, "full-name", "",
-		"donner son nom complet au compte de --user")
+		"donner son nom complet au compte de --user, ou à l'étudiant de --student")
+	set.StringVar(&options.Student, "student", "",
+		"corriger la fiche d'un étudiant du groupe de --manage")
+	set.StringVar(&options.StudentAccount, "student-account", "",
+		"nouveau compte GitHub de l'étudiant de --student")
+	set.BoolVar(&options.RenameRepos, "rename-repos", false,
+		"renommer aussi les dépôts de l'étudiant de --student")
 	enseignant := set.String("teacher", unset,
 		"reconnaître le compte visé comme enseignant (--teacher=false le retire)")
 	enseignants := set.String("teachers", unset,
@@ -673,6 +695,9 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		return nil, valid.Errorf(
 			"--team-delete-repos accompagne « --team-delete » : ajoutez-le pour supprimer l'équipe.")
 	}
+	if err := options.checkStudent(); err != nil {
+		return nil, err
+	}
 	if options.Jobs < 1 {
 		options.Jobs = 1
 	}
@@ -680,6 +705,23 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		options.Depth = 0
 	}
 	return options, nil
+}
+
+// checkStudent refuse ce que les drapeaux d'un étudiant ne peuvent pas vouloir
+// dire. Le dire ici évite qu'un drapeau soit ignoré sans bruit.
+func (o *Options) checkStudent() error {
+	etudiant := strings.TrimSpace(o.Student) != ""
+	// « --user » ouvre une fiche, « --student » corrige une ligne de liste : les
+	// deux ensemble ne disent pas lequel des deux gestes on attend.
+	if etudiant && strings.TrimSpace(o.User) != "" {
+		return valid.Errorf("--user ouvre la fiche d'un compte, --student corrige un " +
+			"étudiant dans la liste d'un groupe : choisissez l'un ou l'autre.")
+	}
+	if !etudiant && (o.RenameRepos || strings.TrimSpace(o.StudentAccount) != "") {
+		return valid.Errorf("--rename-repos et --student-account accompagnent " +
+			"« --student COMPTE » : ajoutez-le pour dire de qui il s'agit.")
+	}
+	return nil
 }
 
 // decidesAsk dit si les drapeaux tranchent ou déposent une demande. Ces

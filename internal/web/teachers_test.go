@@ -2,8 +2,11 @@ package web_test
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
 )
 
 // ficheRendu est ce que l'API rend pour une personne.
@@ -342,6 +345,65 @@ func TestNommerNeRenommeAucunDepot(t *testing.T) {
 	// Et le dépôt qu'il portait déjà reste le sien.
 	if fiche := h.fiche("aleksilepaj"); fiche.User.Repos != avant0(fiche) {
 		t.Errorf("dépôts de la personne = %d", fiche.User.Repos)
+	}
+}
+
+// Un nom déjà donné se corrige depuis la fiche comme on en donne un à qui n'en
+// a pas : ses dépôts restent les siens, et aucun n'est renommé.
+func TestCorrigerUnNomDepuisLaFiche(t *testing.T) {
+	h := college(t)
+	avant := h.depots()
+
+	var rendu struct {
+		FullName string `json:"full_name"`
+	}
+	h.json(http.MethodPut, "/api/users/emilie-cote/name",
+		map[string]any{"full_name": "Émilie Côté-Roy"}, &rendu)
+	if rendu.FullName != "Émilie Côté-Roy" {
+		t.Fatalf("réponse = %+v", rendu)
+	}
+
+	fiche := h.fiche("emilie-cote")
+	if fiche.User.FullName != "Émilie Côté-Roy" {
+		t.Fatalf("nom = %q", fiche.User.FullName)
+	}
+	if fiche.User.Repos != 3 || avant0(fiche) != 3 {
+		t.Errorf("dépôts de la personne = %d, chronologie = %d",
+			fiche.User.Repos, avant0(fiche))
+	}
+	if apres := h.depots(); strings.Join(apres, ",") != strings.Join(avant, ",") {
+		t.Fatalf("dépôts :\navant %v\naprès %v", avant, apres)
+	}
+}
+
+// Une liste de ce poste qui nommait la personne autrement l'emporterait sur le
+// registre : le nom corrigé ne se verrait nulle part. Elle le lui cède, et le
+// dépôt nommé d'après l'ancien reste le sien.
+func TestUneListeLocaleNeMasquePasLeNomCorrige(t *testing.T) {
+	state := fakegh.NewState()
+	state.AddRepo("acme", "h27.5n6.02.tp1.aleksi-lepa", true)
+	h := avantLeRegistre(t, state, cohorte("h27", "5n6", "02", "Aleksi Lepa", "aleksilepaj"))
+
+	h.json(http.MethodPut, "/api/users/aleksilepaj/name",
+		map[string]any{"full_name": "Aleksi Lepaj"}, nil)
+
+	fiche := h.fiche("aleksilepaj")
+	if fiche.User.FullName != "Aleksi Lepaj" {
+		t.Fatalf("nom = %q : la liste locale masque la correction", fiche.User.FullName)
+	}
+	if fiche.User.Repos != 1 {
+		t.Errorf("dépôts de la personne = %d : l'ancien slug l'a perdue", fiche.User.Repos)
+	}
+	if ligne, present := ligneDe(h.annuaire(""), "aleksilepaj"); !present ||
+		ligne.FullName != "Aleksi Lepaj" {
+		t.Errorf("annuaire = %+v", ligne)
+	}
+	contenu, err := os.ReadFile(h.Groupes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(contenu), "Aleksi Lepa\"") {
+		t.Errorf("l'ancien nom est resté dans la liste locale :\n%s", contenu)
 	}
 }
 

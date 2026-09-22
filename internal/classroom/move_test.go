@@ -148,6 +148,108 @@ func TestPlanDeRenommageGardeLeFragmentSansNomComplet(t *testing.T) {
 	}
 }
 
+// ------------------------------------------------------ corriger une fiche
+
+// Corriger un nom garde ce que la ligne porte d'autre : son matricule et ses
+// autres comptes sont à la personne, pas au nom qu'on corrige.
+func TestUneCorrectionGardeMatriculeEtAutresComptes(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp1.jean-luc-picard")
+	cours := groupe("a26", "5n6", "01", []roster.Person{
+		{FullName: "Émilie Côté", Username: "emilie-cote", StudentID: "2100123",
+			Also: []string{"emilie-perso"}},
+		{FullName: "Jean-Luc Picard", Username: "jlpicard"},
+	}).Enrich(nil, inventaire)
+
+	correction, err := classroom.PlanCorrection(cours, "emilie-cote",
+		roster.Person{FullName: "Émilie Côté-Tremblay"}, true, inventaire)
+	if err != nil {
+		t.Fatalf("correction refusée : %v", err)
+	}
+	apres := correction.After
+	if apres.FullName != "Émilie Côté-Tremblay" || apres.Username != "emilie-cote" ||
+		apres.StudentID != "2100123" || strings.Join(apres.Also, ",") != "emilie-perso" {
+		t.Fatalf("fiche corrigée : %+v", apres)
+	}
+	if !correction.Changed() {
+		t.Error("le nom a changé : la correction doit le dire")
+	}
+	if len(correction.Moves) != 1 ||
+		correction.Moves[0].Target != "a26.5n6.01.tp1.emilie-cote-tremblay" {
+		t.Fatalf("dépôts à renommer : %+v", correction.Moves)
+	}
+	enregistree, _ := correction.Classroom.Find("emilie-cote")
+	if enregistree.StudentID != "2100123" || !enregistree.Owns("emilie-perso") {
+		t.Errorf("liste corrigée : %+v", enregistree)
+	}
+}
+
+// Sans renommage demandé, la fiche change et les dépôts restent tels quels.
+func TestUneCorrectionSansDepotsNeLesPlanifiePas(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.emilie-cote")
+	cours := groupe("a26", "5n6", "01", cohorte)
+
+	correction, err := classroom.PlanCorrection(cours, "emilie-cote",
+		roster.Person{FullName: "Émilie Côté-Tremblay", Username: "e-cote"}, false, inventaire)
+	if err != nil {
+		t.Fatalf("correction refusée : %v", err)
+	}
+	if len(correction.Moves) != 0 {
+		t.Fatalf("aucun dépôt n'était à renommer : %+v", correction.Moves)
+	}
+	if correction.After.Username != "e-cote" || correction.Before.Username != "emilie-cote" {
+		t.Fatalf("avant %+v, après %+v", correction.Before, correction.After)
+	}
+}
+
+// Un nom corrigé ailleurs — depuis la fiche de la personne — laisse ses dépôts
+// sous l'ancien. Les renommer sans rien changer d'autre est une correction à
+// part entière.
+func TestRenommerLesDepotsSansChangerLaFiche(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.emlie-cote")
+	cours := groupe("a26", "5n6", "01", cohorte).Enrich(
+		nomsConnus{"emlie-cote": {FullName: "Émilie Côté", Username: "emilie-cote"}}, inventaire)
+
+	correction, err := classroom.PlanCorrection(cours, "emilie-cote",
+		roster.Person{}, true, inventaire)
+	if err != nil {
+		t.Fatalf("correction refusée : %v", err)
+	}
+	if correction.Changed() {
+		t.Error("ni le nom ni le compte n'ont changé")
+	}
+	if len(correction.Moves) != 1 ||
+		correction.Moves[0].Target != "a26.5n6.01.tp1.emilie-cote" {
+		t.Fatalf("dépôts à renommer : %+v", correction.Moves)
+	}
+}
+
+// Une correction qui ne change rien est refusée, avec ou sans dépôts : la
+// laisser passer ferait croire à un geste qui n'a pas eu lieu.
+func TestUneCorrectionQuiNeChangeRienEstRefusee(t *testing.T) {
+	inventaire := depots("a26.5n6.01.tp1.emilie-cote")
+	cours := groupe("a26", "5n6", "01", cohorte)
+	for _, avecDepots := range []bool{false, true} {
+		_, err := classroom.PlanCorrection(cours, "emilie-cote",
+			roster.Person{FullName: "Émilie Côté", Username: "EMILIE-COTE"}, avecDepots, inventaire)
+		if err == nil || !strings.Contains(err.Error(), "n'ont changé") {
+			t.Errorf("avec dépôts = %v : refus attendu, obtenu %v", avecDepots, err)
+		}
+	}
+	if _, err := classroom.PlanCorrection(cours, "inconnu", roster.Person{FullName: "X Y"},
+		false, inventaire); err == nil || !strings.Contains(err.Error(), "n'est pas dans") {
+		t.Errorf("un inconnu doit être refusé : %v", err)
+	}
+}
+
+// nomsConnus tient lieu de registre : un fragment de dépôt, la personne qu'il
+// désigne.
+type nomsConnus map[string]roster.Person
+
+func (n nomsConnus) Lookup(fragment string) (roster.Person, bool) {
+	personne, connue := n[strings.ToLower(fragment)]
+	return personne, connue
+}
+
 // ------------------------------------------------------ déplacer un travail
 
 // sansNoms déclare un groupe dont on ne connaît que les comptes : c'est l'état

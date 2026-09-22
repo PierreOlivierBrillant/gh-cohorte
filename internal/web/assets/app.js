@@ -3060,8 +3060,11 @@ async function renommerEtudiant(ligne) {
     repos: depots > 0 && avecDepots.checked,
   };
   // Une fiche inchangée n'a rien à enregistrer : l'envoyer quand même ferait
-  // croire à une correction qui n'a pas eu lieu.
-  if (corps.full_name === (ligne.full_name || '') &&
+  // croire à une correction qui n'a pas eu lieu. Avec ses dépôts, elle part
+  // quand même — un nom corrigé depuis la fiche de la personne laisse ses
+  // dépôts à renommer, et c'est ici qu'on le fait ; le serveur dit s'il n'y a
+  // rien à renommer.
+  if (!corps.repos && corps.full_name === (ligne.full_name || '') &&
       corps.new_username.toLowerCase() === ligne.username.toLowerCase()) {
     message('Ni le nom ni le compte n’ont changé.', 'alerte');
     return;
@@ -3388,12 +3391,19 @@ function dessinerFiche() {
   matricule.hidden = !personne.student_id;
   matricule.textContent = personne.student_id ? 'Matricule ' + personne.student_id : '';
 
-  // Nommer quelqu'un n'est offert qu'à qui n'a pas de nom : corriger un nom
-  // déjà donné touche aux dépôts qui le portent, et cela se fait là où on les
-  // voit — dans la liste du groupe.
-  const sansNom = $('fiche-sans-nom');
-  sansNom.hidden = !!personne.full_name;
-  if (!sansNom.hidden) $('fiche-nommer').onclick = () => nommerUnUtilisateur(personne);
+  // Un nom manquant est un appel à agir ; un nom donné se corrige seulement,
+  // d'où un geste plus discret. Ni l'un ni l'autre ne touche aux dépôts : les
+  // renommer est une autre opération, offerte dans la liste du groupe.
+  const nomme = !!personne.full_name;
+  $('fiche-nommage').hidden = false;
+  const nommer = $('fiche-nommer');
+  nommer.textContent = nomme ? 'Corriger le nom complet…' : 'Donner un nom complet…';
+  nommer.classList.toggle('petit', nomme);
+  nommer.onclick = () => nommerUnUtilisateur(personne);
+  const aide = $('fiche-nommage-aide');
+  aide.hidden = nomme;
+  aide.textContent = nomme ? '' : 'Sans lui, aucun travail ne peut lui être ' +
+    'distribué : c’est le nom complet qui nomme ses dépôts.';
 
   $('fiche-resume').textContent = resumerFiche(personne);
   dessinerAvisDeLaFiche(donnees, personne);
@@ -3498,27 +3508,37 @@ async function coopter(personne, enseignant) {
   chargerFiche();
 }
 
-// nommerUnUtilisateur donne son nom complet à quelqu'un qui n'en a pas.
+// nommerUnUtilisateur donne son nom complet à quelqu'un, ou corrige celui
+// qu'il a — un accent oublié, un nom d'usage.
 //
 // Le nom monte au registre de l'organisation, pas dans un groupe : c'est une
 // propriété de la personne, et le lui donner depuis sa fiche vaut partout —
 // y compris pour quelqu'un qu'aucun groupe déclaré ici ne connaît.
 async function nommerUnUtilisateur(personne) {
+  const courant = personne.full_name || '';
   const champ = el('input', {
-    classe: 'champ', type: 'text', placeholder: 'Prénom Nom' });
+    classe: 'champ', type: 'text', value: courant, placeholder: 'Prénom Nom' });
   const corps = el('div', {},
     el('p', {}, el('code', { texte: '@' + personne.username }),
-      " n'a pas de nom complet."),
+      courant ? ` s'appelle « ${courant} ».` : " n'a pas de nom complet."),
     el('label', { classe: 'champ-bloc' },
       el('span', { classe: 'etiquette', texte: 'Nom complet' }), champ,
       el('span', { classe: 'aide', texte:
         "Il monte au registre de l'organisation et vaut pour tous ses groupes. "
-        + "Aucun dépôt n'est renommé : ceux qui existent restent les siens." })));
+        + "Aucun dépôt n'est renommé : ceux qui existent restent les siens et "
+        + "gardent leur nom. Les renommer se fait depuis la liste de son groupe, "
+        + "avec « Renommer… »." })));
 
-  if (!await demander('Nommer cette personne', corps, 'Enregistrer',
-    () => champ.focus())) return;
+  if (!await demander(courant ? 'Corriger le nom complet' : 'Nommer cette personne',
+    corps, 'Enregistrer', () => { champ.focus(); champ.select(); })) return;
   const voulu = champ.value.trim();
   if (!voulu) return;
+  // Un nom inchangé n'a rien à enregistrer : l'envoyer quand même ferait
+  // croire à une correction qui n'a pas eu lieu.
+  if (voulu === courant) {
+    message('Le nom n’a pas changé.', 'alerte');
+    return;
+  }
 
   const reponse = await tenter(() => api(
     'PUT', `/api/users/${encode(personne.username)}/name`,
