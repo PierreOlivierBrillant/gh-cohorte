@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
@@ -17,7 +18,8 @@ import (
 // donnés mêlés, du plus récent au plus ancien. Rien n'en est décidé ici :
 // « users » la dresse, et le terminal l'écrit.
 
-// showProfile écrit la fiche d'un compte, puis propose de le coopter.
+// showProfile écrit la fiche d'un compte, puis propose de le nommer et de le
+// coopter.
 func (s *Session) showProfile(account string) (int, error) {
 	compte, err := valid.Login(account, "Compte GitHub")
 	if err != nil {
@@ -36,6 +38,9 @@ func (s *Session) showProfile(account string) (int, error) {
 		return ExitFailure, err
 	}
 	s.printProfile(org, fiche)
+	if strings.TrimSpace(s.Options.FullName) != "" {
+		s.conseillerRenommage(fiche)
+	}
 	// Les équipes disent quels cours quelqu'un a donnés ; elles ne disent pas
 	// quels travaux — leurs noms ne se lisent que dans des dépôts qu'un
 	// collègue ne voit pas. C'est le catalogue qui comble ce trou.
@@ -49,31 +54,92 @@ func (s *Session) showProfile(account string) (int, error) {
 	if !s.Interactive() {
 		return ExitOK, nil
 	}
-	// Un nom manquant se règle d'abord : sans lui, aucun travail ne peut être
-	// distribué à cette personne, et c'est plus urgent qu'un rôle.
-	if fiche.FullName == "" {
-		if code, err := s.askName(org, fiche); err != nil || code != ExitOK {
-			return code, err
-		}
+	// Le nom se règle avant le rôle : sans lui, aucun travail ne peut être
+	// distribué à cette personne, et c'est plus urgent.
+	nomme, code, err := s.askName(org, fiche)
+	if err != nil || code != ExitOK {
+		return code, err
+	}
+	if nomme {
 		if fiche, set, err = s.profileOf(org, compte); err != nil {
 			return ExitFailure, err
 		}
+		s.conseillerRenommage(fiche)
 	}
 	return s.askRole(org, set, fiche)
 }
 
-// askName propose de nommer quelqu'un qui n'a pas de nom complet.
-func (s *Session) askName(org string, fiche users.Profile) (int, error) {
-	s.Console.Warning("@%s n'a pas de nom complet : c'est lui qui nomme ses "+
-		"dépôts, et sans lui aucun travail ne peut lui être distribué.", fiche.Username)
-	voulu, err := s.Prompt.Ask(ui.Question{
-		Title:      "Nom complet (vide pour laisser ainsi)",
-		AllowEmpty: true,
-	})
-	if err != nil || strings.TrimSpace(voulu) == "" {
-		return ExitOK, err
+// askName propose de nommer quelqu'un qui n'a pas de nom complet, ou de
+// corriger celui qu'il a — un accent oublié, un nom d'usage. Elle dit si un
+// nom a été écrit.
+func (s *Session) askName(org string, fiche users.Profile) (bool, int, error) {
+	courant := fiche.FullName
+	titre := "Nom complet (vide pour laisser ainsi)"
+	if courant == "" {
+		s.Console.Warning("@%s n'a pas de nom complet : c'est lui qui nomme ses "+
+			"dépôts, et sans lui aucun travail ne peut lui être distribué.", fiche.Username)
+	} else {
+		corriger, err := s.Prompt.Confirm(
+			"Corriger le nom complet de @"+fiche.Username+" ?", false)
+		if err != nil || !corriger {
+			return false, ExitOK, err
+		}
+		// Le renommage des dépôts est une autre opération, qui écrit sur
+		// GitHub : la dire ici évite de croire qu'elle a eu lieu.
+		s.Console.Note("Aucun dépôt n'est renommé : ceux qui existent restent les " +
+			"siens et gardent leur nom.")
+		titre = "Nom complet"
 	}
-	return s.nameUser(org, fiche.Username, voulu)
+	voulu, err := s.Prompt.Ask(ui.Question{
+		Title: titre, Default: courant, AllowEmpty: true,
+	})
+	voulu = strings.TrimSpace(voulu)
+	if err != nil || voulu == "" {
+		return false, ExitOK, err
+	}
+	// Un nom inchangé n'a rien à écrire : l'annoncer comme une correction
+	// ferait croire à un geste qui n'a pas eu lieu.
+	if voulu == courant {
+		s.Console.Note("Le nom n'a pas changé.")
+		return false, ExitOK, nil
+	}
+	code, err := s.nameUser(org, fiche.Username, voulu)
+	return err == nil && code == ExitOK, code, err
+}
+
+// conseillerRenommage dit comment faire porter à ses dépôts le nom qu'on vient
+// de donner à quelqu'un. Nommer depuis la fiche ne les renomme pas ; corriger
+// la personne dans la liste de son groupe le peut, et la commande est donnée
+// groupe par groupe — seulement là où un dépôt porte encore un autre nom.
+func (s *Session) conseillerRenommage(fiche users.Profile) {
+	slug, err := naming.Student(fiche.FullName)
+	if err != nil {
+		return
+	}
+	var places []string
+	for _, etape := range fiche.Timeline {
+		if etape.Teaching() {
+			continue
+		}
+		for _, travail := range etape.Assignments {
+			// Un dépôt d'équipe porte le nom de l'équipe, pas le sien.
+			if travail.Team == "" &&
+				!strings.HasSuffix(strings.ToLower(travail.Repo), naming.Separator+slug) {
+				places = append(places, etape.Scope)
+				break
+			}
+		}
+	}
+	if len(places) == 0 {
+		return
+	}
+	s.Console.Note("Ses dépôts portent encore un autre nom. Pour qu'ils prennent " +
+		"celui-ci : « Corriger un étudiant du groupe » dans la gestion d'un travail, " +
+		"ou, groupe par groupe :")
+	for _, place := range places {
+		s.Console.Print("    gh cohorte --manage " + place + " --student " +
+			fiche.Username + " --rename-repos")
+	}
 }
 
 // nameUser écrit le nom complet d'un compte au registre.
@@ -102,10 +168,13 @@ func (s *Session) nameUser(org, account, wanted string) (int, error) {
 		}
 	}
 
-	if _, err := s.registryOf(org).Apply(registry.Change{
-		Learn:  []registry.User{registry.From(roster.Person{FullName: nom, Username: account})},
-		Reason: "Nomme @" + account + " : " + nom,
-	}); err != nil {
+	listes := s.groupStore()
+	if _, err := s.registryOf(org).Apply(
+		registry.Name(roster.Person{FullName: nom, Username: account},
+			listes.People(org)...)); err != nil {
+		return ExitFailure, err
+	}
+	if _, err := listes.Unname(org, account); err != nil {
 		return ExitFailure, err
 	}
 	s.Console.Success("@%s s'appelle « %s ».", account, nom)

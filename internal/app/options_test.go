@@ -219,6 +219,26 @@ func TestOptionsFicheEtRole(t *testing.T) {
 	}
 }
 
+// Corriger un étudiant se désigne par « --student » ; ce qui l'accompagne sans
+// lui, ou avec « --user », ne dit pas de qui il s'agit.
+func TestOptionsEtudiant(t *testing.T) {
+	options := analyser(t, "--manage", "a26.5n6.01", "--student", "ecote",
+		"--full-name", "Émilie Côté", "--student-account", "emilie-cote", "--rename-repos", "-y")
+	if options.Student != "ecote" || options.StudentAccount != "emilie-cote" ||
+		!options.RenameRepos || options.FullName != "Émilie Côté" {
+		t.Fatalf("options = %+v", options)
+	}
+	for _, args := range [][]string{
+		{"--rename-repos"},
+		{"--student-account", "emilie-cote"},
+		{"--student", "ecote", "--user", "ecote"},
+	} {
+		if _, err := app.Parse(args, &bytes.Buffer{}); err == nil {
+			t.Errorf("Parse(%v) devait être refusé", args)
+		}
+	}
+}
+
 // La composition de l'équipe enseignante distingue le drapeau absent — qui ne
 // fait qu'afficher — d'une liste vide, qui retire tout le monde.
 func TestOptionsEquipeEnseignante(t *testing.T) {

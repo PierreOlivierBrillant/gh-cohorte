@@ -505,6 +505,29 @@ func Learn(people ...roster.Person) Change {
 	return Change{Learn: fiches}
 }
 
+// Name compose le changement qui donne son nom complet à un compte, ou le
+// corrige. Il ne renomme aucun dépôt.
+//
+// Les noms que des listes de groupe lui donnaient y laissent leur slug. Le
+// registre ne les a peut-être jamais reçus, et ce sont pourtant eux qui ont
+// nommé ses dépôts : le nom corrigé ne doit pas les détacher de lui.
+func Name(person roster.Person, elsewhere ...roster.Person) Change {
+	fiche := From(person)
+	for _, ailleurs := range elsewhere {
+		if !ailleurs.Owns(person.Username) {
+			continue
+		}
+		if slug, err := naming.Student(ailleurs.FullName); err == nil {
+			fiche.Slugs = append(fiche.Slugs, slug)
+		}
+	}
+	change := Change{Learn: []User{fiche}}
+	if nom := strings.TrimSpace(person.FullName); nom != "" {
+		change.Reason = "Nomme @" + strings.TrimSpace(person.Username) + " : " + nom
+	}
+	return change
+}
+
 // LearnSlug retient qu'un slug désigne un compte. C'est ce qu'on apprend en
 // adoptant des dépôts déjà nommés autrement que par le nom complet.
 func LearnSlug(username, slug string) Change {

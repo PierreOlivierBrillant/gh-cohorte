@@ -66,6 +66,30 @@ func TestCorrigerUnNomGardeLAncienSlug(t *testing.T) {
 	}
 }
 
+// Un nom corrigé depuis la fiche garde aussi le slug que lui donnait une liste
+// de groupe : le registre ne l'a peut-être jamais reçu, et c'est pourtant lui
+// qui a nommé ses dépôts. Ce qu'une liste dit d'un autre compte n'y entre pas.
+func TestNommerGardeLeSlugQueDonnaitUneListe(t *testing.T) {
+	change := registry.Name(personne("Aleksi Lepaj", "aleksilepaj"),
+		personne("Aleksi Lepa", "AleksiLepaj"), personne("Émilie Côté", "ecote"),
+		personne("", "aleksilepaj"))
+	set, _, err := appliquer(t, registry.Empty(), change)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fiche, _ := set.Find("aleksilepaj")
+	if fiche.FullName != "Aleksi Lepaj" {
+		t.Fatalf("nom = %q", fiche.FullName)
+	}
+	if strings.Join(fiche.Slugs, ",") != "aleksi-lepa,aleksi-lepaj" {
+		t.Fatalf("slugs = %v", fiche.Slugs)
+	}
+	if _, trouve := set.Resolve("emilie-cote"); trouve {
+		t.Error("le nom d'un autre compte ne doit pas lui être attribué")
+	}
+}
+
 // Adopter des dépôts hérités apprend un compte sans son nom. Cela ne doit
 // jamais effacer un nom déjà connu.
 func TestUnNomVideNEffaceJamaisUnNomConnu(t *testing.T) {

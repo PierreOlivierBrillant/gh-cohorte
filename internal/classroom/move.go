@@ -64,6 +64,79 @@ func PlanRenameStudent(cours Classroom, avant, apres roster.Person,
 		map[string]string{strings.ToLower(avant.Username): fragmentDe(apres)}, repos)
 }
 
+// Correction est la fiche corrigée d'une personne du groupe : ce qu'elle était,
+// ce qu'elle devient, le groupe qui la porte désormais, et les dépôts à
+// renommer pour qu'ils suivent — aucun quand on ne l'a pas demandé.
+type Correction struct {
+	Before    roster.Person
+	After     roster.Person
+	Classroom Classroom
+	Moves     []Move
+}
+
+// Changed dit que la fiche elle-même change : son nom complet ou son compte.
+// La casse d'un compte ne compte pas, GitHub ne la distingue pas.
+func (c Correction) Changed() bool {
+	return c.Before.FullName != c.After.FullName ||
+		!strings.EqualFold(c.Before.Username, c.After.Username)
+}
+
+// PlanCorrection compose la correction de la fiche d'une personne du groupe —
+// son nom complet, son compte GitHub, ou les deux — et, si on le demande, le
+// renommage de ses dépôts pour qu'ils portent son nom. Rien n'est écrit ici :
+// les trois interfaces partent de ce plan, et refusent donc les mêmes choses.
+//
+// Un nom ou un compte laissé vide reste ce qu'il était. La fiche corrigée part
+// de la ligne de la liste plutôt que de rien : son matricule et ses autres
+// comptes sont à elle, et une correction de nom n'a pas à les lui faire perdre.
+//
+// Le groupe doit avoir été enrichi de l'inventaire : c'est lui qui rattache à
+// la personne les dépôts nommés d'après un ancien nom.
+func PlanCorrection(cours Classroom, username string, wanted roster.Person,
+	withRepos bool, repos []groups.RepoInfo) (Correction, error) {
+	avant, inscrit := cours.Find(username)
+	if !inscrit {
+		return Correction{}, valid.Errorf("@%s n'est pas dans « %s ».",
+			strings.TrimSpace(username), cours.Label())
+	}
+	apres := avant
+	for _, student := range cours.Students {
+		if student.Owns(avant.Username) {
+			apres = student
+			break
+		}
+	}
+	if nom := strings.TrimSpace(wanted.FullName); nom != "" {
+		apres.FullName = nom
+	}
+	if compte := strings.TrimSpace(wanted.Username); compte != "" {
+		apres.Username = compte
+	}
+	modifie, err := cours.Rename(avant.Username, apres)
+	if err != nil {
+		return Correction{}, err
+	}
+	apres, _ = modifie.Find(apres.Username)
+	correction := Correction{Before: avant, After: apres, Classroom: modifie}
+	if withRepos {
+		if correction.Moves, err = PlanRenameStudent(cours, avant, apres, repos); err != nil {
+			return Correction{}, err
+		}
+	}
+
+	// Une correction qui ne change rien n'a rien à écrire : la laisser passer
+	// ferait croire à un geste qui n'a pas eu lieu.
+	if !correction.Changed() && len(correction.Moves) == 0 {
+		if withRepos {
+			return Correction{}, valid.Errorf("Rien à corriger : ni le nom ni le compte de "+
+				"@%s n'ont changé, et ses dépôts portent déjà son nom.", avant.Username)
+		}
+		return Correction{}, valid.Errorf(
+			"Ni le nom ni le compte de @%s n'ont changé.", avant.Username)
+	}
+	return correction, nil
+}
+
 // fragmentDe rend le fragment qui nomme une personne dans un dépôt. Il est vide
 // quand son nom complet manque : le dépôt gardera alors celui qu'il porte.
 func fragmentDe(personne roster.Person) string {

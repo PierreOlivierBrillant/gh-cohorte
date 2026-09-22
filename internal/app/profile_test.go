@@ -234,6 +234,74 @@ func TestNommerUnUtilisateurAuTerminal(t *testing.T) {
 	}
 }
 
+// Corriger un nom qu'une liste de ce poste donnait autrement : la liste
+// l'emporterait sur le registre, si bien qu'elle le lui cède. Le dépôt nommé
+// d'après l'ancien nom reste le sien.
+func TestCorrigerUnNomAuTerminal(t *testing.T) {
+	h := college(t)
+	h.State.AddRepo("acme", "h27.5n6.02.tp1.aleksi-lepa", true)
+	h.declarer(classroom.Classroom{
+		Org: "acme", Session: "h27", Course: "5n6", Group: "02",
+		Students: []roster.Person{{FullName: "Aleksi Lepa", Username: "aleksilepaj"}},
+	})
+
+	h.Options.StudentsRequested = false
+	h.Options.User = "aleksilepaj"
+	h.Options.FullName = "Aleksi Lepaj"
+	if code := h.muet(); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Aleksi Lepaj — @aleksilepaj", "tp1")
+	h.absent("Aleksi Lepa —")
+
+	contenu := h.State.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
+	set, _ := registry.Decode([]byte(contenu))
+	if trouve, connu := set.Lookup("aleksi-lepa"); !connu || trouve.Username != "aleksilepaj" {
+		t.Errorf("l'ancien slug doit toujours le désigner : %+v, %v", trouve, connu)
+	}
+}
+
+// Au terminal, la fiche propose de corriger un nom déjà donné, et dit que ses
+// dépôts ne sont pas renommés pour autant.
+func TestCorrigerUnNomDepuisLaFicheInteractive(t *testing.T) {
+	h := college(t)
+	h.Options.StudentsRequested = false
+	h.Options.User = "emilie-cote"
+
+	// Corriger ? oui ; le nom ; coopter ? non.
+	code, scripte := h.script("o", "Émilie Côté-Roy", "n")
+	if code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	question, posee := scripte.AskedFor("Nom complet")
+	if !posee || question.Default != "Émilie Côté" {
+		t.Fatalf("le champ doit être prérempli du nom courant : %+v, %v", question, posee)
+	}
+	h.contient("Aucun dépôt n'est renommé",
+		"@emilie-cote s'appelle « Émilie Côté-Roy »")
+
+	contenu := h.State.Files("acme/"+registry.RepoName, registry.Branch)[registry.UsersFile]
+	set, _ := registry.Decode([]byte(contenu))
+	if set.Name("emilie-cote") != "Émilie Côté-Roy" {
+		t.Fatalf("registre = %+v", set.All())
+	}
+}
+
+// Un nom laissé tel quel n'écrit rien : l'annoncer comme une correction ferait
+// croire à un geste qui n'a pas eu lieu.
+func TestUnNomInchangeNEcritRienAuTerminal(t *testing.T) {
+	h := college(t)
+	h.Options.StudentsRequested = false
+	h.Options.User = "emilie-cote"
+
+	// Corriger ? oui ; Entrée garde le nom proposé ; coopter ? non.
+	if code, _ := h.script("o", "", "n"); code != app.ExitOK {
+		t.Fatalf("code = %d\n%s", code, h.texte())
+	}
+	h.contient("Le nom n'a pas changé.")
+	h.absent("s'appelle")
+}
+
 // Un nom vide ne nomme personne : le refus est dit plutôt qu'avalé.
 func TestUnNomVideEstRefuseAuTerminal(t *testing.T) {
 	h := college(t)
