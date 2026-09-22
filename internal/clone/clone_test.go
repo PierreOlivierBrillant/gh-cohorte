@@ -1,9 +1,11 @@
 package clone_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -318,5 +320,177 @@ func TestRunSansCible(t *testing.T) {
 	resultats, err := clone.New(4, 0).Run(nil, t.TempDir(), nil)
 	if err != nil || len(resultats) != 0 {
 		t.Errorf("Run = %+v, %v", resultats, err)
+	}
+}
+
+// poste simule une machine : ses variables, son accueil, ses fichiers et ses
+// dossiers. Aucun n'est lu sur le système qui fait tourner les tests.
+type poste struct {
+	systeme  string
+	env      map[string]string
+	accueil  string // vide : l'accueil est inconnu
+	fichiers map[string]string
+	dossiers []string
+	connu    string // vide : l'appel au dossier connu de Windows échoue
+}
+
+func (p poste) System() clone.System {
+	return clone.System{
+		GOOS:   p.systeme,
+		Getenv: func(nom string) string { return p.env[nom] },
+		Home: func() (string, error) {
+			if p.accueil == "" {
+				return "", errors.New("accueil inconnu")
+			}
+			return p.accueil, nil
+		},
+		ReadFile: func(chemin string) ([]byte, error) {
+			contenu, ok := p.fichiers[chemin]
+			if !ok {
+				return nil, os.ErrNotExist
+			}
+			return []byte(contenu), nil
+		},
+		IsDir: func(chemin string) bool {
+			for _, dossier := range p.dossiers {
+				if dossier == chemin {
+					return true
+				}
+			}
+			return false
+		},
+		KnownFolder: func() (string, error) {
+			if p.connu == "" {
+				return "", errors.New("dossier connu indisponible")
+			}
+			return p.connu, nil
+		},
+	}
+}
+
+func TestDossierParentParDefaut(t *testing.T) {
+	const accueil = "/home/prof"
+	dirs := func(config string) string { return filepath.Join(config, "user-dirs.dirs") }
+	fichierXDG := dirs(filepath.Join(accueil, ".config"))
+	telechargements := filepath.Join(accueil, "Téléchargements")
+	downloads := filepath.Join(accueil, "Downloads")
+	windows := `C:\Users\prof`
+
+	cas := []struct {
+		nom     string
+		poste   poste
+		attendu string
+	}{
+		{"XDG_DOWNLOAD_DIR pointe ailleurs", poste{
+			systeme:  "linux",
+			env:      map[string]string{"XDG_DOWNLOAD_DIR": "/srv/recus"},
+			accueil:  accueil,
+			fichiers: map[string]string{fichierXDG: `XDG_DOWNLOAD_DIR="$HOME/Téléchargements"`},
+			dossiers: []string{accueil, "/srv/recus", telechargements},
+		}, "/srv/recus"},
+		{"user-dirs.dirs au nom accentué", poste{
+			systeme: "linux",
+			accueil: accueil,
+			fichiers: map[string]string{fichierXDG: "# Écrit par xdg-user-dirs-update\n" +
+				"XDG_DESKTOP_DIR=\"$HOME/Bureau\"\r\n" +
+				"XDG_DOWNLOAD_DIR=\"$HOME/Téléchargements\"\r\n"},
+			dossiers: []string{accueil, telechargements, downloads},
+		}, telechargements},
+		{"user-dirs.dirs sous un XDG_CONFIG_HOME déplacé", poste{
+			systeme:  "linux",
+			env:      map[string]string{"XDG_CONFIG_HOME": "/etc/prof"},
+			accueil:  accueil,
+			fichiers: map[string]string{dirs("/etc/prof"): `XDG_DOWNLOAD_DIR="/mnt/Descargas"`},
+			dossiers: []string{accueil, "/mnt/Descargas", downloads},
+		}, "/mnt/Descargas"},
+		{"nom échappé dans user-dirs.dirs", poste{
+			systeme:  "linux",
+			accueil:  accueil,
+			fichiers: map[string]string{fichierXDG: `XDG_DOWNLOAD_DIR="$HOME/Mes \"reçus\""`},
+			dossiers: []string{accueil, filepath.Join(accueil, `Mes "reçus"`)},
+		}, filepath.Join(accueil, `Mes "reçus"`)},
+		{"valeur relative ignorée", poste{
+			systeme:  "linux",
+			env:      map[string]string{"XDG_DOWNLOAD_DIR": "recus"},
+			accueil:  accueil,
+			dossiers: []string{accueil, "recus", downloads},
+		}, downloads},
+		{"fichier absent : ~/Downloads", poste{
+			systeme:  "linux",
+			accueil:  accueil,
+			dossiers: []string{accueil, downloads},
+		}, downloads},
+		{"téléchargements inexistants : l'accueil", poste{
+			systeme:  "linux",
+			accueil:  accueil,
+			fichiers: map[string]string{fichierXDG: `XDG_DOWNLOAD_DIR="$HOME/Téléchargements"`},
+			dossiers: []string{accueil},
+		}, accueil},
+		{"accueil inconnu : le dossier courant", poste{
+			systeme:  "linux",
+			fichiers: map[string]string{fichierXDG: `XDG_DOWNLOAD_DIR="$HOME/Téléchargements"`},
+			dossiers: []string{telechargements, "Downloads"},
+		}, "."},
+		{"accueil inexistant : le dossier courant", poste{
+			systeme: "linux",
+			accueil: accueil,
+		}, "."},
+		{"macOS : le nom anglais", poste{
+			systeme:  "darwin",
+			accueil:  "/Users/prof",
+			dossiers: []string{"/Users/prof", filepath.Join("/Users/prof", "Downloads")},
+		}, filepath.Join("/Users/prof", "Downloads")},
+		{"Windows : le dossier connu, déplacé", poste{
+			systeme:  "windows",
+			accueil:  windows,
+			connu:    `D:\OneDrive\Téléchargements`,
+			dossiers: []string{windows, `D:\OneDrive\Téléchargements`, filepath.Join(windows, "Downloads")},
+		}, `D:\OneDrive\Téléchargements`},
+		{"Windows : dossier connu en échec", poste{
+			systeme:  "windows",
+			accueil:  windows,
+			dossiers: []string{windows, filepath.Join(windows, "Downloads")},
+		}, filepath.Join(windows, "Downloads")},
+		{"Windows : ni l'un ni l'autre", poste{
+			systeme:  "windows",
+			accueil:  windows,
+			dossiers: []string{windows},
+		}, windows},
+	}
+	for _, c := range cas {
+		t.Run(c.nom, func(t *testing.T) {
+			if obtenu := clone.DefaultParentOn(c.poste.System()); obtenu != c.attendu {
+				t.Fatalf("proposé %q, attendu %q", obtenu, c.attendu)
+			}
+		})
+	}
+}
+
+func TestDossierParentReel(t *testing.T) {
+	parent := clone.DefaultParent()
+	t.Logf("proposé sur cette machine : %s", parent)
+	if parent == "." {
+		return
+	}
+	if info, err := os.Stat(parent); err != nil || !info.IsDir() {
+		t.Fatalf("« %s » proposé, mais ce n'est pas un dossier existant", parent)
+	}
+}
+
+func TestDossierConnuDeWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("le dossier connu FOLDERID_Downloads n'existe que sous Windows")
+	}
+	connu, err := clone.KnownDownloads()
+	if err != nil {
+		t.Fatalf("dossier connu : %v", err)
+	}
+	if !filepath.IsAbs(connu) {
+		t.Fatalf("dossier connu relatif : %q", connu)
+	}
+	if info, err := os.Stat(connu); err == nil && info.IsDir() {
+		if parent := clone.DefaultParent(); parent != connu {
+			t.Fatalf("proposé %q, attendu le dossier connu %q", parent, connu)
+		}
 	}
 }

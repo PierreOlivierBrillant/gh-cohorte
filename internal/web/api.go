@@ -12,6 +12,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/clone"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
@@ -55,6 +56,11 @@ type contextPayload struct {
 	// NativePicker nomme la fenêtre de sélection du système quand il y en a
 	// une ; vide, l'interface montre son propre explorateur.
 	NativePicker string `json:"native_picker"`
+	// CloneParent est la destination proposée tant que Settings.CloneDir est
+	// vide. Elle voyage à part : glissée dans les réglages, elle serait
+	// réécrite dans config.json au premier enregistrement, comme si quelqu'un
+	// l'avait choisie, et y resterait figée même sur une autre machine.
+	CloneParent string `json:"clone_parent"`
 }
 
 // handleContext décrit la session en cours.
@@ -76,6 +82,7 @@ func (s *Server) handleContext(writer http.ResponseWriter, _ *http.Request) {
 		Jobs:         s.deps.Jobs,
 		Depth:        s.deps.Depth,
 		NativePicker: picker.Name(),
+		CloneParent:  clone.DefaultParent(),
 	})
 }
 

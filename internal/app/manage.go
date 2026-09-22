@@ -1073,7 +1073,7 @@ func (m *manageSession) cloneRepos(group *groups.Group) error {
 
 	parent := session.Settings.CloneDir
 	if parent == "" {
-		parent = "."
+		parent = clone.DefaultParent()
 	}
 	answer, err := session.Prompt.Ask(ui.Question{
 		Title:      "Dossier de destination (« - » pour annuler)",
@@ -1146,7 +1146,7 @@ func (m *manageSession) pullClones(group *groups.Group) error {
 
 	parent := session.Settings.CloneDir
 	if parent == "" {
-		parent = "."
+		parent = clone.DefaultParent()
 	}
 	var clones []clone.Clone
 	var folder string

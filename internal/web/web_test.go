@@ -1365,6 +1365,39 @@ func TestReglagesMemorises(t *testing.T) {
 	}
 }
 
+// La destination proposée voyage à côté des réglages : renvoyés tels que la page
+// les a reçus, ceux-ci ne doivent pas la figer dans config.json.
+func TestDestinationProposeeHorsDesReglages(t *testing.T) {
+	h := nouveau(t, nil)
+	var contexte struct {
+		Settings    config.Settings `json:"settings"`
+		CloneParent string          `json:"clone_parent"`
+	}
+	h.json(http.MethodGet, "/api/context", nil, &contexte)
+	if contexte.CloneParent == "" {
+		t.Fatal("aucune destination proposée")
+	}
+	if contexte.Settings.CloneDir != "" {
+		t.Fatalf("la proposition a pris la place du réglage : %q", contexte.Settings.CloneDir)
+	}
+
+	var bilan struct {
+		Path string `json:"path"`
+	}
+	h.json(http.MethodPut, "/api/settings", contexte.Settings, &bilan)
+	contenu, err := os.ReadFile(bilan.Path)
+	if err != nil {
+		t.Fatalf("lecture des réglages : %v", err)
+	}
+	var relus config.Settings
+	if err := json.Unmarshal(contenu, &relus); err != nil {
+		t.Fatalf("réglages illisibles : %v", err)
+	}
+	if relus.CloneDir != "" {
+		t.Fatalf("destination figée dans les réglages : %q", relus.CloneDir)
+	}
+}
+
 func TestReglagesInvalidesRefuses(t *testing.T) {
 	h := nouveau(t, nil)
 	reglages := config.Default()
