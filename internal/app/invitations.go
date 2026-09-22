@@ -1,0 +1,199 @@
+package app
+
+import (
+	"strings"
+
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+)
+
+// L'invitation d'un étudiant, au terminal. GitHub la laisse expirer au bout de
+// quelques jours, et un étudiant peut la refuser : dans les deux cas, il n'a
+// plus de lien qui mène à son dépôt, et l'enseignant croit l'avoir invité. La
+// liste le montre dès que les accès ont été relevés, et un envoi remplace
+// l'invitation morte par une neuve — ou en fait partir une première.
+
+// invitations dit où en est l'invitation de chaque dépôt du groupe, et combien
+// de dépôts un envoi débloquerait.
+//
+// Rien n'est demandé à GitHub : ce sont les accès déjà mémorisés qui parlent,
+// et un dépôt dont on ne les a pas relevés ne dit rien.
+func (m *manageSession) invitations(group *groups.Group) (map[string]identity.InvitationState, int) {
+	noms := nomsDuGroupe(group)
+	acces := m.resolver.Accesses(m.org, noms, identity.Cached, nil)
+	cours, equipes, droit := m.pourInviter(group)
+
+	etats := make(map[string]identity.InvitationState, len(noms))
+	for _, nom := range noms {
+		var lus *identity.Access
+		if connu, inspecte := acces[nom]; inspecte {
+			lus = &connu
+		}
+		etats[nom], _ = cours.InvitationOf(nom, equipes, lus)
+	}
+	depots := map[string]bool{}
+	for _, envoi := range cours.ToInvite(noms, equipes, acces, droit) {
+		depots[envoi.Repo] = true
+	}
+	return etats, len(depots)
+}
+
+// pourInviter rassemble ce que le domaine demande pour décider des invitations
+// du groupe : qui chaque dépôt vise, et le droit d'une première invitation.
+//
+// Un préfixe hérité ne dit pas à quel groupe il appartient : le groupe rendu
+// est alors vide et ne vise personne. Tous ceux qui ont accès à un dépôt
+// comptent pour dire où il en est, et seules les invitations expirées — qui
+// nomment déjà quelqu'un — peuvent se renvoyer.
+func (m *manageSession) pourInviter(group *groups.Group) (classroom.Classroom, []teams.Team, string) {
+	cours, nom, reconnu := m.travail(group)
+	if !reconnu {
+		return classroom.Classroom{}, nil, m.session.Settings.Permission
+	}
+	return cours, m.equipesDe(cours), cours.Settings(nom).Permission
+}
+
+// motDInvitation colore l'état d'une invitation comme le navigateur le fait :
+// une invitation expirée ou absente est celle qui demande qu'on agisse.
+func motDInvitation(console *ui.Console, etat identity.InvitationState) string {
+	switch etat {
+	case identity.InvitationAccepted:
+		return console.OK(string(etat))
+	case identity.InvitationPending:
+		return console.Warn(string(etat))
+	case identity.InvitationExpired, identity.InvitationNone:
+		return console.Err(string(etat))
+	}
+	return console.Dim("—")
+}
+
+// envoisDuDepot rend ce qu'il faut envoyer pour qu'un dépôt s'ouvre à celui
+// qu'il vise, d'après des accès qu'on vient de relire.
+func (m *manageSession) envoisDuDepot(group *groups.Group, repo groups.Repo,
+	acces identity.Access) []identity.Dispatch {
+	cours, equipes, droit := m.pourInviter(group)
+	return cours.ToInvite([]string{repo.Name}, equipes,
+		map[string]identity.Access{repo.Name: acces}, droit)
+}
+
+// gesteDEnvoi nomme dans un menu ce qu'un envoi fera.
+func gesteDEnvoi(envois []identity.Dispatch) string {
+	gestes := make([]string, 0, len(envois))
+	for _, envoi := range envois {
+		if envoi.First() {
+			gestes = append(gestes, "inviter @"+envoi.Invitation.Login)
+			continue
+		}
+		gestes = append(gestes, "renvoyer l'invitation expirée de @"+envoi.Invitation.Login)
+	}
+	return "Envoyer l'invitation manquante (" + strings.Join(gestes, ", ") + ")"
+}
+
+// envoyerAuDepot fait partir ce qui manque à un seul dépôt.
+func (m *manageSession) envoyerAuDepot(envois []identity.Dispatch) {
+	console := m.session.Console
+	var faits []identity.Dispatch
+	ui.Await(console, "Envoi des invitations…", func() {
+		faits = m.resolver.Send(m.org, envois, nil)
+	})
+	for _, fait := range faits {
+		if fait.Error != "" {
+			console.Failure("%s", fait.Summary())
+			continue
+		}
+		console.Success("%s", fait.Summary())
+	}
+}
+
+// envoyerManquantes relit les accès du groupe et envoie les invitations qui
+// manquent : une neuve à la place de chaque invitation expirée, une première à
+// qui n'en a aucune. « demander » fait confirmer avant d'agir : l'assistant le
+// fait, la ligne de commande non — le drapeau est déjà la demande.
+//
+// Le second retour compte les envois qui ont échoué : la ligne de commande en
+// fait son code de sortie.
+func (m *manageSession) envoyerManquantes(group *groups.Group, demander bool) (int, error) {
+	noms := nomsDuGroupe(group)
+	if len(noms) == 0 {
+		return 0, valid.Errorf("Aucun dépôt dans « %s ».", group.Prefix)
+	}
+	console := m.session.Console
+	console.Heading("Invitations manquantes de « " + group.Prefix + " »")
+
+	// Les accès sont relus : ce qui a expiré depuis le dernier relevé compte, et
+	// ce qui a été accepté entre-temps n'a pas à l'être une seconde fois.
+	progression := ui.NewProgress(console, "Accès", len(noms))
+	lus := m.resolver.Accesses(m.org, noms, identity.Refresh,
+		func(done, _ int, repo string) { progression.Update(done, repo) })
+	progression.Clear()
+	if manquants := len(noms) - len(lus); manquants > 0 {
+		console.Warning("%d dépôt(s) n'ont pas pu être lus : leurs invitations restent "+
+			"inconnues.", manquants)
+	}
+
+	cours, equipes, droit := m.pourInviter(group)
+	envois := cours.ToInvite(noms, equipes, lus, droit)
+	if len(envois) == 0 {
+		console.Success("Aucune invitation ne manque.")
+		return 0, nil
+	}
+	rows := make([][]string, 0, len(envois))
+	for _, envoi := range envois {
+		geste := "renvoi (expirée)"
+		if envoi.First() {
+			geste = "première invitation"
+		}
+		rows = append(rows, []string{
+			envoi.Repo, "@" + envoi.Invitation.Login, envoi.Invitation.Permission, geste,
+		})
+	}
+	console.Table([]string{"Dépôt", "Compte", "Droit", "Envoi"}, rows, 40)
+
+	if m.session.Options.DryRun {
+		console.Note("Simulation : %d invitation(s) partiraient, rien n'est parti.",
+			len(envois))
+		return 0, nil
+	}
+	if demander {
+		console.Note("Une invitation expirée est annulée puis remplacée par une nouvelle, " +
+			"au même droit ; qui n'en a aucune — jamais invité, invitation refusée ou " +
+			"annulée — en reçoit une première, au droit du groupe. GitHub envoie un " +
+			"courriel à chacun.")
+		confirme, err := m.session.Prompt.Confirm(
+			"Envoyer ces "+itoa(len(envois))+" invitation(s) ?", true)
+		if err != nil || !confirme {
+			return 0, err
+		}
+	}
+
+	progression = ui.NewProgress(console, "Invitations", len(envois))
+	faits := m.resolver.Send(m.org, envois,
+		func(done, _ int, envoi identity.Dispatch) { progression.Update(done, envoi.Repo) })
+	progression.Clear()
+	echecs := 0
+	for _, fait := range faits {
+		if fait.Error != "" {
+			echecs++
+			console.Failure("%s : %s", fait.Repo, fait.Summary())
+			continue
+		}
+		console.Success("%s : %s", fait.Repo, fait.Summary())
+	}
+	if echecs > 0 {
+		console.Warning("%d envoi(s) sur %d ont échoué.", echecs, len(faits))
+	}
+	return echecs, nil
+}
+
+// nomsDuGroupe rend les noms des dépôts du groupe, dans leur ordre.
+func nomsDuGroupe(group *groups.Group) []string {
+	noms := make([]string, 0, group.Len())
+	for _, repo := range group.Repos {
+		noms = append(noms, repo.Name)
+	}
+	return noms
+}

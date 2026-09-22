@@ -268,6 +268,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/classrooms/{scope}/migration/apply", s.handleMigrationApply)
 	mux.HandleFunc("GET /api/classrooms/{scope}/assignments/{name}", s.handleAssignment)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/access", s.handleAssignmentAccess)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/invitations",
+		s.handleAssignmentInvitations)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/repos/{repo}/invitations",
+		s.handleRepoInvitation)
 	mux.HandleFunc("PUT /api/classrooms/{scope}/assignments/{name}/deadline", s.handleSetDeadline)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/handins", s.handleAssignmentHandins)
 	mux.HandleFunc("POST /api/classrooms/{scope}/handins", s.handleClassroomHandins)
@@ -296,6 +300,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/orgs/{org}/repos/{repo}/collaborators", s.handleAddCollaborator)
 	mux.HandleFunc("DELETE /api/orgs/{org}/repos/{repo}/collaborators/{login}", s.handleRemoveCollaborator)
 	mux.HandleFunc("DELETE /api/orgs/{org}/repos/{repo}/invitations/{id}", s.handleCancelInvitation)
+	mux.HandleFunc("POST /api/orgs/{org}/repos/{repo}/invitations/{id}/resend", s.handleResendInvitation)
 	mux.HandleFunc("DELETE /api/orgs/{org}/repos/{repo}", s.handleDeleteRepo)
 
 	// --- clones

@@ -33,6 +33,7 @@ var manageMenu = ui.Options(
 	"acces", "Afficher les accès de tous les dépôts",
 	"urls", "Afficher les URL des dépôts",
 	"collaborateurs", "Gérer les collaborateurs d'un dépôt",
+	"invitations", "Envoyer les invitations manquantes (expirées ou absentes)",
 	"cloner", "Cloner des dépôts en local",
 	"pull", "Mettre à jour des clones existants",
 	"supprimer", "Supprimer un dépôt",
@@ -333,12 +334,21 @@ func (m *manageSession) criteria() string {
 // show affiche le groupe : dépôt, nom complet, visibilité, dernier envoi. Les
 // commits et l'état des remises s'y ajoutent dès qu'un relevé a eu lieu : deux
 // colonnes de plus n'ont de sens que quand elles ont quelque chose à dire.
+// L'invitation suit la même règle : elle paraît dès que des accès sont connus.
 func (m *manageSession) show(group *groups.Group) {
 	console := m.session.Console
 	names := m.names(group)
 	visibles := m.visible(group)
 	bilans := m.bilans(group)
 	etats := m.etats(group)
+	invitations, aDebloquer := m.invitations(group)
+	avecInvitations := false
+	for _, etat := range invitations {
+		if etat != identity.InvitationUnknown {
+			avecInvitations = true
+			break
+		}
+	}
 
 	titre := "Groupe « " + group.Prefix + " » — " + itoa(group.Len()) + " dépôt(s)"
 	if len(visibles) != group.Len() {
@@ -349,6 +359,9 @@ func (m *manageSession) show(group *groups.Group) {
 	entetes := []string{"#", "Dépôt", "Nom complet", "Visibilité", "Dernier envoi"}
 	if len(bilans) > 0 {
 		entetes = append(entetes, "Commits", "Remise")
+	}
+	if avecInvitations {
+		entetes = append(entetes, "Invitation")
 	}
 	rows := make([][]string, 0, len(visibles))
 	for index, repo := range visibles {
@@ -365,11 +378,18 @@ func (m *manageSession) show(group *groups.Group) {
 			commits, verdict := resumeDeRemise(console, bilans[repo.Name], etats[repo.Name])
 			ligne = append(ligne, commits, verdict)
 		}
+		if avecInvitations {
+			ligne = append(ligne, motDInvitation(console, invitations[repo.Name]))
+		}
 		rows = append(rows, ligne)
 	}
 	console.Table(entetes, rows, 40)
 	if len(visibles) == 0 && group.Len() > 0 {
 		console.Warning("Aucun dépôt ne répond aux critères.")
+	}
+	if aDebloquer > 0 {
+		console.Warning("%d dépôt(s) sans invitation valable — expirée ou absente : "+
+			"« Envoyer les invitations manquantes » y remédie.", aDebloquer)
 	}
 	console.Note("%s", m.criteria())
 }
@@ -776,6 +796,10 @@ func (m *manageSession) showAccess(group *groups.Group) error {
 		}
 		pending := make([]string, 0, len(acces.Invitations))
 		for _, invitation := range acces.Invitations {
+			if invitation.Expired {
+				pending = append(pending, invitation.Login+" "+console.Err("(expirée)"))
+				continue
+			}
 			pending = append(pending, invitation.Login+" (invité)")
 		}
 		rows = append(rows, []string{
@@ -824,14 +848,25 @@ func (m *manageSession) manageCollaborators(group *groups.Group) error {
 			console.Note("Aucun collaborateur direct.")
 		}
 		for _, invitation := range acces.Invitations {
+			if invitation.Expired {
+				console.Warning("Invitation expirée : @%s", invitation.Login)
+				continue
+			}
 			console.Note("Invitation en attente : @%s", invitation.Login)
 		}
 
-		action, err := m.session.Prompt.Choose("Action", ui.Options(
+		actions := ui.Options(
 			"ajouter", "Ajouter un collaborateur",
 			"retirer", "Retirer un collaborateur ou annuler une invitation",
-			"revenir", "Revenir au menu",
-		), "revenir")
+		)
+		// L'envoi n'est proposé que s'il débloque quelque chose : une invitation
+		// encore valable n'a pas besoin d'un second courriel.
+		envois := m.envoisDuDepot(group, *repo, acces)
+		if len(envois) > 0 {
+			actions = append(actions, ui.Option{Value: "envoyer", Label: gesteDEnvoi(envois)})
+		}
+		actions = append(actions, ui.Option{Value: "revenir", Label: "Revenir au menu"})
+		action, err := m.session.Prompt.Choose("Action", actions, "revenir")
 		if err != nil {
 			return err
 		}
@@ -842,6 +877,8 @@ func (m *manageSession) manageCollaborators(group *groups.Group) error {
 			if err := m.addCollaborator(*repo); err != nil {
 				return err
 			}
+		case "envoyer":
+			m.envoyerAuDepot(envois)
 		default:
 			if err := m.removeCollaborator(*repo, acces); err != nil {
 				return err
@@ -898,6 +935,14 @@ func (m *manageSession) addCollaborator(repo groups.Repo) error {
 	return nil
 }
 
+// etiquetteDInvitation nomme une invitation dans un menu.
+func etiquetteDInvitation(invitation identity.Invitation) string {
+	if invitation.Expired {
+		return "invitation expirée"
+	}
+	return "invitation en attente"
+}
+
 func (m *manageSession) removeCollaborator(repo groups.Repo, acces identity.Access) error {
 	console := m.session.Console
 	options := make([]ui.Option, 0, len(acces.Collaborators)+len(acces.Invitations)+1)
@@ -907,7 +952,7 @@ func (m *manageSession) removeCollaborator(repo groups.Repo, acces identity.Acce
 	for _, invitation := range acces.Invitations {
 		options = append(options, ui.Option{
 			Value: "invitation:" + strconv.FormatInt(invitation.ID, 10),
-			Label: invitation.Login + " — invitation en attente",
+			Label: invitation.Login + " — " + etiquetteDInvitation(invitation),
 		})
 	}
 	if len(options) == 0 {
@@ -1514,6 +1559,19 @@ func (m *manageSession) run() (int, error) {
 			}
 			return ExitOK, nil
 		}
+		// « --send-invitations » fait une chose et s'en va, comme
+		// « --handins » : le drapeau est la demande, il n'y a rien à confirmer.
+		if m.session.Options.SendInvitations {
+			m.session.Options.SendInvitations = false
+			echecs, err := m.envoyerManquantes(group, false)
+			if err != nil {
+				return ExitValidation, err
+			}
+			if echecs > 0 {
+				return ExitFailure, nil
+			}
+			return ExitOK, nil
+		}
 		if m.session.Options.PublishIndex {
 			m.session.Options.PublishIndex = false
 			if err := m.publierIndex(group); err != nil {
@@ -1599,6 +1657,9 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return m.showAccess(group)
 	case "collaborateurs":
 		return m.manageCollaborators(group)
+	case "invitations":
+		_, err := m.envoyerManquantes(group, true)
+		return err
 	case "urls":
 		return m.urls(group)
 	case "cloner":

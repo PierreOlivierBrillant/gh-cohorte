@@ -137,6 +137,7 @@ type invitation struct {
 	ID         int64
 	Login      string
 	Permission string
+	Expired    bool
 }
 
 type treeEntry struct {
@@ -262,6 +263,16 @@ func (s *State) Invite(fullName, login, permission string) {
 	s.Invitations[fullName] = append(s.Invitations[fullName], invitation{
 		ID: s.nextInvitation, Login: login, Permission: permission,
 	})
+}
+
+// ExpireInvitations laisse passer le délai des invitations d'un dépôt : GitHub
+// les garde dans la liste, mais les dit expirées.
+func (s *State) ExpireInvitations(fullName string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	for index := range s.Invitations[fullName] {
+		s.Invitations[fullName][index].Expired = true
+	}
 }
 
 // AcceptInvitations transforme les invitations en attente en collaborateurs établis.
@@ -524,8 +535,10 @@ func (s *Server) get(writer http.ResponseWriter, request *http.Request, path str
 		payload := make([]map[string]any, 0)
 		for _, item := range state.Invitations[full] {
 			payload = append(payload, map[string]any{
-				"id":      item.ID,
-				"invitee": map[string]any{"login": item.Login},
+				"id":          item.ID,
+				"invitee":     map[string]any{"login": item.Login},
+				"permissions": droitInvite(item.Permission),
+				"expired":     item.Expired,
 			})
 		}
 		s.send(writer, 200, payload)
@@ -868,8 +881,10 @@ func (s *Server) put(writer http.ResponseWriter, request *http.Request, path str
 			writer.WriteHeader(204)
 			return
 		}
-		item := invitation{ID: state.nextInvitation, Login: login, Permission: permission}
+		// Le compteur avance avant de servir, comme dans « Invite » : les deux
+		// chemins ne doivent jamais donner le même identifiant.
 		state.nextInvitation++
+		item := invitation{ID: state.nextInvitation, Login: login, Permission: permission}
 		state.Invitations[full] = append(state.Invitations[full], item)
 		s.send(writer, 201, map[string]any{
 			"id":      item.ID,
@@ -1248,4 +1263,16 @@ func sortedKeys[T any](values map[string]T) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// droitInvite nomme un droit comme les invitations le nomment : « read » et
+// « write » là où l'ajout d'un collaborateur a reçu « pull » et « push ».
+func droitInvite(permission string) string {
+	switch permission {
+	case "pull":
+		return "read"
+	case "push", "":
+		return "write"
+	}
+	return permission
 }

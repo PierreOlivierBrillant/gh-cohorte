@@ -7,6 +7,7 @@ import (
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 )
 
@@ -446,5 +447,71 @@ func TestLeCritereDEtatNeGardeQueLeSien(t *testing.T) {
 	}
 	if classroom.Overdue.Keep(classroom.Delivered) {
 		t.Error("un critère garde un autre état que le sien")
+	}
+}
+
+// L'invitation se juge sur la personne que le dépôt vise : une autre
+// invitation, acceptée ou non, ne dit rien d'elle. Sans accès relevés, rien ne
+// se conclut.
+func TestLInvitationSeRapporteALaPersonneVisee(t *testing.T) {
+	cours := groupe("a26", "5n6", "01", personnes("Émilie Côté", "ecote"))
+	depot := "a26.5n6.01.tp1.emilie-cote"
+
+	if etat, _ := cours.InvitationOf(depot, nil, nil); etat != identity.InvitationUnknown {
+		t.Errorf("sans accès relevés, l'invitation est dite %q", etat)
+	}
+	acces := identity.Access{
+		Collaborators: []string{"quelquun-dautre"},
+		Invitations:   []identity.Invitation{{ID: 7, Login: "ECOTE", Expired: true}},
+	}
+	etat, invitation := cours.InvitationOf(depot, nil, &acces)
+	if etat != identity.InvitationExpired || invitation.ID != 7 {
+		t.Errorf("InvitationOf = %q, %+v : l'invitation de l'étudiante a expiré", etat, invitation)
+	}
+}
+
+// Un dépôt d'équipe s'ouvre par l'équipe GitHub : c'est son invitation qui
+// compte, et les accès du dépôt n'ont pas à avoir été relevés.
+func TestLInvitationDUnDepotDEquipeEstCelleDeLEquipe(t *testing.T) {
+	cours := groupe("a26", "5n6", "01",
+		personnes("Émilie Côté", "ecote", "Jean-Luc Picard", "jlpicard"))
+	equipe := teams.Team{
+		Slug: "a26-5n6-01-eq1", Name: "a26.5n6.01.eq1", Short: "eq1",
+		Members: []string{"ecote", "jlpicard"},
+	}
+	depot := "a26.5n6.01.projet.eq1"
+
+	if etat, _ := cours.InvitationOf(depot, []teams.Team{equipe}, nil); etat != identity.InvitationAccepted {
+		t.Errorf("une équipe au complet est dite %q", etat)
+	}
+	equipe.Pending = []string{"jlpicard"}
+	if etat, _ := cours.InvitationOf(depot, []teams.Team{equipe}, nil); etat != identity.InvitationPending {
+		t.Errorf("une équipe dont un membre n'a pas accepté est dite %q", etat)
+	}
+}
+
+// Les invitations à envoyer se décident dépôt par dépôt : une première à qui
+// n'en a aucune, au droit donné ; rien pour un dépôt dont on n'a pas lu les
+// accès ; rien pour un dépôt d'équipe, que l'équipe ouvre.
+func TestLesInvitationsAEnvoyerDUnTravail(t *testing.T) {
+	cours := groupe("a26", "5n6", "01",
+		personnes("Émilie Côté", "ecote", "Jean-Luc Picard", "jlpicard"))
+	equipes := []teams.Team{{
+		Slug: "a26-5n6-01-eq1", Name: "a26.5n6.01.eq1", Short: "eq1",
+		Members: []string{"ecote"},
+	}}
+	acces := map[string]identity.Access{
+		"a26.5n6.01.tp1.emilie-cote": {},
+		"a26.5n6.01.projet.eq1":      {},
+	}
+	envois := cours.ToInvite([]string{
+		"a26.5n6.01.tp1.emilie-cote", "a26.5n6.01.tp1.jean-luc-picard", "a26.5n6.01.projet.eq1",
+	}, equipes, acces, "pull")
+	if len(envois) != 1 {
+		t.Fatalf("envois = %+v, attendu la seule première invitation d'Émilie", envois)
+	}
+	if envoi := envois[0]; envoi.Repo != "a26.5n6.01.tp1.emilie-cote" || !envoi.First() ||
+		envoi.Invitation.Login != "ecote" || envoi.Invitation.Permission != "pull" {
+		t.Errorf("envoi = %+v", envoi)
 	}
 }

@@ -884,6 +884,16 @@ type assignmentRepo struct {
 	// Access dit qui a accès au dépôt, quand on l'a déjà inspecté. Absent, on
 	// n'a pas encore regardé — ce qui n'est pas la même chose qu'aucun accès.
 	Access *identity.Access `json:"access,omitempty"`
+	// Invitation dit si la personne visée est entrée dans son dépôt :
+	// « acceptée », « en attente », « expirée » ou « sans invitation ». Vide,
+	// les accès n'ont pas été relevés. Le décider ici fait dire au navigateur
+	// les mêmes mots qu'au terminal.
+	Invitation string `json:"invitation,omitempty"`
+	// Invitable dit qu'un envoi y remédierait : une invitation expirée à
+	// remplacer, ou une première à envoyer. Le bouton ne se montre qu'avec
+	// lui : une invitation encore valable n'a pas besoin d'un second courriel,
+	// et une personne sans compte GitHub connu ne peut pas être invitée.
+	Invitable bool `json:"invitable,omitempty"`
 }
 
 // assignmentOf résout le groupe et le travail désignés par l'adresse.
@@ -961,6 +971,7 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 	// a pas de raison de faire cliquer pour montrer ce qu'on sait déjà.
 	remises := s.remisesConnues(cours.Org, tous)
 	acces := s.resolver(cours.Org).Accesses(cours.Org, tous, identity.Cached, nil)
+	droit := cours.Settings(cours.ShortName(id)).Permission
 	echeance, _ := valid.ParseDue(cours.DueOf(id))
 	remiseVoulue, err := classroom.ParseHandinState(request.URL.Query().Get("handin"))
 	if err != nil {
@@ -987,6 +998,9 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		if inspecte {
 			ligne.Access = &connu
 		}
+		invitation, _ := cours.InvitationOf(repo.Name, equipes, ligne.Access)
+		ligne.Invitation = string(invitation)
+		ligne.Invitable = len(cours.ToInvite([]string{repo.Name}, equipes, acces, droit)) > 0
 		// Sans accès relevés, une invitation en attente ne se voit pas : l'état
 		// dit alors ce que l'historique seul permet de dire.
 		attend := cours.Awaiting(repo.Name, equipes, connu.Pending())
@@ -1016,6 +1030,110 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		// dépôts du travail, filtrés compris — ce qu'on cache à l'écran ne sort
 		// pas du travail pour autant.
 		"shown": len(lignes), "total": len(trouves), "names": tous,
+	})
+}
+
+// handleAssignmentInvitations envoie les invitations qui manquent aux dépôts
+// d'un travail : une neuve à la place de chaque invitation expirée, et une
+// première à qui n'en a aucune.
+//
+// Les accès sont relus d'abord : ce qui a expiré depuis le dernier relevé
+// compte, et ce qui a été accepté entre-temps n'a pas à l'être de nouveau.
+func (s *Server) handleAssignmentInvitations(writer http.ResponseWriter, request *http.Request) {
+	cours, id, repos, err := s.assignmentOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	equipes, err := s.teamsIn(cours)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	noms := nomsDeDepots(cours.Repos(id, repos))
+	if len(noms) == 0 {
+		fail(writer, valid.Errorf("Aucun dépôt pour le travail « %s ».", cours.ShortName(id)))
+		return
+	}
+	droit := cours.Settings(cours.ShortName(id)).Permission
+
+	job := s.jobs.Start("invitations", "Invitations manquantes de « "+cours.ShortName(id)+" »",
+		func(job *Job) (any, error) {
+			resolver := s.resolver(cours.Org)
+			lus := resolver.Accesses(cours.Org, noms, identity.Refresh,
+				func(done, total int, repo string) {
+					job.Progress(done, total, repo)
+				})
+			if manquants := len(noms) - len(lus); manquants > 0 {
+				job.Warn(fmt.Sprintf("%d dépôt(s) n'ont pas pu être lus : leurs "+
+					"invitations restent inconnues.", manquants))
+			}
+			envois := cours.ToInvite(noms, equipes, lus, droit)
+			if len(envois) == 0 || job.Canceled() {
+				return []identity.Dispatch{}, nil
+			}
+			return resolver.Send(cours.Org, envois,
+				func(done, total int, envoi identity.Dispatch) {
+					statut := "envoyée"
+					if envoi.Error != "" {
+						statut = "échec"
+					}
+					job.Line(envoi.Repo+" : "+envoi.Summary(), map[string]string{"status": statut})
+					job.Progress(done, total, envoi.Repo)
+				}), nil
+		})
+	writeJSON(writer, http.StatusAccepted, job.State())
+}
+
+// handleRepoInvitation envoie ce qui manque à un seul dépôt du travail : c'est
+// le bouton d'une ligne. Ses accès sont relus d'abord, comme pour tout le
+// travail — l'écran peut dater d'avant une acceptation.
+func (s *Server) handleRepoInvitation(writer http.ResponseWriter, request *http.Request) {
+	cours, id, repos, err := s.assignmentOf(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	nom := strings.TrimSpace(request.PathValue("repo"))
+	appartient := false
+	for _, depot := range cours.Repos(id, repos) {
+		appartient = appartient || strings.EqualFold(depot.Name, nom)
+	}
+	if !appartient {
+		fail(writer, valid.Errorf("« %s » n'est pas un dépôt du travail « %s ».",
+			nom, cours.ShortName(id)))
+		return
+	}
+	equipes, err := s.teamsIn(cours)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	resolver := s.resolver(cours.Org)
+	lus, err := resolver.AccessOf(cours.Org, nom, identity.Refresh)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	envois := cours.ToInvite([]string{nom}, equipes, map[string]identity.Access{nom: lus},
+		cours.Settings(cours.ShortName(id)).Permission)
+	if len(envois) == 0 {
+		etat, _ := cours.InvitationOf(nom, equipes, &lus)
+		fail(writer, valid.Errorf("Rien à envoyer pour « %s » : l'invitation est « %s ».",
+			nom, etat))
+		return
+	}
+	faits := resolver.Send(cours.Org, envois, nil)
+	phrases := make([]string, 0, len(faits))
+	for _, fait := range faits {
+		if fait.Err() != nil {
+			fail(writer, fait.Err())
+			return
+		}
+		phrases = append(phrases, fait.Summary())
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"dispatches": faits, "message": strings.Join(phrases, " "),
 	})
 }
 

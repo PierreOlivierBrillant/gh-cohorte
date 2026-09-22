@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
@@ -348,4 +349,68 @@ func (c Classroom) Awaiting(repoName string, equipes []teams.Team, invites []str
 		}
 	}
 	return false
+}
+
+// InvitationOf dit où en est l'invitation de ceux qu'un dépôt vise. « acces »
+// vaut nil quand ses accès n'ont pas été relevés : rien ne se conclut alors.
+//
+// Un dépôt d'équipe ne se lit pas dans ses accès : c'est l'équipe GitHub qui
+// l'ouvre, et c'est donc l'invitation dans l'équipe qui compte. L'outil n'en
+// relève que les invitations en attente, qui ne disent pas si elles ont
+// expiré : l'état n'y est jamais « expirée », et rien ne s'y renvoie.
+//
+// Un dépôt dont on ne connaît pas le destinataire — hors liste — se juge sur
+// tous ceux qui y ont accès : c'est encore la meilleure réponse à « quelqu'un
+// y est-il entré ? ».
+func (c Classroom) InvitationOf(repoName string, equipes []teams.Team,
+	acces *identity.Access) (identity.InvitationState, identity.Invitation) {
+	if equipe, appartient := c.TeamOf(repoName, equipes); appartient {
+		switch {
+		case len(equipe.Pending) > 0:
+			return identity.InvitationPending, identity.Invitation{}
+		case len(equipe.Members) > 0:
+			return identity.InvitationAccepted, identity.Invitation{}
+		default:
+			return identity.InvitationNone, identity.Invitation{}
+		}
+	}
+	if acces == nil {
+		return identity.InvitationUnknown, identity.Invitation{}
+	}
+	return acces.InvitationOf(c.comptesVises(repoName, equipes))
+}
+
+// ToInvite rend les invitations à envoyer pour que ces dépôts s'ouvrent à ceux
+// qu'ils visent : une neuve à la place de chaque invitation expirée, et une
+// première à qui n'en a aucune, au droit donné.
+//
+// Seuls les dépôts dont les accès ont été relevés comptent : ne pas savoir
+// n'est pas savoir que personne n'a été invité. Un dépôt d'équipe n'en reçoit
+// jamais — c'est l'équipe qui l'ouvre. Et un dépôt dont on ne connaît pas le
+// destinataire n'a que ses invitations expirées à renvoyer : on ne sait pas qui
+// inviter pour la première fois.
+func (c Classroom) ToInvite(repos []string, equipes []teams.Team,
+	acces map[string]identity.Access, permission string) []identity.Dispatch {
+	var envois []identity.Dispatch
+	for _, repo := range repos {
+		lus, inspecte := acces[repo]
+		if !inspecte {
+			continue
+		}
+		if _, appartient := c.TeamOf(repo, equipes); appartient {
+			continue
+		}
+		lus.Repo = repo
+		envois = append(envois, lus.Dispatches(c.comptesVises(repo, equipes), permission)...)
+	}
+	return envois
+}
+
+// comptesVises rend les comptes GitHub de ceux qu'un dépôt vise.
+func (c Classroom) comptesVises(repoName string, equipes []teams.Team) []string {
+	var comptes []string
+	for _, personne := range c.Targets(repoName, equipes) {
+		comptes = append(comptes, personne.Accounts()...)
+	}
+	return comptes
 }

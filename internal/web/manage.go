@@ -131,6 +131,29 @@ func (s *Server) handleCancelInvitation(writer http.ResponseWriter, request *htt
 	writeJSON(writer, http.StatusOK, map[string]string{"message": "Invitation annulée."})
 }
 
+// handleResendInvitation remplace une invitation expirée par une nouvelle, au
+// même compte et avec le même droit.
+func (s *Server) handleResendInvitation(writer http.ResponseWriter, request *http.Request) {
+	org, repo, err := target(request)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	identifier, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil {
+		fail(writer, valid.Errorf("Invitation inconnue."))
+		return
+	}
+	envoi, err := s.resolver(org).Resend(org, repo, identifier)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"dispatch": envoi, "message": envoi.Summary(),
+	})
+}
+
 // handleDeleteRepo supprime définitivement un dépôt. Le nom exact doit être
 // retapé : aucune option ne court-circuite cette confirmation.
 func (s *Server) handleDeleteRepo(writer http.ResponseWriter, request *http.Request) {
