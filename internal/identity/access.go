@@ -1,12 +1,15 @@
 package identity
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
 
 // À qui un dépôt appartient-il ? Son nom le dit mal : « kickmyb-firebase-alice »
@@ -30,6 +33,12 @@ import (
 type Invitation struct {
 	ID    int64  `json:"id"`
 	Login string `json:"login"`
+	// Permission est le droit promis, tel qu'« AddCollaborator » l'attend :
+	// c'est celui qu'un renvoi doit promettre à nouveau.
+	Permission string `json:"permission,omitempty"`
+	// Expired dit que le délai pour accepter est passé. L'invitation reste
+	// affichée par GitHub, mais elle ne mène plus nulle part.
+	Expired bool `json:"expired,omitempty"`
 }
 
 // Access dit qui a accès à un dépôt : les collaborateurs directs, et les
@@ -78,6 +87,91 @@ func (a Access) Pending() []string {
 		}
 	}
 	return comptes
+}
+
+// InvitationState dit d'un mot où en est l'invitation d'une personne à son
+// dépôt.
+//
+// Les mots vivent ici plutôt que dans une interface : « expirée » doit vouloir
+// dire la même chose au navigateur et au terminal, et c'est lui qui décide
+// qu'un renvoi a un sens.
+type InvitationState string
+
+const (
+	// InvitationUnknown dit qu'on n'a pas regardé : les accès du dépôt n'ont
+	// pas été relevés, et rien ne s'en conclut.
+	InvitationUnknown InvitationState = ""
+	// InvitationAccepted dit que la personne a accès au dépôt.
+	InvitationAccepted InvitationState = "acceptée"
+	// InvitationPending dit que l'invitation attend une réponse, et qu'il est
+	// encore temps d'y répondre.
+	InvitationPending InvitationState = "en attente"
+	// InvitationExpired dit que le délai est passé : sans nouvelle
+	// invitation, la personne n'entrera jamais dans son dépôt.
+	InvitationExpired InvitationState = "expirée"
+	// InvitationNone dit que la personne n'a ni accès ni invitation : elle n'a
+	// jamais été invitée, elle a refusé, ou son invitation a été annulée —
+	// GitHub ne garde la trace d'aucun des trois. Il lui en faut une première.
+	InvitationNone InvitationState = "sans invitation"
+)
+
+// InvitationOf dit où en est l'invitation de l'un de ces comptes. Sans compte
+// donné — un dépôt dont on ne sait pas qui il vise —, tous ceux qui y ont accès
+// ou y sont invités comptent.
+//
+// Un accès établi l'emporte sur tout : une personne qui a accepté sous l'un de
+// ses comptes est entrée, quoi que dise une vieille invitation sous l'autre.
+// Une invitation encore valable l'emporte ensuite sur une expirée : elle
+// suffit, et en renvoyer une serait de trop.
+//
+// L'invitation rendue est celle qui a décidé de l'état, quand il y en a une :
+// c'est elle qu'un renvoi remplace.
+func (a Access) InvitationOf(accounts []string) (InvitationState, Invitation) {
+	for _, login := range a.Collaborators {
+		if vise(accounts, login) {
+			return InvitationAccepted, Invitation{}
+		}
+	}
+	var expiree *Invitation
+	for index, invitation := range a.Invitations {
+		if !vise(accounts, invitation.Login) {
+			continue
+		}
+		if !invitation.Expired {
+			return InvitationPending, invitation
+		}
+		if expiree == nil {
+			expiree = &a.Invitations[index]
+		}
+	}
+	if expiree != nil {
+		return InvitationExpired, *expiree
+	}
+	return InvitationNone, Invitation{}
+}
+
+// vise dit qu'un compte est l'un de ceux-là. Sans compte donné, tous le sont.
+func vise(accounts []string, login string) bool {
+	if len(accounts) == 0 {
+		return true
+	}
+	for _, compte := range accounts {
+		if strings.EqualFold(strings.TrimSpace(compte), strings.TrimSpace(login)) {
+			return true
+		}
+	}
+	return false
+}
+
+// Expired rend les invitations dont le délai est passé.
+func (a Access) Expired() []Invitation {
+	var expirees []Invitation
+	for _, invitation := range a.Invitations {
+		if invitation.Expired {
+			expirees = append(expirees, invitation)
+		}
+	}
+	return expirees
 }
 
 // Owner est ce qu'on a appris d'un dépôt.
@@ -160,6 +254,173 @@ func (r *Resolver) ForgetAccess(org, repo string) {
 	r.store.Forget(cache.AccessKey(org, repo))
 }
 
+// Dispatch est une invitation à envoyer, et ce que l'envoi en a fait. C'est
+// soit une neuve à la place d'une invitation expirée, soit la première d'une
+// personne qui n'en a pas — jamais invitée, invitation refusée ou annulée.
+type Dispatch struct {
+	Repo string `json:"repo"`
+	// Invitation est celle qu'on remplace, ou, pour une première invitation,
+	// le compte et le droit qu'on promet — son identifiant vaut alors zéro.
+	Invitation Invitation `json:"invitation"`
+	// State dit ce que GitHub a fait de la demande : une invitation, ou un
+	// accès direct si la personne est membre de l'organisation. Vide tant que
+	// rien n'est parti.
+	State string `json:"state,omitempty"`
+	// Error dit pourquoi rien n'est parti.
+	Error string `json:"error,omitempty"`
+	// err garde l'erreur elle-même : une interface qui n'envoie qu'une
+	// invitation la rend telle quelle, avec ce que GitHub en disait.
+	err error
+}
+
+// First dit qu'il n'y a rien à remplacer : c'est la première invitation.
+func (d Dispatch) First() bool { return d.Invitation.ID == 0 }
+
+// Err rend l'erreur de l'envoi, ou nil s'il a réussi.
+func (d Dispatch) Err() error { return d.err }
+
+// Summary dit en une phrase ce qu'un envoi a fait, ou fera. Le navigateur et
+// le terminal la reprennent telle quelle : les deux doivent dire la même chose.
+func (d Dispatch) Summary() string {
+	compte := "@" + d.Invitation.Login + " (" + d.Invitation.Permission + ")"
+	switch {
+	case d.Error != "":
+		return d.Error
+	case d.State == ghapi.CollaboratorAdded:
+		// La personne est membre de l'organisation : GitHub lui ouvre le dépôt
+		// sans rien lui demander.
+		return "@" + d.Invitation.Login + " a désormais accès à « " + d.Repo + " »."
+	case d.State == "" && d.First():
+		return "Première invitation à envoyer à " + compte + "."
+	case d.State == "":
+		return "Invitation expirée de " + compte + ", à remplacer."
+	case d.First():
+		return "Invitation envoyée à " + compte + "."
+	}
+	return "Nouvelle invitation envoyée à " + compte + "."
+}
+
+// Dispatches rend ce qu'il faut envoyer pour que l'un de ces comptes entre
+// dans le dépôt, au droit donné pour une première invitation.
+//
+// Rien quand la personne est entrée, ou qu'une invitation l'attend encore : un
+// second courriel ne servirait à rien. Une neuve à la place de chaque
+// invitation expirée. Sinon, une première invitation à chacun de ses comptes :
+// c'est ce que fait la distribution, et une personne qui travaille sous deux
+// comptes doit pouvoir entrer par l'un comme par l'autre.
+//
+// Sans compte donné, on ne sait pas qui inviter : seules les invitations
+// expirées se renvoient, puisqu'elles nomment déjà quelqu'un.
+func (a Access) Dispatches(accounts []string, permission string) []Dispatch {
+	etat, _ := a.InvitationOf(accounts)
+	var envois []Dispatch
+	switch etat {
+	case InvitationExpired:
+		for _, invitation := range a.Expired() {
+			if vise(accounts, invitation.Login) {
+				envois = append(envois, Dispatch{Repo: a.Repo, Invitation: invitation})
+			}
+		}
+	case InvitationNone:
+		for _, compte := range accounts {
+			if compte = strings.TrimSpace(compte); compte != "" {
+				envois = append(envois, Dispatch{Repo: a.Repo,
+					Invitation: Invitation{Login: compte, Permission: permission}})
+			}
+		}
+	}
+	return envois
+}
+
+// Resend remplace une invitation par une nouvelle, au même compte et avec le
+// même droit.
+//
+// L'invitation est relue avant qu'on y touche : une personne qui a accepté
+// entre-temps n'a pas à recevoir un second courriel, et le droit promis est
+// celui que GitHub dit, pas celui qu'un écran ancien croyait.
+func (r *Resolver) Resend(org, repo string, id int64) (Dispatch, error) {
+	acces, err := r.AccessOf(org, repo, Refresh)
+	if err != nil {
+		return Dispatch{}, err
+	}
+	for _, invitation := range acces.Invitations {
+		if invitation.ID != id {
+			continue
+		}
+		fait := r.envoyer(org, Dispatch{Repo: repo, Invitation: invitation})
+		return fait, fait.err
+	}
+	return Dispatch{}, valid.Errorf("Cette invitation n'existe plus sur « %s » : "+
+		"elle a été acceptée ou annulée entre-temps.", repo)
+}
+
+// Send envoie ces invitations, l'une après l'autre. Chacune dit ce qu'il en
+// est advenu : un échec n'arrête pas les suivantes, et c'est au bilan de le
+// dire. « onEach » reçoit chaque envoi dès qu'il est fait, pour qu'une
+// interface le montre sans attendre la fin.
+func (r *Resolver) Send(org string, envois []Dispatch,
+	onEach func(done, total int, envoi Dispatch)) []Dispatch {
+	faits := make([]Dispatch, 0, len(envois))
+	touches := make([]string, 0, len(envois))
+	vus := map[string]bool{}
+	for index, envoi := range envois {
+		fait := r.envoyer(org, envoi)
+		faits = append(faits, fait)
+		if !vus[fait.Repo] {
+			vus[fait.Repo] = true
+			touches = append(touches, fait.Repo)
+		}
+		if onEach != nil {
+			onEach(index+1, len(envois), fait)
+		}
+	}
+	// Les dépôts touchés sont relus : oubliés seulement, ils passeraient à
+	// l'écran pour des dépôts qu'on n'a pas regardés, alors qu'on sait très
+	// bien qu'une invitation neuve vient d'y partir.
+	r.Accesses(org, touches, Refresh, nil)
+	return faits
+}
+
+// envoyer fait partir une invitation, après avoir annulé celle qu'elle
+// remplace.
+//
+// GitHub n'a pas de geste « renvoyer » pour une invitation à un dépôt : la
+// seule façon d'en faire partir une neuve est de retirer l'ancienne. Si la
+// seconde étape échoue, la personne n'a plus d'invitation du tout — l'ancienne
+// ne menait déjà nulle part —, et l'erreur le dit pour qu'on l'invite à la main.
+func (r *Resolver) envoyer(org string, envoi Dispatch) Dispatch {
+	invitation := envoi.Invitation
+	// Quoi qu'il arrive ensuite, ce qu'on savait des accès est faux.
+	defer r.ForgetAccess(org, envoi.Repo)
+	echouer := func(err error) Dispatch {
+		envoi.err, envoi.Error = err, err.Error()
+		return envoi
+	}
+	permission := invitation.Permission
+	if permission == "" {
+		permission = ghapi.Invitation{}.Permission()
+	}
+	if !envoi.First() {
+		if err := r.client.CancelInvitation(org, envoi.Repo, invitation.ID); err != nil {
+			return echouer(fmt.Errorf("@%s : l'ancienne invitation n'a pas pu être "+
+				"annulée : %w", invitation.Login, err))
+		}
+	}
+	etat, err := r.client.AddCollaborator(org, envoi.Repo, invitation.Login, permission)
+	switch {
+	case err != nil && envoi.First():
+		return echouer(fmt.Errorf("@%s : l'invitation n'a pas pu partir : %w",
+			invitation.Login, err))
+	case err != nil:
+		return echouer(fmt.Errorf("@%s : l'ancienne invitation est annulée, mais la "+
+			"nouvelle n'a pas pu partir — invitez la personne depuis les accès du "+
+			"dépôt : %w", invitation.Login, err))
+	}
+	envoi.State = etat
+	envoi.Invitation.Permission = permission
+	return envoi
+}
+
 // fetchAccesses interroge GitHub pour les dépôts qu'on ne connaît pas encore.
 //
 // Un dépôt dont la lecture échoue est laissé de côté plutôt que mémorisé vide :
@@ -236,8 +497,10 @@ func (r *Resolver) accessOf(org, repo string) (Access, error) {
 	}
 	for _, invitation := range invitations {
 		if login := strings.TrimSpace(invitation.Invitee.Login); login != "" {
-			acces.Invitations = append(acces.Invitations,
-				Invitation{ID: invitation.ID, Login: login})
+			acces.Invitations = append(acces.Invitations, Invitation{
+				ID: invitation.ID, Login: login, Permission: invitation.Permission(),
+				Expired: invitation.Expired,
+			})
 		}
 	}
 	return acces, nil

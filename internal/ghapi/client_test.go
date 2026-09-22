@@ -571,3 +571,18 @@ func TestEquipesEtAccesAuDepot(t *testing.T) {
 		t.Error("une équipe inconnue doit produire une erreur")
 	}
 }
+
+// Une invitation nomme ses droits « read » et « write » ; l'ajout d'un
+// collaborateur les attend sous « pull » et « push ». Renvoyer doit promettre
+// le même droit que la première fois.
+func TestLeDroitDUneInvitationSeTraduit(t *testing.T) {
+	cas := map[string]string{
+		"read": "pull", "write": "push", "triage": "triage",
+		"maintain": "maintain", "admin": "admin", "": "push",
+	}
+	for promis, attendu := range cas {
+		if obtenu := (ghapi.Invitation{Permissions: promis}).Permission(); obtenu != attendu {
+			t.Errorf("Permission(%q) = %q, attendu %q", promis, obtenu, attendu)
+		}
+	}
+}

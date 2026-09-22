@@ -121,6 +121,11 @@ type Options struct {
 	// commits, les remises postérieures à la date cible, et les personnes dont
 	// aucun commit ne porte la trace.
 	Handins bool
+	// SendInvitations relit les accès des dépôts du travail géré et envoie les
+	// invitations qui manquent : une neuve à la place de chaque invitation
+	// expirée, une première à qui n'en a aucune — jamais invité, invitation
+	// refusée ou annulée. Avec --dry-run, il les nomme sans rien envoyer.
+	SendInvitations bool
 	// Plagiarism compare entre elles les copies du travail géré : elle mesure
 	// leurs ressemblances et les classe par ordre de suspicion. Ce n'est pas un
 	// verdict — le rapport le dit lui-même à chaque fois.
@@ -255,6 +260,7 @@ Utilisation :
   gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
   gh cohorte --manage a26.5n6.01.tp1 --due 2026-10-01
   gh cohorte --manage a26.5n6.01.tp1 --handins
+  gh cohorte --manage a26.5n6.01.tp1 --send-invitations
   gh cohorte --plagiarism --manage a26.5n6.01.tp1
   gh cohorte --plagiarism --manage a26.5n6.01.tp1 --profile next --languages tsx,css
   gh cohorte --plagiarism --manage a26.5n6.01.tp1 --reach annees
@@ -307,6 +313,9 @@ Drapeaux :
   --due DATE               date cible du travail (AAAA-MM-JJ ou AAAA-MM-JJTHH:MM,
                            vide pour la retirer)
   --handins                relever les commits des dépôts du travail géré
+  --send-invitations       envoyer les invitations manquantes du travail géré :
+                           renouveler les expirées, inviter qui n'en a aucune
+                           (avec --dry-run : les nommer sans rien envoyer)
   --plagiarism             comparer entre elles les copies du travail géré et les
                            classer par ordre de suspicion (ce n'est pas un verdict :
                            une ressemblance forte n'est pas une preuve)
@@ -511,6 +520,8 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	set.BoolVar(&options.NoBaseline, "no-baseline", false, "ne pas écarter le gabarit distribué")
 	set.BoolVar(&options.Handins, "handins", false,
 		"relever les commits des dépôts du travail")
+	set.BoolVar(&options.SendInvitations, "send-invitations", false,
+		"envoyer les invitations manquantes du travail")
 	equipe := set.String("team", "", "équipe visée")
 	membres := set.String("team-members", unset, "composition exacte de l'équipe")
 	ajouts := set.String("team-add", "", "comptes à inscrire dans l'équipe")
@@ -615,12 +626,14 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	}
 	// Comparer des copies, c'est forcément gérer un travail existant : le
 	// drapeau ouvre donc le mode gestion de lui-même. Sans préfixe, l'assistant
-	// demande lequel, comme « --manage » sans valeur.
+	// demande lequel, comme « --manage » sans valeur. Envoyer des invitations
+	// aussi : elles appartiennent aux dépôts d'un travail.
 	// « --grant » se sert du même « --export-zip » pour dire où écrire, mais il
 	// ne gère aucun travail : c'est la demande qui dit lequel. Et
 	// « --publish-index » sans travail ne gère rien non plus : il rattrape tous
 	// ceux qui n'ont pas d'index.
-	if options.Plagiarism || (options.PublishIndex && options.Manage != "") ||
+	if options.Plagiarism || options.SendInvitations ||
+		(options.PublishIndex && options.Manage != "") ||
 		(options.ExportZip != "" && !options.decidesAsk()) {
 		options.ManageRequested = true
 	}

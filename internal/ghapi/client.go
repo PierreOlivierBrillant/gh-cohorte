@@ -297,6 +297,30 @@ type Invitation struct {
 	Invitee struct {
 		Login string `json:"login"`
 	} `json:"invitee"`
+	// Permissions est le droit promis, dans le vocabulaire des invitations :
+	// « read » et « write » là où l'ajout d'un collaborateur attend « pull »
+	// et « push ». « Permission » traduit.
+	Permissions string `json:"permissions"`
+	// Expired dit que la personne a laissé passer le délai. GitHub garde
+	// l'invitation dans la liste, mais l'accepter n'est plus possible : il
+	// faut en envoyer une autre.
+	Expired bool `json:"expired"`
+}
+
+// Permission rend le droit promis dans le vocabulaire qu'« AddCollaborator »
+// attend. Renvoyer une invitation doit promettre ce que la première promettait,
+// et les deux points d'API ne nomment pas les droits de la même façon.
+func (i Invitation) Permission() string {
+	switch strings.ToLower(strings.TrimSpace(i.Permissions)) {
+	case "read":
+		return "pull"
+	case "write", "":
+		// Une invitation qui ne dit pas son droit reçoit celui que l'outil
+		// donne d'ordinaire : c'est celui que GitHub prendrait sans rien dire.
+		return "push"
+	default:
+		return strings.ToLower(strings.TrimSpace(i.Permissions))
+	}
 }
 
 // AuthenticatedUser vérifie le jeton et renvoie le compte associé.

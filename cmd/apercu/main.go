@@ -38,6 +38,7 @@ func main() {
 		state.AddRepo("acme", nom, true).PushedAt = envoi
 	}
 	garnirPourLaComparaison(state)
+	garnirLesInvitations(state)
 	faux := fakegh.New(state)
 	defer faux.Close()
 
@@ -104,6 +105,20 @@ func main() {
 	}
 	fmt.Println(serveur.URL())
 	_ = serveur.Serve(context.Background())
+}
+
+// garnirLesInvitations donne au premier travail un étudiant à chaque point de
+// son invitation : entré dans son dépôt, encore attendu, hors délai, et sans
+// invitation. C'est ce que la colonne « Invitation » doit savoir montrer.
+func garnirLesInvitations(state *fakegh.State) {
+	// Le faux GitHub refuse d'inviter un compte qu'il ne connaît pas : Bruno
+	// doit exister pour que « Inviter » aboutisse.
+	state.Users["btanguay"] = "Bruno Tanguay"
+	state.AddCollaborator("acme/a26.5n6.01.tp1.emilie-cote", "emilie-cote", "push")
+	state.AddCollaborator("acme/a26.5n6.01.tp1.jean-luc-picard", "jlpicard", "push")
+	state.Invite("acme/a26.5n6.01.tp1.claire-otis", "cotis", "push")
+	state.Invite("acme/a26.5n6.01.tp1.aminata-diallo", "aminata-d", "push")
+	state.ExpireInvitations("acme/a26.5n6.01.tp1.aminata-diallo")
 }
 
 // gabarit déclare le dépôt modèle du groupe : c'est lui que la comparaison

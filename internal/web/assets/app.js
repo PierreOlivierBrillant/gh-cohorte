@@ -1639,7 +1639,6 @@ function dessinerTravail() {
   const corps = $('detail-table').querySelector('tbody');
   vider(corps);
   for (const repo of depots) {
-    const acces = etat.acces.get(repo.name);
     corps.append(el('tr', {},
       el('td', {}, el('input', {
         type: 'checkbox',
@@ -1679,7 +1678,7 @@ function dessinerTravail() {
       // Une colonne vide dit qu'on n'a pas regardé ; un zéro, qu'il n'y a rien.
       el('td', repo.seen ? { texte: String(repo.commits) } : { classe: 'vide', texte: '—' }),
       el('td', {}, ...pastillesDuDepot(repo)),
-      el('td', { texte: acces ? resumerAcces(acces) : '—' }),
+      el('td', {}, ...pastillesDInvitation(repo)),
       el('td', { classe: 'etroit' }, el('span', { classe: 'actions' },
         el('button', {
           type: 'button', classe: 'lien icone',
@@ -1747,11 +1746,69 @@ function pastillesDuDepot(repo) {
   return jetons;
 }
 
-function resumerAcces(acces) {
-  const parts = [];
-  if (acces.collaborators.length) parts.push(`${acces.collaborators.length} collab.`);
-  if (acces.invitations.length) parts.push(`${acces.invitations.length} invit.`);
-  return parts.length ? parts.join(' · ') : 'aucun';
+// etatsDInvitation dit si la personne est entrée dans son dépôt. L'état vient
+// du serveur, comme celui de la remise : le navigateur n'en choisit que la
+// couleur.
+const etatsDInvitation = {
+  '': { classe: 'vide', texte: '—',
+    title: "Accès non inspectés : « Ce travail › Inspecter les accès » va les lire" },
+  acceptée: { classe: 'jeton oui', texte: 'acceptée',
+    title: 'La personne a accès à son dépôt' },
+  'en attente': { classe: 'jeton orange', texte: 'en attente',
+    title: "Invitation envoyée : la personne n'y a pas encore répondu" },
+  expirée: { classe: 'jeton non', texte: 'expirée',
+    title: "Le délai pour accepter est passé : sans nouvelle invitation, la personne " +
+      "n'entrera pas dans son dépôt" },
+  // Rouge comme l'expirée : sans geste de notre part, la personne n'entrera
+  // pas dans son dépôt.
+  'sans invitation': { classe: 'jeton non', texte: 'sans invitation',
+    title: "Ni accès ni invitation : jamais invitée, invitation refusée ou annulée — " +
+      "GitHub ne dit pas lequel" },
+};
+
+// pastillesDInvitation montre l'état de l'invitation et, quand un envoi y
+// remédierait, de quoi le faire : renvoyer une invitation expirée, ou inviter
+// qui n'en a pas. Le serveur en décide ; la page n'en choisit que le mot.
+function pastillesDInvitation(repo) {
+  const etatInvitation = etatsDInvitation[repo.invitation || ''] || etatsDInvitation[''];
+  const jeton = el('span', {
+    classe: etatInvitation.classe, texte: etatInvitation.texte, title: etatInvitation.title,
+  });
+  if (!repo.invitable) return [jeton];
+  const premiere = repo.invitation === 'sans invitation';
+  const qui = repo.full_name || repo.name;
+  return [el('span', { classe: 'invitation' }, jeton, el('button', {
+    type: 'button', classe: 'lien', texte: premiere ? 'Inviter' : 'Renvoyer',
+    title: premiere
+      ? "Envoyer une première invitation au compte de la liste, au droit du groupe"
+      : "Annuler l'invitation expirée et en envoyer une nouvelle, au même droit",
+    'aria-label': premiere ? `Inviter ${qui}` : `Renvoyer l'invitation de ${qui}`,
+    onclick: () => inviterSurLeDepot(repo),
+  }))];
+}
+
+// inviterSurLeDepot envoie ce qui manque à un dépôt du travail, puis relit le
+// travail : c'est le serveur qui dit ce que la ligne est devenue, et il a relu
+// les accès du dépôt après l'envoi.
+async function inviterSurLeDepot(repo) {
+  const fait = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/` +
+    `${encode(etat.travail.name)}/repos/${encode(repo.name)}/invitations`), 'Invitation');
+  if (!fait) return;
+  message(fait.message);
+  await chargerTravail(etat.travail, false, false);
+}
+
+// renvoyerInvitation remplace une invitation expirée désignée dans le panneau
+// d'accès, puis relit le travail.
+async function renvoyerInvitation(repo, identifiant) {
+  const fait = await tenter(() => api('POST',
+    `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}` +
+    `/invitations/${identifiant}/resend`), 'Renvoi');
+  if (!fait) return false;
+  message(fait.message);
+  await rafraichirAcces(repo);
+  return true;
 }
 
 function majSelection() {
@@ -1905,7 +1962,39 @@ $('detail-acces').addEventListener('click', async () => {
   const resultats = await suivre(fiche);
   if (!Array.isArray(resultats)) return;
   for (const acces of resultats) etat.acces.set(acces.repo, acces);
-  dessinerTravail();
+  // Ce que les accès disent de chaque invitation se décide au serveur, qui
+  // sait qui chaque dépôt vise : il suffit de relire le travail, sans réseau.
+  rechargerTravail();
+});
+
+$('detail-inviter').addEventListener('click', async () => {
+  menuTravail.deplier(false);
+  const connues = etat.travail.depots.filter((repo) => repo.invitable).length;
+  const corps = el('div', {},
+    el('p', { texte: `Envoyer les invitations manquantes de « ${etat.travail.name} » ?` }),
+    el('p', { classe: 'note', texte:
+      "Les accès de chaque dépôt sont relus d'abord. Chaque invitation expirée est remplacée " +
+      "par une nouvelle, au même droit ; chaque étudiant sans invitation — jamais invité, " +
+      "invitation refusée ou annulée — reçoit une première invitation, au droit du groupe. " +
+      "GitHub envoie un courriel à chacun." }),
+    connues
+      ? el('p', { classe: 'note', texte: `${connues} dépôt(s) concerné(s) à l'écran.` })
+      : el('p', { classe: 'note', texte:
+        "Aucune invitation manquante à l'écran — les accès n'ont peut-être pas été inspectés." }));
+  if (!await demander('Envoyer les invitations manquantes', corps, 'Envoyer')) return;
+
+  const fiche = await tenter(() => api('POST',
+    `/api/classrooms/${encode(etat.groupe.scope)}/assignments/` +
+    `${encode(etat.travail.name)}/invitations`), 'Invitations');
+  if (!fiche) return;
+  const envois = await suivre(fiche);
+  if (!Array.isArray(envois)) return;
+  const echecs = envois.filter((envoi) => envoi.error).length;
+  journaliser(envois.length === 0
+    ? 'Aucune invitation ne manquait dans ce travail.'
+    : `${envois.length - echecs} invitation(s) envoyée(s) · ${echecs} en échec`,
+  echecs ? 'warn' : 'ok');
+  rechargerTravail();
 });
 
 // --- accès d'un dépôt
@@ -1915,7 +2004,9 @@ async function panneauAcces(repo) {
     api('GET', `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/access`), 'Accès');
   if (!acces) return;
   etat.acces.set(repo.name, acces);
-  dessinerTravail();
+  // La ligne se relit en même temps : ces accès frais changent peut-être ce
+  // que la colonne « Invitation » disait. Le panneau ne l'attend pas.
+  chargerTravail(etat.travail, false, false);
 
   const liste = el('div', {});
   const redessiner = () => {
@@ -1931,10 +2022,20 @@ async function panneauAcces(repo) {
       }, redessiner));
     }
     for (const invitation of courant.invitations) {
-      liste.append(ligneAcces(repo, invitation.login, 'invitation en attente', async () => {
-        await api('DELETE',
-          `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/invitations/${invitation.id}`);
-      }, redessiner));
+      const ligne = ligneAcces(repo, invitation.login,
+        invitation.expired ? 'invitation expirée' : 'invitation en attente', async () => {
+          await api('DELETE',
+            `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/invitations/${invitation.id}`);
+        }, redessiner);
+      if (invitation.expired) {
+        ligne.insertBefore(el('button', {
+          type: 'button', classe: 'bouton petit vert', texte: 'Renvoyer',
+          onclick: async () => {
+            if (await renvoyerInvitation(repo, invitation.id)) redessiner();
+          },
+        }), ligne.lastChild);
+      }
+      liste.append(ligne);
     }
   };
   redessiner();
@@ -1982,7 +2083,9 @@ async function rafraichirAcces(repo) {
     api('GET', `/api/orgs/${encode(etat.groupe.org)}/repos/${encode(repo.name)}/access`), 'Accès');
   if (acces) {
     etat.acces.set(repo.name, acces);
-    dessinerTravail();
+    // L'état de l'invitation se relit avec la ligne : c'est le serveur qui le
+    // décide, et les accès qu'il vient de lire sont mémorisés.
+    await chargerTravail(etat.travail, false, false);
   }
 }
 

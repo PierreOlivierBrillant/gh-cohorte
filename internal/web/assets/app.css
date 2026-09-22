@@ -345,6 +345,11 @@ main { padding: 1.5rem; max-width: 1100px; }
    son dépôt ne lui est pas ouvert. Ce n'est ni le jaune du travail pas commencé
    ni le rouge du retard — c'est un empêchement, et il se voit comme tel. */
 .jeton.orange { color: var(--orange); background: var(--orange-fond); border-color: transparent; }
+/* Une invitation expirée et de quoi la renvoyer tiennent sur une ligne : sous
+   la pastille, le bouton doublerait la hauteur de la ligne et ferait replier
+   les colonnes voisines. */
+.invitation { display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap; }
+.invitation .lien { font-size: .8125rem; }
 .etiquettes { display: flex; gap: .4rem; flex-wrap: wrap; }
 
 /* ------------------------------------------------------------------- étapes */
