@@ -410,8 +410,10 @@ function tonDuResultat(donnees) {
   if (!donnees || !donnees.status) return 'dim';
   const statut = donnees.status;
   if (statut === 'échec') return 'err';
-  if (statut === 'ignoré' || statut === 'ignoré (dépôt non vide)') return 'warn';
-  if (statut === 'créé' || statut === 'cloné' || statut === 'mis à jour') return 'ok';
+  if (statut === 'ignoré' || statut === 'ignoré (dépôt non vide)' ||
+    statut === 'différent, conservé') return 'warn';
+  if (statut === 'créé' || statut === 'cloné' || statut === 'mis à jour' ||
+    statut === 'ajouté' || statut === 'remplacé') return 'ok';
   return 'dim';
 }
 
@@ -1996,6 +1998,116 @@ $('detail-inviter').addEventListener('click', async () => {
   echecs ? 'warn' : 'ok');
   rechargerTravail();
 });
+
+// --- déposer un fichier dans tous les dépôts
+
+// Un même fichier part dans chaque dépôt du travail — des consignes corrigées,
+// une grille —, rempli pour chacun par les champs du gabarit. Le serveur
+// décide de tout : les champs, le chemin acceptable, le sort d'un fichier déjà
+// présent. La page ne fait que demander et montrer.
+$('detail-fichier').addEventListener('click', async () => {
+  menuTravail.deplier(false);
+  await deposerFichier();
+});
+
+async function deposerFichier() {
+  const champs = await tenter(() => api('GET', '/api/broadcast/fields'), 'Champs');
+  if (!champs) return;
+  const adresse = `/api/classrooms/${encode(etat.groupe.scope)}/assignments/` +
+    `${encode(etat.travail.name)}/file`;
+
+  const { zone, champ: fichier } = zoneDepot({ titre: 'Fichier à déposer' });
+  const cible = el('input', { type: 'text', classe: 'champ', spellcheck: 'false' });
+  const commit = el('input', { type: 'text', classe: 'champ' });
+  const remplir = el('input', { type: 'checkbox', checked: true });
+  const remplacer = el('input', { type: 'checkbox' });
+  const simuler = el('input', { type: 'checkbox' });
+  const apercu = el('div', {});
+
+  const nomDuFichier = () => fichier.value.trim().split(/[\\/]/).pop();
+  const requete = () => ({
+    path: zone.dataset.contenu ? '' : fichier.value.trim(),
+    content: zone.dataset.contenu || undefined,
+    name: zone.dataset.contenu ? nomDuFichier() : '',
+    target: cible.value.trim(),
+    message: commit.value.trim(),
+    raw: !remplir.checked,
+    overwrite: remplacer.checked,
+    dry_run: simuler.checked,
+  });
+
+  // L'aperçu se refait à chaque changement, sans rien demander à GitHub : il
+  // montre le fichier tel que le premier dépôt le recevra.
+  let tour = 0;
+  const montrer = async () => {
+    const numero = ++tour;
+    const nom = nomDuFichier();
+    cible.placeholder = nom || 'nom du fichier';
+    commit.placeholder = `Ajoute ${cible.value.trim() || nom || '…'}`;
+    vider(apercu);
+    if (!fichier.value.trim()) return;
+    let reponse;
+    try {
+      reponse = await api('POST', `${adresse}/preview`, requete());
+    } catch (erreur) {
+      if (numero === tour) apercu.append(el('p', { classe: 'note alerte', texte: erreur.message }));
+      return;
+    }
+    if (numero !== tour) return;
+    if (reponse.unknown.length) {
+      apercu.append(el('p', { classe: 'note alerte', texte:
+        `Champ(s) inconnu(s), laissé(s) tels quels : {${reponse.unknown.join('}, {')}}.` }));
+    }
+    if (reponse.incomplete) {
+      const exemple = reponse.empty_example;
+      apercu.append(el('p', { classe: 'note alerte', texte:
+        `${reponse.incomplete} dépôt(s) laissent un champ vide — par exemple ` +
+        `${exemple.repo} : {${exemple.fields.join('}, {')}}.` }));
+    }
+    const exemple = reponse.sample;
+    apercu.append(el('p', { classe: 'note', texte:
+      `${reponse.count} dépôt(s). Aperçu pour ${exemple.recipient || exemple.repo} — ` +
+      `${exemple.path}` + (reponse.templated ? ' :' : ' (contenu déposé tel quel).') }));
+    if (reponse.templated && exemple.content !== undefined) {
+      apercu.append(el('pre', { classe: 'pl-code apercu-renommage', texte: exemple.content }));
+    }
+  };
+  for (const element of [fichier, cible, commit, remplir]) {
+    element.addEventListener('change', montrer);
+  }
+
+  const corps = el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Fichier' }), zone),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Chemin dans le dépôt' }), cible),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Message du commit' }), commit),
+    el('p', { classe: 'note', texte: 'Le contenu, le chemin et le message acceptent les champs ' +
+      champs.map((champ) => `{${champ.name}}`).join(', ') + '.' }),
+    el('label', { classe: 'case' }, remplir,
+      el('span', { texte: 'Remplir les champs dans le contenu' })),
+    el('label', { classe: 'case' }, remplacer,
+      el('span', { texte: "Remplacer un fichier déjà présent et différent — peut-être celui " +
+        "que l'étudiant a modifié" })),
+    el('label', { classe: 'case' }, simuler,
+      el('span', { texte: 'Simuler : dire ce que chaque dépôt deviendrait, sans rien écrire' })),
+    apercu);
+  if (!await demander(`Déposer un fichier dans « ${etat.travail.name} »`, corps, 'Déposer')) return;
+  if (!fichier.value.trim()) { message('Aucun fichier choisi.', 'alerte'); return; }
+
+  const fiche = await tenter(() => api('POST', adresse, requete()), 'Dépôt');
+  if (!fiche) return;
+  const resultats = await suivre(fiche);
+  if (!Array.isArray(resultats)) return;
+  const compte = (statut) => resultats.filter((resultat) => resultat.status === statut).length;
+  const echecs = compte('échec');
+  const conserves = compte('différent, conservé');
+  journaliser((simuler.checked ? 'Simulation : ' : '') +
+    `${compte('ajouté')} ajouté(s) · ${compte('remplacé')} remplacé(s) · ` +
+    `${compte('déjà à jour')} déjà à jour · ${conserves} conservé(s) · ${echecs} en échec`,
+  echecs ? 'err' : (conserves ? 'warn' : 'ok'));
+}
 
 // --- accès d'un dépôt
 

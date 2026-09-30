@@ -49,3 +49,78 @@ func TestUnReleveSansAuteursRendLaDateQuIlPorte(t *testing.T) {
 		t.Errorf("LastBut = %q", dernier)
 	}
 }
+
+// Un relevé ne couvre que ce qui a été poussé avant sa lecture — à une minute
+// près, pour les horloges. Un relevé sans date, lu avant qu'on la retienne,
+// ne couvre rien.
+func TestUnReleveCouvreCeQuiLePrecede(t *testing.T) {
+	remise := groups.Handin{Seen: "2026-09-30T12:00:00Z"}
+	cas := map[string]bool{
+		"":                     true,
+		"2026-09-30T11:00:00Z": true,
+		"2026-09-30T12:00:30Z": true,
+		"2026-09-30T12:05:00Z": false,
+		"illisible":            false,
+	}
+	for envoi, voulu := range cas {
+		if obtenu := remise.Covers(envoi); obtenu != voulu {
+			t.Errorf("Covers(%q) = %v, voulu %v", envoi, obtenu, voulu)
+		}
+	}
+	if (groups.Handin{}).Covers("2026-09-30T11:00:00Z") {
+		t.Error("un relevé sans date couvre un envoi")
+	}
+}
+
+// Le dernier envoi d'un dépôt ignore ce que l'enseignant y a poussé, tant que
+// l'historique relevé le permet ; sinon, il reste celui que GitHub donne.
+func TestLActiviteIgnoreCeQueLEnseignantAPousse(t *testing.T) {
+	historique := groups.Handin{
+		Last:   "2026-09-20T16:00:00Z",
+		LastBy: map[string]string{"prof": "2026-09-20T16:00:00Z", "ecote": "2026-09-05T10:00:00Z"},
+		Seen:   "2026-09-21T08:00:00Z",
+	}
+	seulProf := groups.Handin{
+		Last: "2026-09-20T16:00:00Z", LastBy: map[string]string{"prof": "2026-09-20T16:00:00Z"},
+		Seen: "2026-09-21T08:00:00Z",
+	}
+	inventaire := []groups.RepoInfo{
+		{Name: "releve", PushedAt: "2026-09-20T16:00:01Z"},
+		{Name: "pousse-depuis", PushedAt: "2026-09-25T09:00:00Z"},
+		{Name: "jamais-releve", PushedAt: "2026-09-20T16:00:01Z"},
+		{Name: "rien-de-l-etudiant", PushedAt: "2026-09-20T16:00:01Z"},
+	}
+	remises := map[string]groups.Handin{
+		"releve": historique, "pousse-depuis": historique, "rien-de-l-etudiant": seulProf,
+	}
+
+	corriges := groups.Activity(inventaire, remises, prof)
+	voulus := []string{"2026-09-05T10:00:00Z", "2026-09-25T09:00:00Z", "2026-09-20T16:00:01Z", ""}
+	for index, voulu := range voulus {
+		if corriges[index].PushedAt != voulu {
+			t.Errorf("%s : %q, voulu %q", corriges[index].Name, corriges[index].PushedAt, voulu)
+		}
+	}
+	// L'inventaire reçu reste tel que GitHub l'a rendu : il est mis en cache.
+	if inventaire[0].PushedAt != "2026-09-20T16:00:01Z" {
+		t.Error("l'inventaire d'origine a été modifié")
+	}
+	// Sans savoir qui enseigne, rien ne se corrige.
+	if groups.Activity(inventaire, remises, nil)[0].PushedAt != "2026-09-20T16:00:01Z" {
+		t.Error("corrigé sans savoir qui enseigne")
+	}
+}
+
+func TestDatedReporteLActiviteSurLeGroupe(t *testing.T) {
+	groupe := groups.Build("tp1", []groups.RepoInfo{
+		{Name: "tp1-ecote", PushedAt: "2026-09-20T16:00:00Z"},
+		{Name: "tp1-jlpicard", PushedAt: "2026-09-20T16:00:00Z"},
+	})
+	date := groupe.Dated([]groups.RepoInfo{{Name: "TP1-ECOTE", PushedAt: ""}})
+	if date.Repos[0].PushedAt != "" || date.Repos[1].PushedAt != groupe.Repos[1].PushedAt {
+		t.Errorf("groupe daté = %+v", date.Repos)
+	}
+	if groupe.Repos[0].PushedAt == "" {
+		t.Error("le groupe d'origine a été modifié")
+	}
+}

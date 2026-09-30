@@ -887,6 +887,10 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   border-radius: 6px;
 }
 
+/* Ce que l'aperçu d'un fichier à déposer craint — un champ inconnu, un champ
+   vide — se lit avant de confirmer, dans la couleur des mises en garde. */
+.note.alerte { color: var(--alerte); }
+
 .liste-cases label { padding: .15rem 0; }
 .liste-cases .compte { color: var(--texte-doux); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 

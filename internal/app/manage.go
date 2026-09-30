@@ -34,6 +34,7 @@ var manageMenu = ui.Options(
 	"urls", "Afficher les URL des dépôts",
 	"collaborateurs", "Gérer les collaborateurs d'un dépôt",
 	"invitations", "Envoyer les invitations manquantes (expirées ou absentes)",
+	"fichier", "Déposer un fichier dans tous les dépôts",
 	"cloner", "Cloner des dépôts en local",
 	"pull", "Mettre à jour des clones existants",
 	"supprimer", "Supprimer un dépôt",
@@ -271,6 +272,10 @@ func (m *manageSession) names(group *groups.Group) map[string]string {
 // que la liste montre et ce parmi quoi les sélections se font : on choisit ce
 // qu'on voit.
 func (m *manageSession) visible(group *groups.Group) []groups.Repo {
+	// Le dernier envoi montré et filtré est celui des étudiants : ce que
+	// l'enseignant a poussé n'en est pas, dès que l'historique le dit.
+	date := group.Dated(m.session.activite(m.org, m.repos))
+	group = &date
 	parNom := make(map[string]groups.Repo, group.Len())
 	for _, repo := range group.Repos {
 		parNom[repo.Name] = repo
@@ -1584,6 +1589,19 @@ func (m *manageSession) run() (int, error) {
 			}
 			return ExitOK, nil
 		}
+		// « --push-file » aussi : le fichier part, le bilan dit où, et les
+		// échecs font le code de sortie.
+		if m.session.Options.PushFile != "" {
+			echecs, err := m.deposerDepuisDrapeaux(group)
+			m.session.Options.PushFile = ""
+			if err != nil {
+				return ExitValidation, err
+			}
+			if echecs > 0 {
+				return ExitFailure, nil
+			}
+			return ExitOK, nil
+		}
 		if m.session.Options.PublishIndex {
 			m.session.Options.PublishIndex = false
 			if err := m.publierIndex(group); err != nil {
@@ -1675,6 +1693,8 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return err
 	case "urls":
 		return m.urls(group)
+	case "fichier":
+		return m.deposerFichier(group)
 	case "cloner":
 		return m.cloneRepos(group)
 	case "pull":

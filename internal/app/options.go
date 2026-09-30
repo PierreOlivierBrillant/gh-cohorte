@@ -135,6 +135,18 @@ type Options struct {
 	// expirée, une première à qui n'en a aucune — jamais invité, invitation
 	// refusée ou annulée. Avec --dry-run, il les nomme sans rien envoyer.
 	SendInvitations bool
+	// PushFile dépose un fichier local dans chaque dépôt du travail géré. Son
+	// contenu, son chemin dans le dépôt (PushPath, par défaut son nom) et le
+	// message du commit (PushMessage) acceptent les champs du gabarit —
+	// {nom_etudiant}, {groupe}, {cours}… Un fichier déjà présent au contenu
+	// différent est laissé tel quel, sauf avec PushOverwrite ; PushRaw dépose
+	// le contenu sans y remplir aucun champ. Avec --dry-run, il dit ce que
+	// chaque dépôt deviendrait sans rien y écrire.
+	PushFile      string
+	PushPath      string
+	PushMessage   string
+	PushOverwrite bool
+	PushRaw       bool
 	// Plagiarism compare entre elles les copies du travail géré : elle mesure
 	// leurs ressemblances et les classe par ordre de suspicion. Ce n'est pas un
 	// verdict — le rapport le dit lui-même à chaque fois.
@@ -271,6 +283,7 @@ Utilisation :
   gh cohorte --manage a26.5n6.01.tp1 --due 2026-10-01
   gh cohorte --manage a26.5n6.01.tp1 --handins
   gh cohorte --manage a26.5n6.01.tp1 --send-invitations
+  gh cohorte --manage a26.5n6.01.tp1 --push-file consignes.md --push-path docs/CONSIGNES.md
   gh cohorte --plagiarism --manage a26.5n6.01.tp1
   gh cohorte --plagiarism --manage a26.5n6.01.tp1 --profile next --languages tsx,css
   gh cohorte --plagiarism --manage a26.5n6.01.tp1 --reach annees
@@ -332,6 +345,18 @@ Drapeaux :
   --send-invitations       envoyer les invitations manquantes du travail géré :
                            renouveler les expirées, inviter qui n'en a aucune
                            (avec --dry-run : les nommer sans rien envoyer)
+  --push-file FICHIER      déposer un fichier dans chaque dépôt du travail géré. Son
+                           contenu, son chemin et le message du commit acceptent
+                           les champs {nom_etudiant}, {prenom}, {nom_famille},
+                           {compte}, {matricule}, {equipe}, {session},
+                           {session_nom}, {cours}, {groupe}, {travail},
+                           {echeance}, {depot} et {date}. Un fichier déjà présent
+                           et différent est conservé (avec --dry-run : dire ce que
+                           chaque dépôt deviendrait sans rien écrire)
+  --push-path CHEMIN       chemin du fichier dans le dépôt (défaut : son nom)
+  --push-message TEXTE     message du commit (défaut : « Ajoute CHEMIN »)
+  --push-overwrite         remplacer un fichier déjà présent dont le contenu diffère
+  --push-raw               déposer le contenu tel quel, sans y remplir de champ
   --plagiarism             comparer entre elles les copies du travail géré et les
                            classer par ordre de suspicion (ce n'est pas un verdict :
                            une ressemblance forte n'est pas une preuve)
@@ -544,6 +569,12 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"relever les commits des dépôts du travail")
 	set.BoolVar(&options.SendInvitations, "send-invitations", false,
 		"envoyer les invitations manquantes du travail")
+	set.StringVar(&options.PushFile, "push-file", "", "fichier à déposer dans chaque dépôt")
+	set.StringVar(&options.PushPath, "push-path", "", "chemin du fichier dans le dépôt")
+	set.StringVar(&options.PushMessage, "push-message", "", "message du commit")
+	set.BoolVar(&options.PushOverwrite, "push-overwrite", false,
+		"remplacer un fichier déjà présent et différent")
+	set.BoolVar(&options.PushRaw, "push-raw", false, "déposer le contenu sans gabarit")
 	equipe := set.String("team", "", "équipe visée")
 	membres := set.String("team-members", unset, "composition exacte de l'équipe")
 	ajouts := set.String("team-add", "", "comptes à inscrire dans l'équipe")
@@ -649,12 +680,12 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	// Comparer des copies, c'est forcément gérer un travail existant : le
 	// drapeau ouvre donc le mode gestion de lui-même. Sans préfixe, l'assistant
 	// demande lequel, comme « --manage » sans valeur. Envoyer des invitations
-	// aussi : elles appartiennent aux dépôts d'un travail.
+	// ou déposer un fichier aussi : les deux touchent les dépôts d'un travail.
 	// « --grant » se sert du même « --export-zip » pour dire où écrire, mais il
 	// ne gère aucun travail : c'est la demande qui dit lequel. Et
 	// « --publish-index » sans travail ne gère rien non plus : il rattrape tous
 	// ceux qui n'ont pas d'index.
-	if options.Plagiarism || options.SendInvitations ||
+	if options.Plagiarism || options.SendInvitations || options.PushFile != "" ||
 		(options.PublishIndex && options.Manage != "") ||
 		(options.ExportZip != "" && !options.decidesAsk()) {
 		options.ManageRequested = true
@@ -697,6 +728,11 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	}
 	if err := options.checkStudent(); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(options.PushFile) == "" && (options.PushPath != "" ||
+		options.PushMessage != "" || options.PushOverwrite || options.PushRaw) {
+		return nil, valid.Errorf("--push-path, --push-message, --push-overwrite et " +
+			"--push-raw accompagnent « --push-file FICHIER » : ajoutez-le pour dire quoi déposer.")
 	}
 	if options.Jobs < 1 {
 		options.Jobs = 1

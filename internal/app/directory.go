@@ -125,7 +125,7 @@ func (d *directorySession) load(force bool) error {
 	for _, cours := range visibles {
 		equipes = append(equipes, cours.Teams(infos)...)
 	}
-	d.rows = users.Directory(visibles, repos, equipes, infos, set)
+	d.rows = users.Directory(visibles, d.session.activite(d.org, repos), equipes, infos, set)
 	d.orphelins = users.Unmatched(visibles, repos, equipes)
 	d.loaded = true
 	return nil

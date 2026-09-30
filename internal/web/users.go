@@ -90,7 +90,7 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 	infos, _ := s.orgTeams(org, false)
 	equipes := teamsOfAll(visibles, infos)
 	set, avis := s.names(org)
-	toutes := users.Directory(visibles, repos, equipes, infos, set)
+	toutes := users.Directory(visibles, s.activite(org, repos), equipes, infos, set)
 	retenues := users.Apply(toutes, filtre, tri, decroissant)
 
 	lignes := make([]directoryRow, 0, len(retenues))
@@ -180,7 +180,8 @@ func (s *Server) handleUser(writer http.ResponseWriter, request *http.Request) {
 	visibles := s.visibles(org, repos)
 	infos, _ := s.orgTeams(org, false)
 	set, avis := s.names(org)
-	fiche := users.ProfileOf(visibles, repos, teamsOfAll(visibles, infos), infos, set, compte)
+	fiche := users.ProfileOf(visibles, s.activite(org, repos), teamsOfAll(visibles, infos),
+		infos, set, compte)
 
 	// Les adresses des dépôts se composent ici : le domaine ne connaît pas
 	// l'hôte, qui n'est pas toujours github.com.

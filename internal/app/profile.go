@@ -209,7 +209,8 @@ func (s *Session) profileOf(org, account string) (users.Profile, *registry.Set, 
 	for _, cours := range visibles {
 		equipes = append(equipes, cours.Teams(infos)...)
 	}
-	return users.ProfileOf(visibles, repos, equipes, infos, set, account), set, nil
+	return users.ProfileOf(visibles, s.activite(org, repos), equipes, infos, set, account),
+		set, nil
 }
 
 // printProfile écrit la fiche : l'identité, puis la chronologie.

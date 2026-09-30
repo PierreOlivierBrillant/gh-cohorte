@@ -9,6 +9,8 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
@@ -108,6 +110,20 @@ func (s *Session) registryOf(org string) *registry.Store {
 // names lit le registre de l'organisation, et rend avec lui ce qu'il faut en
 // dire. Un registre qu'on n'a pas pu lire ne prive de rien : les groupes
 // s'affichent quand même, les noms manquent — mais cela se dit.
+// activite rend l'inventaire dont le dernier envoi ignore ce que les
+// enseignants ont poussé, là où l'historique relevé permet de le dire. C'est
+// ce que montrent et filtrent les colonnes « Dernier envoi » ; le reste
+// continue de lire l'inventaire tel que GitHub l'a rendu.
+func (s *Session) activite(org string, repos []groups.RepoInfo) []groups.RepoInfo {
+	set, _ := s.names(org)
+	noms := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		noms = append(noms, repo.Name)
+	}
+	historiques := identity.New(s.Client, s.Cache, s.Options.Jobs).Histories(org, noms)
+	return groups.Activity(repos, historiques, set.Teaches)
+}
+
 func (s *Session) names(org string) (*registry.Set, string) {
 	snapshot, err := s.registryOf(org).Load()
 	switch {
