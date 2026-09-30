@@ -2,6 +2,7 @@ package identity
 
 import (
 	"sync"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
@@ -54,6 +55,20 @@ func (r *Resolver) Handins(org string, repos []string, jusqua Reading,
 	return trouves
 }
 
+// Histories rend les historiques déjà relevés, si vieux soient-ils, sans rien
+// demander à GitHub. Ils servent à dater l'activité des dépôts : c'est
+// « Covers » qui dit si chacun vaut encore, pas son âge.
+func (r *Resolver) Histories(org string, repos []string) map[string]groups.Handin {
+	trouves := make(map[string]groups.Handin, len(repos))
+	for _, repo := range repos {
+		var remise groups.Handin
+		if r.store.Get(cache.HandinKey(org, repo), cache.HistoryTTL, &remise) {
+			trouves[repo] = remise
+		}
+	}
+	return trouves
+}
+
 // fetchHandins interroge GitHub pour les dépôts qu'on ne connaît pas encore.
 //
 // Un dépôt dont la lecture échoue est laissé de côté plutôt que mémorisé vide :
@@ -78,7 +93,11 @@ func (r *Resolver) fetchHandins(org string, repos []string,
 		go func() {
 			defer groupe.Done()
 			for repo := range file {
+				// L'instant d'avant la lecture : ce qui arrive pendant
+				// qu'on lit n'est pas sûr d'y figurer.
+				vu := time.Now().UTC().Format(time.RFC3339)
 				remise, err := r.client.Handin(org, repo)
+				remise.Seen = vu
 				sorties <- resultat{repo: repo, remise: remise, err: err}
 			}
 		}()

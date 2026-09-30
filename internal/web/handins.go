@@ -71,6 +71,20 @@ func (s *Server) remisesConnues(org string, noms []string) map[string]groups.Han
 	return s.resolver(org).Handins(org, noms, identity.Cached, nil)
 }
 
+// activite rend l'inventaire dont le dernier envoi ignore ce que les
+// enseignants ont poussé — un fichier déposé dans tous les dépôts, une
+// correction —, là où l'historique relevé permet de le dire. C'est ce que
+// montrent et filtrent les colonnes « Dernier envoi » ; le reste continue de
+// lire l'inventaire tel que GitHub l'a rendu.
+func (s *Server) activite(org string, repos []groups.RepoInfo) []groups.RepoInfo {
+	set, _ := s.names(org)
+	noms := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		noms = append(noms, repo.Name)
+	}
+	return groups.Activity(repos, s.resolver(org).Histories(org, noms), set.Teaches)
+}
+
 // jusqua lit ce que l'adresse demande : « refresh=1 » oublie ce qu'on savait,
 // sans quoi le relevé se contente d'aller chercher ce qui manque.
 func jusqua(request *http.Request) identity.Reading {

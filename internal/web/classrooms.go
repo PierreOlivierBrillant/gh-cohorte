@@ -91,10 +91,11 @@ func (s *Server) handleClassrooms(writer http.ResponseWriter, request *http.Requ
 
 	liste := make([]classroomPayload, 0, len(visibles))
 	courts := make([]string, 0, len(visibles))
+	actifs := s.activite(org, repos)
 	for _, cours := range visibles {
 		equipes := cours.Teams(infos)
 		fiche := s.fiche(cours)
-		fiche.Assignments = cours.Assignments(repos, equipes)
+		fiche.Assignments = cours.Assignments(actifs, equipes)
 		fiche.Teams = len(equipes)
 		fiche.Source = source
 		liste = append(liste, fiche)
@@ -183,7 +184,7 @@ func (s *Server) handleClassroom(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	fiche := s.fiche(cours)
-	travaux := cours.Assignments(repos, equipes)
+	travaux := cours.Assignments(s.activite(cours.Org, repos), equipes)
 	// Les pastilles paraissent sans rien redemander à GitHub : ce qu'on a déjà
 	// relevé suffit à les allumer, et ce qu'on ignore se voit à « seen ».
 	fiche.Assignments = cours.WithHandins(travaux, repos, equipes,
@@ -317,7 +318,7 @@ func (s *Server) handleClassroomStudents(writer http.ResponseWriter, request *ht
 		return
 	}
 
-	toutes := users.Build(cours, repos, equipes)
+	toutes := users.Build(cours, s.activite(cours.Org, repos), equipes)
 	retenues := users.Apply(toutes, filtre, tri, decroissant)
 
 	// Les noms complets manquants se comptent sur le groupe entier : le
@@ -924,7 +925,9 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 		fail(writer, err)
 		return
 	}
-	trouves := cours.Repos(id, repos)
+	// Le dernier envoi montré, et filtré, est celui des étudiants : ce que
+	// l'enseignant y a poussé n'en est pas, dès que l'historique le dit.
+	trouves := cours.Repos(id, s.activite(cours.Org, repos))
 	if len(trouves) == 0 {
 		fail(writer, valid.Errorf("Aucun dépôt pour le travail « %s ».", cours.ShortName(id)))
 		return

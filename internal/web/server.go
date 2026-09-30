@@ -272,6 +272,10 @@ func (s *Server) routes() http.Handler {
 		s.handleAssignmentInvitations)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/repos/{repo}/invitations",
 		s.handleRepoInvitation)
+	mux.HandleFunc("GET /api/broadcast/fields", s.handleBroadcastFields)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/file/preview",
+		s.handleFilePreview)
+	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/file", s.handleFilePush)
 	mux.HandleFunc("PUT /api/classrooms/{scope}/assignments/{name}/deadline", s.handleSetDeadline)
 	mux.HandleFunc("POST /api/classrooms/{scope}/assignments/{name}/handins", s.handleAssignmentHandins)
 	mux.HandleFunc("POST /api/classrooms/{scope}/handins", s.handleClassroomHandins)

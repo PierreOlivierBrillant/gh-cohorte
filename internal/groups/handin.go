@@ -2,6 +2,7 @@ package groups
 
 import (
 	"strings"
+	"time"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
 )
@@ -52,6 +53,65 @@ type Handin struct {
 	// étudiant qui commet depuis une machine mal configurée est là, et nulle
 	// part ailleurs : l'oublier le ferait passer pour muet.
 	Anonymous []Author `json:"anonymous,omitempty"`
+	// Seen est l'instant où l'historique a été lu, au format RFC 3339. C'est
+	// lui, et non l'âge de l'entrée en mémoire, qui dit si le relevé est encore
+	// complet : tant que rien n'a été poussé depuis, il l'est.
+	Seen string `json:"seen,omitempty"`
+}
+
+// seenSkew est la marge accordée aux horloges. « Seen » vient de la machine,
+// « pushed_at » de GitHub, et un poste mal réglé de quelques secondes ne doit
+// pas faire croire qu'on a poussé après un relevé qui a suivi l'envoi. La
+// marge a son revers : un envoi fait dans la minute qui suit le relevé passe
+// pour couvert, jusqu'au relevé suivant.
+const seenSkew = time.Minute
+
+// Covers dit que l'historique relevé couvre tout ce que le dépôt a reçu : rien
+// n'y a été poussé depuis sa lecture. Un relevé sans date — lu avant qu'on la
+// retienne — ne couvre rien.
+func (h Handin) Covers(pushedAt string) bool {
+	vu, err := time.Parse(time.RFC3339, h.Seen)
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(pushedAt) == "" {
+		return true
+	}
+	envoi, err := time.Parse(time.RFC3339, pushedAt)
+	if err != nil {
+		return false
+	}
+	return !envoi.After(vu.Add(seenSkew))
+}
+
+// Activity rend l'inventaire tel que les étudiants l'ont fait : le dernier
+// envoi de chaque dépôt y ignore ce que les comptes écartés — ceux qui
+// enseignent — y ont poussé.
+//
+// « pushed_at » ne dit pas qui a poussé : un fichier que l'enseignant dépose
+// dans tous les dépôts ferait passer tout le groupe pour actif le même jour.
+// L'historique le dit, et il remplace la date dès qu'il est relevé et que rien
+// n'a été poussé depuis. Un dépôt dont on ne l'a pas lu, ou qui a reçu
+// quelque chose depuis, garde « pushed_at » : mieux vaut une date trop
+// récente qu'une activité d'étudiant passée sous silence.
+//
+// La date rendue est alors celle du commit, pas celle de son envoi — la même
+// que celle de la remise, ce qui fait dire aux deux colonnes la même chose.
+// L'inventaire donné n'est pas modifié : il est mis en cache tel que GitHub
+// l'a rendu, et d'autres s'y fient — la réutilisation d'une analyse, entre
+// autres, veut savoir si le dépôt a changé, quel qu'en soit l'auteur.
+func Activity(repos []RepoInfo, remises map[string]Handin, ignore func(login string) bool) []RepoInfo {
+	if ignore == nil || len(remises) == 0 {
+		return repos
+	}
+	corriges := make([]RepoInfo, len(repos))
+	for index, repo := range repos {
+		if remise, lue := remises[repo.Name]; lue && remise.Covers(repo.PushedAt) {
+			repo.PushedAt = remise.LastBut(ignore)
+		}
+		corriges[index] = repo
+	}
+	return corriges
 }
 
 // Empty dit qu'aucun commit n'a été relevé dans le dépôt.

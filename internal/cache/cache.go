@@ -27,6 +27,10 @@ const (
 	// HandinTTL est courte : ce qu'un étudiant vient de pousser doit se voir,
 	// et c'est à la veille d'une date de remise qu'on regarde le plus souvent.
 	HandinTTL = time.Hour
+	// HistoryTTL borne ce qu'on garde d'un historique pour dater l'activité
+	// d'un dépôt. Ce n'est pas l'âge qui le périme : c'est un envoi fait depuis
+	// sa lecture, et le relevé le sait (« Handin.Covers »).
+	HistoryTTL = 30 * 24 * time.Hour
 	// RegistryTTL est longue à dessein : ce n'est pas le temps qui dit si le
 	// registre a bougé, c'est le commit relevé sur sa branche. La péremption
 	// n'est là que pour ne pas garder indéfiniment ce qui ne sert plus.

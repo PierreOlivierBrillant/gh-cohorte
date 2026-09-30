@@ -304,6 +304,24 @@ func Build(prefix string, repos []RepoInfo) Group {
 	return group
 }
 
+// Dated rend le groupe dont chaque dépôt prend le dernier envoi que
+// l'inventaire donné lui prête — celui qu'« Activity » a corrigé, par exemple.
+// Un dépôt que l'inventaire ignore garde le sien.
+func (g Group) Dated(repos []RepoInfo) Group {
+	envois := make(map[string]string, len(repos))
+	for _, repo := range repos {
+		envois[strings.ToLower(repo.Name)] = repo.PushedAt
+	}
+	date := Group{Prefix: g.Prefix, Repos: make([]Repo, len(g.Repos))}
+	for index, repo := range g.Repos {
+		if envoi, connu := envois[strings.ToLower(repo.Name)]; connu {
+			repo.PushedAt = valid.Moment(envoi)
+		}
+		date.Repos[index] = repo
+	}
+	return date
+}
+
 // suit dit si un nom commence par le préfixe donné suivi d'un séparateur. Les
 // deux nomenclatures se lisent ainsi sans que l'appelant ait à choisir : « tp1 »
 // retrouve « tp1-emilie-cote », et « a26.5n6.01.tp1 » retrouve
