@@ -13,12 +13,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/config"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Statuts possibles pour un dépôt du plan.

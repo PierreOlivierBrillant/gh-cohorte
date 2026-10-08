@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 // reunis rend un registre où @Mr-Commetuveux et @commetuveuxx sont une même

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
 )
 
 // cohorte décrit trois équipes de l'organisation : deux d'un groupe, une d'un

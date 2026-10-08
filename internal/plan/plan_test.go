@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/config"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 func reglages(pattern string) config.Settings {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/runner"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/runner"
 )
 
 // Inscrire une cohorte telle que le collège l'exporte.

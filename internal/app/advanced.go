@@ -4,9 +4,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
 )
 
 // starterLoad isole le chargement d'un dossier de départ, pour la lisibilité.

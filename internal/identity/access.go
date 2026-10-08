@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // À qui un dépôt appartient-il ? Son nom le dit mal : « kickmyb-firebase-alice »

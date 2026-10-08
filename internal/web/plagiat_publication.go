@@ -4,11 +4,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Publier ce qu'on a donné, et voir ce que les autres ont donné.

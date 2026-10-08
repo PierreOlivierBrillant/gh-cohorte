@@ -3,13 +3,13 @@ package app
 import (
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
 )
 
 // Reprendre un travail d'équipe au terminal. Le parcours est celui de la

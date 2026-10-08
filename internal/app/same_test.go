@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 // commetuveux monte le cas de l'issue : la même personne, @Mr-Commetuveux à

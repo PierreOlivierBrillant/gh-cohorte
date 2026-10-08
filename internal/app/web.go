@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/web"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/web"
 )
 
 // serveWeb ouvre l'interface graphique locale et la tient jusqu'à l'arrêt.

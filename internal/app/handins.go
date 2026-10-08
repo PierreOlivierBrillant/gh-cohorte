@@ -3,13 +3,13 @@ package app
 import (
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // La date cible et les remises, au terminal. L'assistant gère un préfixe, et un

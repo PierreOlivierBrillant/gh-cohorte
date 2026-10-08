@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/signature"
 )
 
 const readme = `# Travail pratique 1

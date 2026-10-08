@@ -30,7 +30,7 @@ package naming
 import (
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Separator sépare les niveaux d'un nom de dépôt.

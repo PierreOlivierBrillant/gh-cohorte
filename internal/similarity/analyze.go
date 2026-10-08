@@ -1,6 +1,6 @@
 package similarity
 
-import "github.com/PierreOlivierBrillant/gh-cohorte/internal/tokens"
+import "github.com/PierreOlivierBrillant/gh-milou/internal/tokens"
 
 // Le pont entre les jetons et l'index : c'est ici, et nulle part ailleurs, que
 // le contenu d'un fichier devient une suite d'empreintes. Tout ce qui est en

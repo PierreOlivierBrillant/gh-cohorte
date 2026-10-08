@@ -4,11 +4,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plagiarism"
 )
 
 // compteur compte les archives réellement téléchargées : c'est la seule mesure

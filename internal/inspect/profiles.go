@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/tokens"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Un profil d'inspection dit quoi regarder dans un travail d'un type donné.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
 )
 
 // envoi met une date rendue par GitHub sous la forme que l'annuaire porte :

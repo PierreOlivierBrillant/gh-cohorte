@@ -3,9 +3,9 @@ package web
 import (
 	"net/http"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Les règles de comparaison vivent dans le registre de l'organisation, à côté

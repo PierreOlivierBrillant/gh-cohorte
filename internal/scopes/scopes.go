@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 	"github.com/cli/go-gh/v2"
 	"github.com/cli/go-gh/v2/pkg/auth"
 )

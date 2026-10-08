@@ -3,8 +3,8 @@ package classroom_test
 import (
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 // Le matricule désigne une personne aussi bien que son compte.

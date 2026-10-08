@@ -6,9 +6,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Un rapport est un fichier ; l'écran n'en est qu'une lecture.

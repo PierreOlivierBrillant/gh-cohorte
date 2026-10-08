@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // En-têtes reconnus, en français comme en anglais.

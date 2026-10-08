@@ -4,10 +4,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Jusqu'où comparer.

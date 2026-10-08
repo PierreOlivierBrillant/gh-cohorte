@@ -3,15 +3,16 @@ package app
 import (
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // La fiche d'un utilisateur au terminal, c'est la même chose qu'au navigateur :
@@ -149,7 +150,7 @@ func (s *Session) conseillerRenommage(fiche users.Profile) {
 		"celui-ci : « Corriger un étudiant du groupe » dans la gestion d'un travail, " +
 		"ou, groupe par groupe :")
 	for _, place := range places {
-		s.Console.Print("    gh cohorte --manage " + place + " --student " +
+		s.Console.Print("    " + brand.Command + " --manage " + place + " --student " +
 			fiche.Username + " --rename-repos")
 	}
 }

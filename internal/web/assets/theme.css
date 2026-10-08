@@ -1,0 +1,150 @@
+/* Le thème de Milou : tous les jetons, et rien d'autre. C'est ici — et
+   nulle part ailleurs — que se décident les couleurs, les contours, les
+   ombres et les fontes ; app.css ne fait que les employer. Deux mondes s'y
+   rejoignent : la structure de GitHub, que les enseignants connaissent, et la
+   ligne claire des albums — aplats francs, contours d'encre, ombres portées
+   d'un bloc, pas de dégradé.
+
+   La palette est reprise dans internal/brand/brand.go pour le terminal ; un
+   test du paquet web veille à ce que les deux ne divergent pas.
+
+   Pour changer une composante, cherchez son rôle (« --fond », « --contour »,
+   « --ombre-boite »…) plutôt que sa couleur : la palette dit ce qui existe,
+   les rôles disent où cela va. */
+
+:root {
+  color-scheme: light dark;
+
+  /* ---- palette : les couleurs par leur nom ------------------------------ */
+  --encre: #1c1d2b;            /* contours et barre du haut : le trait de l'album */
+  --encre-douce: #4b4f63;      /* un contour qui ne crie pas */
+  --papier: #fbf7ee;           /* le fond d'une page d'album */
+  --papier-blanc: #fffdf7;     /* une case posée sur la page */
+  --papier-ombre: #f1ebdd;     /* une case en creux, un survol */
+  --trait: #ddd5c4;            /* un filet entre deux lignes */
+  --bleu: #2466b0;             /* le chandail de Tintin */
+  --bleu-clair: #3d7fd0;
+  --bleu-halo: rgba(36, 102, 176, .28);
+  --bleu-pale: #dceaf8;
+  --vert: #2d9a5a;             /* la pelouse de Moulinsart */
+  --vert-fonce: #257f4a;
+  --vert-pale: #d8f1e1;
+  --rouge: #d2342b;
+  --rouge-pale: #fbe0dc;
+  --jaune: #f5c431;            /* la houppette */
+  --jaune-pale: #fdf1c2;
+  --jaune-texte: #8a5a00;
+  --orange: #b85c00;
+  --orange-pale: #ffe3c4;
+  --violet: #7b4fb6;
+  --sarcelle: #0f7b6c;
+  --gris: #7c8496;
+
+  /* ---- rôles : ce que chaque couleur fait --------------------------------- */
+  --fond-page: var(--papier);
+  --fond: var(--papier-blanc);
+  --fond-doux: var(--papier);
+  --fond-creux: var(--papier-ombre);
+  --bord: var(--trait);
+  --bord-net: var(--encre);
+  --texte: var(--encre);
+  --texte-doux: #5b6072;
+  --lien: var(--bleu);
+  --lien-texte: #ffffff;
+  --lien-halo: var(--bleu-halo);
+  --lien-fond: var(--bleu-pale);
+  --vert-texte: #ffffff;
+  --succes: var(--vert-fonce);
+  --succes-fond: var(--vert-pale);
+  --alerte: var(--jaune-texte);
+  --alerte-trait: var(--jaune);
+  --alerte-fond: var(--jaune-pale);
+  --orange-fond: var(--orange-pale);
+  --erreur: var(--rouge);
+  --erreur-texte: #ffffff;
+  --erreur-fond: var(--rouge-pale);
+  --sombre: var(--encre);
+  --sombre-texte: var(--papier);
+  --sombre-trait: rgba(251, 247, 238, .35);
+  --sombre-survol: rgba(251, 247, 238, .12);
+  --onglet-actif: var(--bleu);
+  --voile: rgba(28, 29, 43, .45);
+  --ombre: #e4dccb;
+
+  /* ---- formes : contours, rayons, ombres ---------------------------------- */
+  --rayon: 8px;
+  --rayon-boite: 12px;
+  --contour: 2px solid var(--encre);
+  --contour-doux: 1px solid var(--trait);
+  --contour-pointille: 2px dashed var(--encre-douce);
+  --ombre-bouton: 2px 2px 0 var(--encre);
+  --ombre-boite: 4px 4px 0 var(--ombre);
+  --ombre-flottante: 6px 6px 0 var(--encre);
+  --focus: 0 0 0 3px var(--lien-halo);
+  --pression: translate(2px, 2px);
+  --onglet-trait: 3px;
+  --bandeau-trait: 3px solid var(--bleu);
+
+  /* ---- typographie --------------------------------------------------------- */
+  --police: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+            Helvetica, Arial, sans-serif;
+  --police-titres: var(--police);
+  --police-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 monospace;
+  --taille-texte: 14px;
+  --graisse-titre: 700;
+
+  /* ---- séries des graphiques : une couleur par provenance ---------------- */
+  --serie-1: var(--bleu);
+  --serie-2: var(--violet);
+  --serie-3: var(--vert);
+  --serie-4: var(--orange);
+  --serie-5: var(--rouge);
+  --serie-6: var(--sarcelle);
+}
+
+/* La nuit sur Moulinsart : le papier devient bleu nuit, l'encre s'éclaircit
+   juste assez pour tracer, et les ombres portées s'enfoncent dans le fond. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --encre: #4a526b;
+    --encre-douce: #5d6580;
+    --papier: #141826;
+    --papier-blanc: #1b2032;
+    --papier-ombre: #232a40;
+    --trait: #2c3348;
+    --bleu: #6fb1ec;
+    --bleu-clair: #8cc3f2;
+    --bleu-halo: rgba(111, 177, 236, .35);
+    --bleu-pale: #1d3350;
+    --vert: #3fae6c;
+    --vert-fonce: #2d9a5a;
+    --vert-pale: #16331f;
+    --rouge: #f06a60;
+    --rouge-pale: #3a1f1e;
+    --jaune: #f5c431;
+    --jaune-pale: #352c12;
+    --jaune-texte: #f2c75c;
+    --orange: #f0914a;
+    --orange-pale: #3a2412;
+    --violet: #b79af0;
+    --sarcelle: #4fc4b0;
+    --gris: #8c93a5;
+
+    --texte: #ece6d8;
+    --texte-doux: #a3a8b8;
+    --lien-texte: #0f1526;
+    --vert-texte: #0e1a12;
+    --erreur-texte: #ffffff;
+    --sombre: #0b0d16;
+    --sombre-texte: #ece6d8;
+    --sombre-trait: rgba(236, 230, 216, .3);
+    --sombre-survol: rgba(236, 230, 216, .1);
+    --voile: rgba(0, 0, 0, .6);
+    --ombre: #0c0f1a;
+
+    --ombre-bouton: 2px 2px 0 #090b12;
+    --ombre-boite: 4px 4px 0 #0c0f1a;
+    --ombre-flottante: 6px 6px 0 #090b12;
+  }
+}

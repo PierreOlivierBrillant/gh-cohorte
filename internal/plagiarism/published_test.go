@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plagiarism"
 )
 
 // publies est un accès aux index publiés, monté à la main : ce qui s'éprouve

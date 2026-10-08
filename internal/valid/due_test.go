@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Une date seule désigne la fin de la journée : « remis le 1er octobre » veut

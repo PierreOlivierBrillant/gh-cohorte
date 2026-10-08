@@ -7,7 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Permissions acceptées par l'API pour un collaborateur de dépôt.
@@ -76,16 +77,19 @@ func Default() Settings {
 func (s Settings) Private() bool { return s.Visibility != "public" }
 
 // Path renvoie l'emplacement du fichier de réglages, conforme au standard XDG.
+// Un dossier laissé par l'ancien nom de l'outil est repris au passage : les
+// groupes déclarés sur ce poste y vivent, et un renommage ne doit pas les
+// faire disparaître.
 func Path() string {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return filepath.Join(".", "cohorte", "config.json")
+			return filepath.Join(brand.AdoptLegacyDir("."), "config.json")
 		}
 		base = filepath.Join(home, ".config")
 	}
-	return filepath.Join(base, "cohorte", "config.json")
+	return filepath.Join(brand.AdoptLegacyDir(base), "config.json")
 }
 
 // Save enregistre les réglages réutilisables ; le jeton n'y figure jamais.

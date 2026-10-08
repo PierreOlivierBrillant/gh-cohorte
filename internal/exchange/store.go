@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Le dépôt des index s'écrit comme le registre : par échange conditionnel.

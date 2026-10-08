@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
 )
 
 // L'inventaire d'une organisation est ce qui coûte le plus cher à lire : à

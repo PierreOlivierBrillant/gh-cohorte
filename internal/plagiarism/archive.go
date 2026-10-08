@@ -6,11 +6,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Comparer avec un collègue qui n'est pas dans la même organisation, ou qui
@@ -67,7 +68,7 @@ func Export(client corpus.Client, request Request, options anonymize.Options,
 
 	fetched, problems := fetchAll(client, request.Targets, inspector, request.Jobs, progress)
 	bundle, err := anonymize.Export(anonymizer, anonymize.Manifest{
-		Tool: "gh cohorte", Assignment: request.Assignment,
+		Tool: brand.Command, Assignment: request.Assignment,
 		Profile: inspector.Profile().ID,
 	}, fetched)
 	if err != nil {

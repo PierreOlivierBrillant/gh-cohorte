@@ -3,10 +3,10 @@ package app_test
 import (
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 // groupeAuxQuatreInvitations monte un travail où chaque étudiant en est à un

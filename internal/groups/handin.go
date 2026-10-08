@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Un nom de dépôt dit à qui il appartient ; il ne dit pas ce qu'on y a mis.

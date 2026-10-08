@@ -9,8 +9,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // MaxUnpacked borne ce qu'une archive a le droit de rendre une fois

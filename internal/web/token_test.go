@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/web"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/scopes"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/web"
 )
 
 // jeton est la description du jeton telle que la page la reçoit.

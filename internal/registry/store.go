@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Le registre s'écrit par échange conditionnel, jamais par fusion.
@@ -34,7 +35,7 @@ import (
 const Attempts = 5
 
 // Description est ce que le dépôt du registre annonce sur github.com.
-const Description = "Registre des utilisateurs — gh cohorte. Privé : contient des renseignements personnels."
+const Description = "Registre des utilisateurs — " + brand.Command + ". Privé : contient des renseignements personnels."
 
 // step nomme l'étape qui a échoué, sans perdre l'erreur d'origine : son statut
 // HTTP et la portée qui lui manque servent encore en aval.

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
 )
 
 // magasin monte un faux GitHub et le registre qui s'y écrit.
@@ -454,7 +454,7 @@ func TestDonnerAccesAmorceUnDepotVide(t *testing.T) {
 		t.Fatalf("aucun droit accordé : %+v", state.TeamRepos)
 	}
 	fichiers := state.Files("acme/"+registry.RepoName, registry.Branch)
-	if !strings.Contains(fichiers[registry.ReadmeFile], "gh cohorte") {
+	if !strings.Contains(fichiers[registry.ReadmeFile], "gh milou") {
 		t.Fatalf("le dépôt n'a pas été amorcé : %v", sortedNoms(fichiers))
 	}
 }
@@ -650,7 +650,7 @@ func verifierAucuneRequeteVersUnDepotVide(t *testing.T, preparer func(*fakegh.St
 	// Ce qui explique le dépôt a pris la place du fichier que « auto_init »
 	// y avait déposé, plutôt que de s'ajouter à côté.
 	fichiers := state.Files(depot, registry.Branch)
-	if !strings.Contains(fichiers[registry.ReadmeFile], "gh cohorte") {
+	if !strings.Contains(fichiers[registry.ReadmeFile], "gh milou") {
 		t.Fatalf("%s = %q", registry.ReadmeFile, fichiers[registry.ReadmeFile])
 	}
 	if !strings.Contains(fichiers[registry.UsersFile], "Émilie Côté") {

@@ -5,9 +5,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/tokens"
 )
 
 // Prévoir avant de lancer, plutôt que de se faire tuer au milieu.

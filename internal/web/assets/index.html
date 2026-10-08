@@ -4,9 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>gh cohorte</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="mask-icon" href="/favicon.svg" color="#1f6feb">
+<title>Milou</title>
+<link rel="icon" href="/favicon.png" type="image/png">
+<!-- Les jetons du thème d'abord, les composants ensuite : app.css ne
+     fait qu'employer ce que theme.css déclare. -->
+<link rel="stylesheet" href="/theme.css">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
@@ -16,9 +18,10 @@
 <div id="attente-reseau" class="attente-reseau" role="progressbar"
      aria-label="Chargement en cours" hidden></div>
 
-<!-- Barre globale, à la manière de l'en-tête sombre de GitHub. -->
+<!-- Barre globale, à la manière de l'en-tête sombre de GitHub — Milou devant
+     son nom. -->
 <header class="barre-globale">
-  <button type="button" id="accueil" class="produit">gh cohorte <span class="version" id="version"></span></button>
+  <button type="button" id="accueil" class="produit"><img class="logo" src="/milou/tete.png" alt="" width="24" height="24">Milou <span class="version" id="version"></span></button>
   <span class="espace"></span>
   <span class="compte" id="compte"></span>
   <button type="button" id="ouvrir-reglages" class="bouton discret inverse">Réglages</button>
@@ -53,7 +56,14 @@
        serveur réponde, et cède la place à la première vraie vue. -->
   <section id="vue-demarrage" class="vue">
     <div class="demarrage" aria-live="polite">
-      <span class="roue" id="demarrage-roue" aria-hidden="true"></span>
+      <!-- Milou court tant qu'on attend, et a vu trente-six chandelles si le
+           serveur ne répond pas. Ce sont des dessins d'Hergé, employés tels
+           quels ; le mouvement vit dans app.css. -->
+      <div class="milou-course" id="demarrage-milou" aria-hidden="true">
+        <img class="milou-trotte milou-court" src="/milou/astronaute.png" alt="" width="160" height="194">
+        <span class="milou-sol"></span>
+      </div>
+      <img class="milou-confus milou-grand" id="demarrage-confus" src="/milou/confus.png" alt="" width="200" height="219" hidden>
       <p id="demarrage-texte">Connexion au serveur local…</p>
       <p class="note" id="demarrage-detail"></p>
       <button type="button" id="demarrage-reessayer" class="bouton" hidden>Réessayer</button>
@@ -62,6 +72,11 @@
 
   <!-- ------------------------------------------------- choix de l'organisation -->
   <section id="vue-organisation" class="vue" hidden>
+    <div class="bienvenue">
+      <img class="logo-grand" src="/milou/tete.png" alt="" width="120" height="120">
+      <h2>Milou</h2>
+      <p class="note">Un dépôt GitHub par personne, rapporté au pas de course.</p>
+    </div>
     <div class="boite accueil-organisation">
       <div class="boite-entete"><strong>Choisissez une organisation GitHub</strong></div>
       <div class="boite-corps">
@@ -1373,6 +1388,7 @@
 <!-- Opérations longues : distribution, clonage, vérifications. -->
 <aside id="operation" hidden>
   <div class="operation-entete">
+    <img id="operation-milou" class="milou-trotte milou-operation" src="/milou/astronaute.png" alt="" aria-hidden="true">
     <strong id="operation-titre"></strong>
     <span class="note" id="operation-etat"></span>
     <button type="button" id="operation-annuler" class="bouton petit">Annuler</button>

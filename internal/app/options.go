@@ -8,11 +8,12 @@ import (
 	"io"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Version de l'extension, renseignée à la compilation.
@@ -266,48 +267,49 @@ func Usage(out io.Writer) {
 	for _, name := range plan.Placeholders {
 		champs = append(champs, "{"+name+"}")
 	}
-	fmt.Fprintf(out, `gh cohorte %s — un dépôt GitHub par personne, à la manière de GitHub Classroom.
+	fmt.Fprintf(out, brand.Command+` %s — `+brand.Tagline+`.
+Reproduit GitHub Classroom dans une organisation : une liste d'étudiants, un dépôt chacun.
 
 Utilisation :
-  gh cohorte                                  interface graphique dans le navigateur
-  gh cohorte --cli                            assistant interactif au terminal
-  gh cohorte --manage tp1                     gérer le groupe « tp1 »
-  gh cohorte --students --session a26         utilisateurs de la session a26
-  gh cohorte --students --role enseignant     les enseignants de l'organisation
-  gh cohorte --user ecote                     la fiche de @ecote et son passage
-  gh cohorte --user jdupont --teacher         reconnaître @jdupont comme enseignant
-  gh cohorte --user aleksilepaj --full-name "Aleksi Lepaj"
-  gh cohorte --user Mr-Commetuveux --same-as commetuveuxx --dry-run
-  gh cohorte --manage a26.5n6.01 --student ecote --full-name "Émilie Côté" --rename-repos -y
-  gh cohorte --manage a26.5n6.01 --teachers "prof,jdupont" -y
-  gh cohorte --import                         reprendre des dépôts nommés autrement
-  gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
-  gh cohorte --import projet --teams --into a26.5n6.01 -y
-  gh cohorte --publish-registry --dry-run     ce que publier les noms ferait
-  gh cohorte --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
-  gh cohorte --manage a26.5n6.01.tp1 --rename-to projet-final -y
-  gh cohorte --manage a26.5n6.01.tp1 --due 2026-10-01
-  gh cohorte --manage a26.5n6.01.tp1 --handins
-  gh cohorte --manage a26.5n6.01.tp1 --send-invitations
-  gh cohorte --manage a26.5n6.01.tp1 --push-file consignes.md --push-path docs/CONSIGNES.md
-  gh cohorte --plagiarism --manage a26.5n6.01.tp1
-  gh cohorte --plagiarism --manage a26.5n6.01.tp1 --profile next --languages tsx,css
-  gh cohorte --plagiarism --manage a26.5n6.01.tp1 --reach annees
-  gh cohorte --publish-rules regles.json      déclarer « 5N6 devient 5M6 »
-  gh cohorte --export-zip envoi.zip --manage a26.5n6.01.tp1
-  gh cohorte --plagiarism --manage a26.5n6.01.tp1 --import-zip recu.zip
-  gh cohorte --publish-index --manage a26.5n6.01.tp1
-  gh cohorte --publish-index --org acme -y       rattraper les index manquants
-  gh cohorte --plagiarism --manage a26.5n6.01.tp1 --against a26.5n6.02.tp1
-  gh cohorte --ask a26.5n6.02.tp1:K7DM2X --reason "deux TP quasi identiques"
-  gh cohorte --requests
-  gh cohorte --grant D4K2M9 --export-zip envoi.zip
-  gh cohorte --refresh-token --scopes delete_repo
-  gh cohorte --roster cohorte.csv --dry-run   simulation, sans rien créer
-  gh cohorte --org acme --assignment tp1 --roster cohorte.csv --yes
-  gh cohorte --org acme --manage a26.5n6.01 --teams
-  gh cohorte --org acme --manage a26.5n6.01 --team eq1 --team-members "ec,jlp"
-  gh cohorte --org acme --assignment a26.5n6.01.tp1 --teams --team eq1,eq2 -y
+  gh milou                                  interface graphique dans le navigateur
+  gh milou --cli                            assistant interactif au terminal
+  gh milou --manage tp1                     gérer le groupe « tp1 »
+  gh milou --students --session a26         utilisateurs de la session a26
+  gh milou --students --role enseignant     les enseignants de l'organisation
+  gh milou --user ecote                     la fiche de @ecote et son passage
+  gh milou --user jdupont --teacher         reconnaître @jdupont comme enseignant
+  gh milou --user aleksilepaj --full-name "Aleksi Lepaj"
+  gh milou --user Mr-Commetuveux --same-as commetuveuxx --dry-run
+  gh milou --manage a26.5n6.01 --student ecote --full-name "Émilie Côté" --rename-repos -y
+  gh milou --manage a26.5n6.01 --teachers "prof,jdupont" -y
+  gh milou --import                         reprendre des dépôts nommés autrement
+  gh milou --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+  gh milou --import projet --teams --into a26.5n6.01 -y
+  gh milou --publish-registry --dry-run     ce que publier les noms ferait
+  gh milou --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
+  gh milou --manage a26.5n6.01.tp1 --rename-to projet-final -y
+  gh milou --manage a26.5n6.01.tp1 --due 2026-10-01
+  gh milou --manage a26.5n6.01.tp1 --handins
+  gh milou --manage a26.5n6.01.tp1 --send-invitations
+  gh milou --manage a26.5n6.01.tp1 --push-file consignes.md --push-path docs/CONSIGNES.md
+  gh milou --plagiarism --manage a26.5n6.01.tp1
+  gh milou --plagiarism --manage a26.5n6.01.tp1 --profile next --languages tsx,css
+  gh milou --plagiarism --manage a26.5n6.01.tp1 --reach annees
+  gh milou --publish-rules regles.json      déclarer « 5N6 devient 5M6 »
+  gh milou --export-zip envoi.zip --manage a26.5n6.01.tp1
+  gh milou --plagiarism --manage a26.5n6.01.tp1 --import-zip recu.zip
+  gh milou --publish-index --manage a26.5n6.01.tp1
+  gh milou --publish-index --org acme -y       rattraper les index manquants
+  gh milou --plagiarism --manage a26.5n6.01.tp1 --against a26.5n6.02.tp1
+  gh milou --ask a26.5n6.02.tp1:K7DM2X --reason "deux TP quasi identiques"
+  gh milou --requests
+  gh milou --grant D4K2M9 --export-zip envoi.zip
+  gh milou --refresh-token --scopes delete_repo
+  gh milou --roster cohorte.csv --dry-run   simulation, sans rien créer
+  gh milou --org acme --assignment tp1 --roster cohorte.csv --yes
+  gh milou --org acme --manage a26.5n6.01 --teams
+  gh milou --org acme --manage a26.5n6.01 --team eq1 --team-members "ec,jlp"
+  gh milou --org acme --assignment a26.5n6.01.tp1 --teams --team eq1,eq2 -y
 
 Drapeaux :
   --org ORG                organisation GitHub cible
@@ -480,7 +482,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	}
 
 	options := &Options{}
-	set := flag.NewFlagSet("cohorte", flag.ContinueOnError)
+	set := flag.NewFlagSet(brand.Slug, flag.ContinueOnError)
 	// Les messages du paquet flag sont en anglais : ils sont remplacés plus bas.
 	set.SetOutput(io.Discard)
 	set.Usage = func() {}
@@ -633,7 +635,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	}
 	if rest := set.Args(); len(rest) > 0 {
 		return nil, valid.Errorf(
-			"Argument inattendu : « %s ». Lancez « gh cohorte --help » pour la liste des drapeaux.",
+			"Argument inattendu : « %s ». Lancez « gh milou --help » pour la liste des drapeaux.",
 			rest[0])
 	}
 
@@ -808,7 +810,7 @@ func translateFlagError(err error) error {
 	message := err.Error()
 	if name, found := strings.CutPrefix(message, "flag provided but not defined: "); found {
 		return valid.Errorf(
-			"Drapeau inconnu : « %s ». Lancez « gh cohorte --help » pour la liste des drapeaux.", name)
+			"Drapeau inconnu : « %s ». Lancez « gh milou --help » pour la liste des drapeaux.", name)
 	}
 	if rest, found := strings.CutPrefix(message, "flag needs an argument: "); found {
 		return valid.Errorf("Valeur manquante pour le drapeau %s.", rest)

@@ -1,4 +1,8 @@
-# Binaire compilé
+# Binaire compilé, sous son nom et sous les anciens
+/gh-milou
+/gh-milou.exe
+/gh-nestor
+/gh-nestor.exe
 /gh-cohorte
 /gh-cohorte.exe
 /dist/

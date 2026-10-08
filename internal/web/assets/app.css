@@ -1,72 +1,26 @@
-/* Interface locale de gh cohorte, habillée à la manière de GitHub Classroom :
-   barre globale sombre, en-tête de cours, onglets, boîtes bordées. */
+/* Interface locale de Milou : la structure de GitHub Classroom — barre
+   globale sombre, en-tête de cours, onglets, boîtes — dans la ligne claire des
+   albums : contours d'encre, aplats, ombres portées d'un bloc.
 
-:root {
-  --fond: #ffffff;
-  --fond-doux: #f6f8fa;
-  --fond-creux: #eaeef2;
-  --bord: #d1d9e0;
-  --bord-net: #b7bec6;
-  --texte: #1f2328;
-  --texte-doux: #59636e;
-  --lien: #0969da;
-  --vert: #1f883d;
-  --vert-fonce: #1a7f37;
-  --vert-texte: #ffffff;
-  --alerte: #9a6700;
-  --alerte-fond: #fff8c5;
-  --orange: #bc4c00;
-  --orange-fond: #fff1e5;
-  --erreur: #d1242f;
-  --erreur-fond: #ffebe9;
-  --succes: #1a7f37;
-  --succes-fond: #dafbe1;
-  --sombre: #24292f;
-  --sombre-texte: #f0f6fc;
-  --rayon: 6px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fond: #0d1117;
-    --fond-doux: #161b22;
-    --fond-creux: #21262d;
-    --bord: #30363d;
-    --bord-net: #444c56;
-    --texte: #e6edf3;
-    --texte-doux: #9198a1;
-    --lien: #4493f8;
-    --vert: #238636;
-    --vert-fonce: #2ea043;
-    --vert-texte: #ffffff;
-    --alerte: #d29922;
-    --alerte-fond: #272115;
-    --orange: #db6d28;
-    --orange-fond: #26190f;
-    --erreur: #f85149;
-    --erreur-fond: #251b1c;
-    --succes: #3fb950;
-    --succes-fond: #12261e;
-    --sombre: #010409;
-    --sombre-texte: #f0f6fc;
-  }
-}
+   Cette feuille ne décrit que les composants. Couleurs, contours, ombres et
+   fontes sont des jetons déclarés dans theme.css, et c'est là qu'on les
+   change : rien ici ne doit coder une couleur en dur. */
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
   padding: 0 0 6rem;
-  background: var(--fond);
+  background: var(--fond-page);
   color: var(--texte);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
-        Helvetica, Arial, sans-serif;
+  font: var(--taille-texte)/1.5 var(--police);
 }
 
-h1 { font-size: 1.5rem; margin: 0; font-weight: 600; }
-h2 { font-size: 1.15rem; margin: 0; font-weight: 600; }
-h3 { font-size: .95rem; margin: 1.25rem 0 .5rem; font-weight: 600; }
-code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; font-size: .85em; }
+h1, h2, h3 { font-family: var(--police-titres); font-weight: var(--graisse-titre); letter-spacing: -.01em; }
+h1 { font-size: 1.5rem; margin: 0; }
+h2 { font-size: 1.15rem; margin: 0; }
+h3 { font-size: .95rem; margin: 1.25rem 0 .5rem; }
+code { font-family: var(--police-mono); font-size: .85em; }
 a { color: var(--lien); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .espace { flex: 1 1 auto; }
@@ -81,10 +35,10 @@ a:hover { text-decoration: underline; }
   padding: .6rem 1.5rem;
   background: var(--sombre);
   color: var(--sombre-texte);
+  border-bottom: var(--bandeau-trait);
   font-size: .875rem;
 }
 
-.produit { font-weight: 600; }
 .barre-globale .version { font-weight: 400; opacity: .6; margin-left: .35rem; }
 .barre-globale .compte { opacity: .75; }
 
@@ -96,7 +50,7 @@ a:hover { text-decoration: underline; }
 .entete-page {
   padding: 1.25rem 1.5rem;
   background: var(--fond-doux);
-  border-bottom: 1px solid var(--bord);
+  border-bottom: var(--contour);
 }
 
 /* Les onglets viennent mourir sur le trait du bandeau : leur soulignement en
@@ -139,7 +93,7 @@ a:hover { text-decoration: underline; }
 
 .onglets button {
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-bottom: var(--onglet-trait) solid transparent;
   background: none;
   color: var(--texte-doux);
   font: inherit;
@@ -148,11 +102,7 @@ a:hover { text-decoration: underline; }
 }
 
 .onglets button:hover { color: var(--texte); }
-.onglets button.actif { color: var(--texte); font-weight: 600; border-bottom-color: #fd8c73; }
-
-@media (prefers-color-scheme: dark) {
-  .onglets button.actif { border-bottom-color: #f78166; }
-}
+.onglets button.actif { color: var(--texte); font-weight: 700; border-bottom-color: var(--onglet-actif); }
 
 /* ------------------------------------------------------------------ contenu */
 
@@ -179,11 +129,12 @@ main { padding: 1.5rem; max-width: 1100px; }
 /* -------------------------------------------------------------------- boîte */
 
 .boite {
-  border: 1px solid var(--bord);
-  border-radius: var(--rayon);
+  border: var(--contour);
+  border-radius: var(--rayon-boite);
   background: var(--fond);
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
   overflow: hidden;
+  box-shadow: var(--ombre-boite);
 }
 
 .boite-entete {
@@ -193,7 +144,7 @@ main { padding: 1.5rem; max-width: 1100px; }
   flex-wrap: wrap;
   padding: .6rem .9rem;
   background: var(--fond-doux);
-  border-bottom: 1px solid var(--bord);
+  border-bottom: var(--contour);
   font-size: .875rem;
 }
 
@@ -263,7 +214,7 @@ main { padding: 1.5rem; max-width: 1100px; }
 .equipe-entete { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
 .equipe-titre { font-weight: 600; font-size: 1rem; }
 .equipe-nom { color: var(--texte-doux); font-size: .8125rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  font-family: var(--police-mono); }
 .equipe-actions { display: flex; gap: .3rem; flex-wrap: nowrap; }
 
 /* Un membre par ligne : le nom et le compte se lisent en regard l'un de
@@ -282,7 +233,7 @@ main { padding: 1.5rem; max-width: 1100px; }
 .equipe-membre:hover { background: var(--fond-doux); }
 .membre-nom { min-width: 11rem; }
 .membre-comptes {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--police-mono);
   font-size: .8125rem;
   overflow-wrap: anywhere;
 }
@@ -325,7 +276,7 @@ main { padding: 1.5rem; max-width: 1100px; }
 /* Le compte d'une personne, à côté de son nom : c'est leur association qu'on
    lit, et le compte se reconnaît à sa fonte. */
 .jeton .compte {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--police-mono);
   font-size: .6875rem;
   color: var(--texte-doux);
 }
@@ -372,14 +323,14 @@ main { padding: 1.5rem; max-width: 1100px; }
   width: 1.6rem;
   height: 1.6rem;
   border-radius: 50%;
-  border: 1px solid var(--bord-net);
+  border: 2px solid var(--encre);
   font-size: .8125rem;
   font-weight: 600;
 }
 
 .etapes li.active { color: var(--texte); font-weight: 600; }
-.etapes li.active .pastille { background: var(--vert); border-color: var(--vert); color: var(--vert-texte); }
-.etapes li.faite .pastille { background: var(--fond-creux); border-color: var(--bord-net); color: var(--texte); }
+.etapes li.active .pastille { background: var(--vert); color: var(--vert-texte); }
+.etapes li.faite .pastille { background: var(--fond-creux); color: var(--texte); }
 
 .pied-etape {
   display: flex;
@@ -396,32 +347,37 @@ main { padding: 1.5rem; max-width: 1100px; }
 .bouton {
   font: inherit;
   font-size: .875rem;
-  font-weight: 500;
+  font-weight: 600;
   padding: .35rem .8rem;
   border-radius: var(--rayon);
-  border: 1px solid var(--bord);
-  background: var(--fond-doux);
+  border: var(--contour);
+  background: var(--fond);
   color: var(--texte);
+  box-shadow: var(--ombre-bouton);
   cursor: pointer;
   white-space: nowrap;
+  transition: transform .06s ease-out, box-shadow .06s ease-out;
 }
 
-.bouton:hover:not(:disabled) { background: var(--fond-creux); border-color: var(--bord-net); }
-.bouton:disabled { opacity: .55; cursor: default; }
+/* Un bouton s'enfonce sous le doigt : son ombre portée disparaît et il
+   descend d'autant. C'est le geste d'une case d'album, pas d'un formulaire. */
+.bouton:hover:not(:disabled) { background: var(--fond-creux); }
+.bouton:active:not(:disabled) { transform: var(--pression); box-shadow: none; }
+.bouton:disabled { opacity: .55; cursor: default; box-shadow: none; }
 .bouton.petit { padding: .2rem .6rem; font-size: .8125rem; }
 
 .bouton.vert {
   background: var(--vert);
-  border-color: var(--vert);
   color: var(--vert-texte);
 }
 
-.bouton.vert:hover:not(:disabled) { background: var(--vert-fonce); border-color: var(--vert-fonce); }
-.bouton.discret { background: transparent; }
-.bouton.inverse { color: var(--sombre-texte); border-color: rgba(240, 246, 252, .3); }
-.bouton.inverse:hover:not(:disabled) { background: rgba(240, 246, 252, .12); }
-.bouton.rouge { color: var(--erreur); border-color: var(--bord); }
-.bouton.rouge:hover:not(:disabled) { background: var(--erreur); border-color: var(--erreur); color: #fff; }
+.bouton.vert:hover:not(:disabled) { background: var(--vert-fonce); }
+/* Discret : ni fond ni ombre, le contour seul le dit cliquable. */
+.bouton.discret { background: transparent; box-shadow: none; }
+.bouton.inverse { color: var(--sombre-texte); border-color: var(--sombre-trait); }
+.bouton.inverse:hover:not(:disabled) { background: var(--sombre-survol); }
+.bouton.rouge { color: var(--erreur); }
+.bouton.rouge:hover:not(:disabled) { background: var(--erreur); color: var(--erreur-texte); }
 
 .lien {
   border: 0;
@@ -461,14 +417,14 @@ main { padding: 1.5rem; max-width: 1100px; }
   font-size: .875rem;
   color: var(--texte);
   background: var(--fond);
-  border: 1px solid var(--bord);
+  border: var(--contour);
   border-radius: var(--rayon);
   padding: .35rem .6rem;
   width: 100%;
 }
 
-.champ:focus { outline: 0; border-color: var(--lien); box-shadow: 0 0 0 3px rgba(9, 105, 218, .25); }
-textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.champ:focus { outline: 0; border-color: var(--lien); box-shadow: var(--focus); }
+textarea.champ { resize: vertical; font-family: var(--police-mono); }
 
 .champ-bloc { display: block; }
 .champ-bloc > * + * { margin-top: .3rem; }
@@ -501,9 +457,9 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
   min-width: 15rem;
   padding: .8rem;
   background: var(--fond);
-  border: 1px solid var(--bord-net);
+  border: var(--contour);
   border-radius: var(--rayon);
-  box-shadow: 0 8px 24px rgba(31, 35, 40, .16);
+  box-shadow: var(--ombre-flottante);
 }
 
 .menu-flottant > * + * { margin-top: .7rem; }
@@ -569,7 +525,7 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .ligne-champs { display: flex; flex-wrap: wrap; gap: .75rem 1rem; }
 .aide-omnivox {
   margin: .5rem 0 0; padding: .6rem .75rem; white-space: pre-wrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem;
+  font-family: var(--police-mono); font-size: .82rem;
   background: var(--fond-doux); border-radius: 4px; line-height: 1.5;
 }
 
@@ -578,7 +534,7 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
    déposé donne son contenu. */
 .depot {
   display: flex; align-items: center; gap: .6rem; margin-top: .35rem;
-  padding: .85rem 1rem; border: 1px dashed var(--bord); border-radius: 6px;
+  padding: .85rem 1rem; border: var(--contour-pointille); border-radius: var(--rayon);
   background: var(--fond-doux); cursor: pointer; transition: border-color .12s,
     background .12s;
 }
@@ -593,8 +549,8 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
    nombre d'étudiants ou de travaux. */
 .stepper { list-style: none; margin: 0; padding: 0; display: flex;
   flex-direction: column; gap: .5rem; }
-.etape { border: 1px solid var(--bord); border-radius: 8px; background: var(--fond);
-  overflow: hidden; }
+.etape { border: var(--contour); border-radius: var(--rayon-boite); background: var(--fond);
+  overflow: hidden; box-shadow: var(--ombre-boite); }
 .etape-tete {
   display: flex; align-items: center; gap: .75rem; width: 100%;
   padding: .8rem 1rem; background: none; border: 0; cursor: pointer;
@@ -604,11 +560,10 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .etape-num {
   flex: none; width: 1.6rem; height: 1.6rem; border-radius: 50%;
   display: grid; place-items: center; font-size: .8rem; font-weight: 600;
-  background: var(--fond-doux); border: 1px solid var(--bord); color: var(--texte-doux);
+  background: var(--fond-doux); border: 2px solid var(--encre); color: var(--texte-doux);
 }
-.etape.faite .etape-num { background: var(--succes-fond); border-color: transparent;
-  color: var(--succes); }
-.etape.ouverte .etape-num { background: var(--lien); border-color: transparent; color: #fff; }
+.etape.faite .etape-num { background: var(--succes-fond); color: var(--succes); }
+.etape.ouverte .etape-num { background: var(--lien); color: var(--lien-texte); }
 .etape-titre { font-weight: 600; }
 .etape-resume { margin-left: auto; color: var(--texte-doux); font-size: .85rem;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
@@ -725,7 +680,8 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .avis {
   padding: .6rem .8rem;
   border-radius: var(--rayon);
-  border: 1px solid var(--bord);
+  border: var(--contour);
+  border-left-width: 6px;
   background: var(--fond-doux);
   font-size: .875rem;
 }
@@ -737,11 +693,11 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 .avis-pile > * + * { margin-top: .5rem; }
 .entete-page .avis-pile { margin-top: 1rem; margin-bottom: 1rem; }
 
-.avis.alerte { border-color: var(--alerte); background: var(--alerte-fond); color: var(--texte); }
-.avis.erreur { border-color: var(--erreur); background: var(--erreur-fond); color: var(--texte); }
-.avis.succes { border-color: var(--succes); background: var(--succes-fond); color: var(--texte); }
+.avis.alerte { border-left-color: var(--alerte-trait); background: var(--alerte-fond); color: var(--texte); }
+.avis.erreur { border-left-color: var(--erreur); background: var(--erreur-fond); color: var(--texte); }
+.avis.succes { border-left-color: var(--succes); background: var(--succes-fond); color: var(--texte); }
 
-details { border: 1px solid var(--bord); border-radius: var(--rayon); }
+details { border: var(--contour); border-radius: var(--rayon); }
 summary { cursor: pointer; padding: .5rem .8rem; font-size: .875rem; }
 details .corps { padding: 0 .8rem .8rem; }
 details .corps > * + * { margin-top: .25rem; }
@@ -754,9 +710,9 @@ details .corps > * + * { margin-top: .25rem; }
   bottom: 1rem;
   width: min(34rem, calc(100vw - 2rem));
   background: var(--fond);
-  border: 1px solid var(--bord);
-  border-radius: var(--rayon);
-  box-shadow: 0 8px 24px rgba(31, 35, 40, .2);
+  border: var(--contour);
+  border-radius: var(--rayon-boite);
+  box-shadow: var(--ombre-flottante);
   overflow: hidden;
   z-index: 10;
 }
@@ -766,7 +722,7 @@ details .corps > * + * { margin-top: .25rem; }
   gap: .5rem;
   align-items: center;
   padding: .5rem .75rem;
-  border-bottom: 1px solid var(--bord);
+  border-bottom: var(--contour);
   background: var(--fond-doux);
 }
 
@@ -777,7 +733,7 @@ details .corps > * + * { margin-top: .25rem; }
   max-height: 14rem;
   overflow-y: auto;
   padding: .5rem .75rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--police-mono);
   font-size: .8125rem;
   line-height: 1.5;
 }
@@ -801,21 +757,21 @@ details .corps > * + * { margin-top: .25rem; }
   max-width: min(28rem, calc(100vw - 2rem));
 }
 
-.messages .avis { box-shadow: 0 8px 24px rgba(31, 35, 40, .2); }
+.messages .avis { box-shadow: var(--ombre-flottante); }
 
 /* --------------------------------------------------------------- dialogue */
 
 dialog {
-  border: 1px solid var(--bord);
-  border-radius: var(--rayon);
+  border: var(--contour);
+  border-radius: var(--rayon-boite);
   background: var(--fond);
   color: var(--texte);
   padding: 1rem 1.25rem;
   width: min(34rem, calc(100vw - 2rem));
-  box-shadow: 0 8px 24px rgba(31, 35, 40, .2);
+  box-shadow: var(--ombre-flottante);
 }
 
-dialog::backdrop { background: rgba(31, 35, 40, .4); }
+dialog::backdrop { background: var(--voile); }
 dialog h3 { margin-top: 0; font-size: 1.05rem; }
 dialog menu { display: flex; justify-content: flex-end; gap: .5rem; padding: 0; margin: 1.25rem 0 0; }
 dialog .corps-dialogue > * + * { margin-top: .75rem; }
@@ -898,20 +854,27 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 .note.alerte { color: var(--alerte); }
 
 .liste-cases label { padding: .15rem 0; }
-.liste-cases .compte { color: var(--texte-doux); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.liste-cases .compte { color: var(--texte-doux); font-family: var(--police-mono); }
 
 /* La marque de l'en-tête ramène à l'accueil. */
 .produit {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
   border: 0;
   background: none;
   color: inherit;
   font: inherit;
-  font-weight: 600;
+  font-family: var(--police-titres);
+  font-size: 1.05rem;
+  font-weight: var(--graisse-titre);
+  letter-spacing: .01em;
   padding: 0;
   cursor: pointer;
 }
 
 .produit:hover { text-decoration: underline; }
+.produit .logo { width: 24px; height: 24px; display: block; }
 
 /* Une carte de groupe, sur la page d'accueil. */
 .groupe-ligne .titre { font-size: 1.05rem; }
@@ -920,7 +883,23 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 
 /* L'écran d'entrée : rien d'autre n'est offert tant qu'une organisation
    n'a pas été choisie. */
-.accueil-organisation { max-width: 34rem; margin: 3rem auto 0; }
+.accueil-organisation { max-width: 34rem; margin: 0 auto; }
+
+/* Milou se présente — sa tête, son nom, sa devise — avant de
+   demander quoi que ce soit : c'est le seul écran où la marque a la place de
+   respirer, et celui qu'on voit en premier. */
+.bienvenue {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .25rem;
+  margin: 2.5rem auto 1.5rem;
+  text-align: center;
+}
+
+.bienvenue .logo-grand { width: 120px; height: 120px; margin-bottom: .5rem; }
+.bienvenue h2 { font-size: 1.75rem; }
+.bienvenue .note { font-size: 1rem; }
 
 /* Le fil d'Ariane de la hiérarchie. */
 .fil .lien { font: inherit; }
@@ -1007,21 +986,6 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   100% { left: 100%; }
 }
 
-/* La roue des attentes locales : une zone qui se remplit, un écran qui se
-   prépare. */
-.roue {
-  display: inline-block;
-  width: 1rem;
-  height: 1rem;
-  border: 2px solid var(--bord-net);
-  border-top-color: var(--lien);
-  border-radius: 50%;
-  animation: tourne .8s linear infinite;
-  vertical-align: -.2rem;
-}
-
-@keyframes tourne { to { transform: rotate(360deg); } }
-
 .attente {
   display: flex;
   gap: .6rem;
@@ -1047,16 +1011,63 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   color: var(--texte-doux);
 }
 
-.demarrage .roue { width: 1.75rem; height: 1.75rem; border-width: 3px; }
 .demarrage p { margin: 0; }
+
+/* Milou court le temps que la page attende le serveur — c'est le seul écran
+   qui bloque tout, et une roue qui tourne n'y disait rien de l'outil.
+
+   Les dessins sont ceux d'Hergé, jamais redessinés. L'animation est donc
+   celle d'une marionnette de papier : Milou rebondit et tangue au rythme
+   d'un trot pendant que le sol défile sous lui, et c'est tout — ses pattes
+   sont celles du dessin. */
+.milou-course {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 240px;
+  height: 200px;
+}
+
+.milou-court { display: block; width: 160px; height: auto; margin-bottom: 14px; }
+
+.milou-sol {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  height: 3px;
+  background: repeating-linear-gradient(90deg, var(--encre) 0 14px, transparent 14px 26px);
+  animation: milou-defile .3s linear infinite;
+}
+
+/* Quand le serveur ne répond pas, Milou a vu trente-six chandelles. */
+.milou-grand { display: block; width: 200px; height: auto; }
+
+/* Milou ponctue le reste de l'interface — un seul par écran. L'humeur dit le
+   dessin et son mouvement (app.js choisit l'image) ; l'emplacement dit la
+   taille. Un emplacement nouveau se déclare ici, pas dans le script. */
+.milou-trotte { transform-origin: 50% 100%; animation: milou-trot .3s ease-in-out infinite alternate; }
+.milou-confus { transform-origin: 50% 90%; animation: milou-tangue 1.8s ease-in-out infinite alternate; }
+.milou-vide { display: block; width: 72px; height: auto; margin: 0 auto .25rem; }
+.milou-attente { width: 40px; height: auto; flex: none; }
+.milou-operation { width: 34px; height: 34px; object-fit: contain; flex: none; }
+.milou-dialogue { display: block; width: 84px; height: auto; margin: 0 auto; }
+.milou-adieu { display: block; width: 140px; height: auto; margin: 1.5rem 0 1rem; }
+.boite-vide p { margin: .25rem 0; }
+
+@keyframes milou-trot { from { transform: translateY(0) rotate(-1.5deg); } to { transform: translateY(-8px) rotate(1.5deg); } }
+@keyframes milou-defile { to { background-position: -26px 0; } }
+@keyframes milou-tangue { from { transform: rotate(-3deg); } to { transform: rotate(3deg); } }
 
 /* Ce qui tourne doit pouvoir s'arrêter : certaines personnes règlent leur
    système pour bannir les animations. L'indication reste, seul le mouvement
    s'en va. */
 @media (prefers-reduced-motion: reduce) {
   .attente-reseau::before { animation: none; width: 100%; opacity: .5; }
-  .roue { animation: none; border-top-color: var(--bord-net); }
   .occupe { transition: none; }
+  /* Milou s'arrête ; sa pose dit encore qu'on attend. */
+  .milou-trotte, .milou-sol, .milou-confus { animation: none; }
 }
 
 /* ------------------------------------------------- fiche d'un utilisateur */
@@ -1080,7 +1091,7 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   border-radius: 999px;
   background: var(--fond-doux);
   color: var(--texte-doux);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--police-mono);
   font-size: .8125rem;
   text-decoration: none;
 }
@@ -1208,8 +1219,8 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 .avertissement {
   margin: 0 0 1rem;
   padding: .7rem .9rem;
-  border: 1px solid var(--alerte);
-  border-left-width: 4px;
+  border: var(--contour);
+  border-left: 6px solid var(--alerte-trait);
   border-radius: var(--rayon);
   background: var(--alerte-fond);
   color: var(--texte);
@@ -1245,7 +1256,7 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 .pl-table tbody tr.cliquable:hover { background: var(--fond-doux); }
 .pl-table td.chiffre { text-align: right; font-variant-numeric: tabular-nums; }
 .pl-au-dessus { color: var(--erreur); font-weight: 600; }
-.pl-chemin { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8125rem; }
+.pl-chemin { font-family: var(--police-mono); font-size: .8125rem; }
 
 /* Une demande de levée du voile : ce qu'on demande d'un côté, les deux
    décisions de l'autre. Elles restent côte à côte — accorder et refuser se
@@ -1276,7 +1287,7 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 
 .pl-code {
   margin: 0; padding: .75rem .9rem; overflow: auto; max-height: 70vh;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--police-mono);
   font-size: .8125rem; line-height: 1.55; white-space: pre; tab-size: 4;
 }
 /* Ce qui est commun se surligne ; ce qui ne l'est pas se fane. Les deux

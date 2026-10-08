@@ -2,14 +2,15 @@ package app
 
 import (
 	"fmt"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 	"strconv"
 )
 
@@ -134,7 +135,7 @@ func montrerCatalogue(console *ui.Console, catalogue exchange.Catalog, compte st
 		})
 	}
 	console.Table([]string{"Travail", "Copies", "Dernière remise", ""}, lignes, 0)
-	console.Note("Comparer vos copies aux siennes : gh cohorte --plagiarism "+
+	console.Note("Comparer vos copies aux siennes : "+brand.Command+" --plagiarism "+
 		"--manage VOTRE-TRAVAIL --against %s — ce sont des empreintes qui "+
 		"circulent, jamais du code.", siens[0].ID())
 }

@@ -3,7 +3,13 @@ package ui
 import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
 )
+
+// Ce fichier est le seul endroit où le terminal décide de son apparence :
+// couleurs des questions, marques de la sélection, styles des messages. Le
+// paquet brand dit les couleurs ; ici on dit où elles vont.
 
 // Couleurs des questions. Elles sont dites en toutes lettres plutôt que reprises
 // de la palette du terminal : le « bleu » d'un thème clair y est souvent délavé
@@ -16,12 +22,12 @@ import (
 // question part alors au milieu des touches que lit le formulaire, et sans
 // réponse elle fait patienter cinq secondes pour conclure « sombre ».
 const (
-	accentColor     = lipgloss.Color("#2557D6") // le fond de ce qui est retenu
-	onAccentColor   = lipgloss.Color("#FFFFFF") // le texte posé dessus
-	accentTextColor = lipgloss.Color("#3B72F0") // l'accent porté par du texte
-	checkedColor    = lipgloss.Color("#1E9E57") // ce qui est coché
-	mutedColor      = lipgloss.Color("#7C8496") // ce qui n'est pas retenu
-	failureColor    = lipgloss.Color("#E5484D") // un refus de saisie
+	accentColor     = lipgloss.Color(brand.Bleu)      // le fond de ce qui est retenu
+	onAccentColor   = lipgloss.Color("#FFFFFF")       // le texte posé dessus
+	accentTextColor = lipgloss.Color(brand.BleuClair) // l'accent porté par du texte
+	checkedColor    = lipgloss.Color(brand.Vert)      // ce qui est coché
+	mutedColor      = lipgloss.Color(brand.Gris)      // ce qui n'est pas retenu
+	failureColor    = lipgloss.Color(brand.Rouge)     // un refus de saisie
 )
 
 // Marques de la sélection. Elles la portent à elles seules quand la couleur
@@ -33,6 +39,20 @@ const (
 	blurredButtonMark = " "
 	checkedMark       = "[✓] "
 	uncheckedMark     = "[ ] "
+)
+
+// Styles des messages de la console. Eux suivent la palette du terminal — les
+// numéros 1 à 8 — plutôt que la marque : un « ✓ » vert ou un « ✗ » rouge sont
+// des conventions que chaque terminal rend dans ses propres teintes, et un
+// bilan de trente lignes doit se lire comme le reste de ce qui s'y affiche.
+var (
+	boldStyle  = lipgloss.NewStyle().Bold(true)
+	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	okStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	warnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	errStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	infoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 )
 
 // promptTheme habille les questions pour que la réponse retenue saute aux yeux :

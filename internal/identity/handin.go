@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
 )
 
 // L'historique d'un dépôt coûte deux requêtes, et un groupe en compte autant

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
 )
 
 func sources(fichiers map[string]string) []inspect.Source {

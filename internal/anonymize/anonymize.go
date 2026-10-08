@@ -29,8 +29,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 	"golang.org/x/text/unicode/norm"
 )
 

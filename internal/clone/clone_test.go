@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/clone"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/clone"
 )
 
 // git lance une commande git isolée de la configuration de la machine.

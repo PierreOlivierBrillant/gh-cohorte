@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/scopes"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
 )
 
 // groupe prépare une organisation contenant un groupe de dépôts déjà créés.
