@@ -14,6 +14,23 @@ import (
 type registre struct {
 	noms       map[string]string
 	enseignent map[string]bool
+	// memes réunit des comptes d'une même personne : le compte qui la désigne
+	// d'abord.
+	memes [][]string
+}
+
+func (r registre) Accounts(username string) []string {
+	for _, comptes := range r.memes {
+		for _, compte := range comptes {
+			if strings.EqualFold(compte, username) {
+				return comptes
+			}
+		}
+	}
+	if r.Knows(username) {
+		return []string{username}
+	}
+	return nil
 }
 
 func (r registre) Name(username string) string { return r.noms[strings.ToLower(username)] }

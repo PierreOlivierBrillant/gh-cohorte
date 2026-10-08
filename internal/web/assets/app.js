@@ -3285,6 +3285,10 @@ async function chargerAnnuaire(force) {
   if (!attente.fini(donnees, "L'annuaire n'a pas pu être chargé.")) return;
   etat.annuaire.lignes = donnees.users || [];
   etat.annuaire.deplies = new Set();
+  // Réunir deux comptes est une décision d'enseignant : le serveur dit si
+  // celui qui regarde peut la prendre, la page ne fait que le suivre.
+  etat.annuaire.decide = !!donnees.may_decide;
+  $('annuaire-actions').hidden = !etat.annuaire.decide;
 
   // Les sessions de l'annuaire servent aussi à nommer : « a26 » s'y lit
   // « Automne 2026 » même si aucun groupe n'a encore été ouvert.
@@ -3320,7 +3324,7 @@ function ligneAnnuaire(ligne) {
       ligne.is_teacher
         ? el('span', { classe: 'jeton enseignant', texte: 'enseignant' })
         : null)),
-    el('td', {}, lienDeProfil(ligne.username)),
+    el('td', {}, comptesDeLaLigne(ligne)),
     el('td', {}, ligne.enrollments.length === 0
       ? el('span', { classe: 'vide', texte: 'aucun cours' })
       : el('span', { classe: 'etiquettes' },
@@ -3344,7 +3348,25 @@ function ligneAnnuaire(ligne) {
             dessinerAnnuaire();
           },
         })),
-    el('td', ligne.pushed_at ? { texte: ligne.pushed_at } : { classe: 'vide', texte: 'jamais' }));
+    el('td', ligne.pushed_at ? { texte: ligne.pushed_at } : { classe: 'vide', texte: 'jamais' }),
+    // Sans compte, il n'y a rien à réunir : c'est un compte qu'on réunit.
+    etat.annuaire.decide
+      ? el('td', {}, ligne.username && el('button', {
+          classe: 'bouton petit', type: 'button', texte: 'Réunir…',
+          title: `Dire que ${ligne.full_name || '@' + ligne.username} travaille aussi sous un autre compte`,
+          onclick: () => reunirDeuxComptes(ligne, () => chargerAnnuaire()),
+        }))
+      : null);
+}
+
+// comptesDeLaLigne montre le compte qui désigne la personne, puis les autres :
+// c'est en les voyant côte à côte qu'on sait qu'une réunion a eu lieu.
+function comptesDeLaLigne(ligne) {
+  const autres = (ligne.accounts || []).filter(
+    (compte) => compte.toLowerCase() !== ligne.username.toLowerCase());
+  if (autres.length === 0) return lienDeProfil(ligne.username);
+  return el('span', { classe: 'etiquettes' }, lienDeProfil(ligne.username),
+    autres.map((compte) => el('span', { classe: 'note' }, lienDeProfil(compte))));
 }
 
 function jetonDuCours(inscription) {
@@ -3371,7 +3393,8 @@ function depotsAnnuaire(ligne) {
       el('span', { classe: 'frise-travaux' },
         inscription.assignments.map(puceDeTravail))));
   return el('tr', { classe: 'ligne-depliee' },
-    el('td', {}), el('td', { colspan: '4' }, el('div', { classe: 'depots' }, blocs)));
+    el('td', {}), el('td', { colspan: etat.annuaire.decide ? '5' : '4' },
+      el('div', { classe: 'depots' }, blocs)));
 }
 
 function resumerAnnuaire(donnees) {
@@ -3525,6 +3548,7 @@ function dessinerFiche() {
   aide.textContent = nomme ? '' : 'Sans lui, aucun travail ne peut lui être ' +
     'distribué : c’est le nom complet qui nomme ses dépôts.';
 
+  dessinerReunion(donnees, personne);
   $('fiche-resume').textContent = resumerFiche(personne);
   dessinerAvisDeLaFiche(donnees, personne);
   dessinerCooptation(donnees, personne);
@@ -3666,6 +3690,129 @@ async function nommerUnUtilisateur(personne) {
   if (!reponse) return;
   message(`@${reponse.username} s'appelle « ${reponse.full_name} ».`);
   chargerFiche();
+}
+
+// ------------------------------------------- une personne, deux comptes
+
+// Une même personne travaille parfois sous deux comptes — celui d'une session
+// et celui de la suivante. Les réunir se décide au registre, et vaut alors pour
+// tous ses groupes et sur tous les postes. Tout ce qui est refusé, et ce qui
+// l'emporte, est décidé par le serveur : la page recueille les deux comptes et
+// montre ce qui revient.
+
+// dessinerReunion offre de réunir la personne à un autre compte, et de défaire
+// ce que le registre a réuni.
+function dessinerReunion(donnees, personne) {
+  const zone = $('fiche-reunion');
+  zone.hidden = !donnees.may_decide;
+  if (zone.hidden) return;
+  $('fiche-reunir').onclick = () => reunirDeuxComptes(personne, chargerFiche);
+  const separer = $('fiche-separer');
+  const reunis = personne.joined || [];
+  separer.hidden = reunis.length < 2;
+  separer.onclick = () => separerUnCompte(personne, chargerFiche);
+}
+
+// reunirDeuxComptes demande l'autre compte et lequel des deux désigne la
+// personne, montre ce que la réunion fera, puis l'écrit.
+async function reunirDeuxComptes(personne, ensuite) {
+  const donnees = await tenter(() => api('GET',
+    `/api/users/${encode(personne.username)}/same-as`), 'Candidats');
+  if (!donnees) return;
+  const candidats = donnees.candidates || [];
+  if (candidats.length === 0) {
+    message("Personne d'autre n'est connu dans cette organisation.", 'alerte');
+    return;
+  }
+  const intitule = (candidat) => (candidat.full_name || '@' + candidat.username)
+    + ' (@' + candidat.accounts.join(', @') + ')';
+  const homonymes = candidats.filter((candidat) => candidat.same_name);
+  const autres = candidats.filter((candidat) => !candidat.same_name);
+  // Les homonymes passent d'abord : une suggestion, jamais une décision —
+  // deux personnes peuvent s'appeler pareil.
+  const choix = el('select', { classe: 'champ' },
+    homonymes.length
+      ? el('optgroup', { label: 'Même nom' }, homonymes.map((candidat) =>
+          el('option', { value: candidat.username, texte: intitule(candidat) })))
+      : null,
+    el('optgroup', { label: homonymes.length ? 'Les autres' : 'Utilisateurs' },
+      autres.map((candidat) =>
+        el('option', { value: candidat.username, texte: intitule(candidat) }))));
+  const ici = personne.full_name || '@' + personne.username;
+  const garderCeluiCi = el('input', { type: 'radio', name: 'reunion-garde', value: 'ici' });
+  const garderLAutre = el('input', { type: 'radio', name: 'reunion-garde', value: 'autre', checked: true });
+  const corps = el('div', {},
+    el('p', {}, el('strong', { texte: ici }), ' travaille aussi sous un autre compte.'),
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Autre compte' }), choix,
+      el('span', { classe: 'aide', texte:
+        'Rien ne se déduit d’un nom : deux personnes peuvent s’appeler pareil, et '
+        + 'les réunir leur donnerait un seul dépôt pour deux.' })),
+    el('div', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Le compte qui la désigne ensuite' }),
+      el('label', { classe: 'case' }, garderLAutre,
+        el('span', { texte: 'l’autre compte — son nom et son matricule l’emportent' })),
+      el('label', { classe: 'case' }, garderCeluiCi,
+        el('span', { texte: '@' + personne.username + ' — le sien l’emporte' }))));
+  if (!await demander('Réunir deux comptes', corps, 'Voir ce qui change')) return;
+
+  const autre = choix.value;
+  const [compte, garde] = garderCeluiCi.checked
+    ? [autre, personne.username] : [personne.username, autre];
+  const chemin = `/api/users/${encode(compte)}/same-as`;
+  const apercu = await tenter(() => api('POST', chemin, { same_as: garde, dry_run: true }),
+    'Réunion');
+  if (!apercu) return;
+  const plan = apercu.joining;
+  const ligneDuPlan = (etiquette, valeur, vide) => el('li', {},
+    el('span', { texte: etiquette + ' : ' }),
+    valeur ? el('strong', { texte: valeur }) : el('span', { classe: 'vide', texte: vide }));
+  const resume = el('div', {},
+    el('ul', { classe: 'liste-simple' },
+      ligneDuPlan('Nom complet', plan.full_name, 'aucun'),
+      ligneDuPlan('Matricule', plan.student_id, 'aucun'),
+      ligneDuPlan('Rôle', plan.role),
+      ligneDuPlan('Comptes', '@' + plan.accounts.join(', @'))),
+    el('p', { classe: 'note', texte:
+      `@${plan.principal} la désigne désormais, dans l’annuaire comme au registre. `
+      + 'Aucun dépôt n’est renommé ni retiré, et aucune liste de groupe n’est touchée : '
+      + 'elle sera invitée sous ses deux comptes aux prochains travaux. Le geste se '
+      + 'défait depuis sa fiche, avec « Séparer un compte… ».' }));
+  if (!await demander(`Réunir @${plan.account} à @${plan.principal} ?`, resume, 'Réunir')) return;
+
+  const fait = await tenter(() => api('POST', chemin, { same_as: garde }), 'Réunion');
+  if (!fait) return;
+  message(`@${fait.joining.account} et @${fait.joining.principal} sont désormais une même personne.`);
+  // La fiche ouverte peut être celle du compte qui ne la désigne plus : elle
+  // suit la personne.
+  const ouverte = ((etat.fiche && etat.fiche.compte) || '').toLowerCase();
+  if (ouverte === fait.joining.account.toLowerCase()) {
+    etat.fiche.compte = fait.joining.principal;
+  }
+  ensuite();
+}
+
+// separerUnCompte défait une réunion : le compte choisi redevient une personne
+// à lui seul, avec ce que sa fiche portait avant.
+async function separerUnCompte(personne, ensuite) {
+  const reunis = personne.joined || [];
+  // Celui qui ne la désigne pas est le plus souvent celui qu'on a réuni à
+  // tort ; c'est lui qu'on propose d'abord.
+  const choix = el('select', { classe: 'champ' },
+    [...reunis.slice(1), reunis[0]].map((compte) =>
+      el('option', { value: compte, texte: '@' + compte })));
+  const corps = el('div', {},
+    el('label', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Compte à séparer' }), choix,
+      el('span', { classe: 'aide', texte:
+        'Il redevient une personne à lui seul, avec le nom et le matricule que sa '
+        + 'fiche portait. Ses dépôts restent les siens, et aucune liste n’est touchée.' })));
+  if (!await demander('Séparer un compte', corps, 'Séparer')) return;
+  const fait = await tenter(() => api('DELETE',
+    `/api/users/${encode(choix.value)}/same-as`), 'Séparation');
+  if (!fait) return;
+  message(`@${fait.splitting.account} est de nouveau une personne à lui seul.`);
+  ensuite();
 }
 
 // dessinerFrise déroule la chronologie. Chaque étape porte sa session en toutes

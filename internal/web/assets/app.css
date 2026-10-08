@@ -430,6 +430,9 @@ main { padding: 1.5rem; max-width: 1100px; }
   font: inherit;
   color: var(--lien);
   cursor: pointer;
+  /* Un nom qui passe à la ligne reste aligné sur sa colonne : un bouton
+     centre son texte, un lien ne le fait pas. */
+  text-align: left;
 }
 
 .lien:hover { text-decoration: underline; }
@@ -629,6 +632,9 @@ textarea.champ { resize: vertical; font-family: ui-monospace, SFMono-Regular, Me
 
 /* Les travaux repérés : une ligne cliquable, la pastille détachée du nom. */
 .liste-choix { display: flex; flex-direction: column; gap: .35rem; }
+/* Ce qu'un geste fera, dit avant de le confirmer : une ligne par conséquence. */
+.liste-simple { margin: .3rem 0 .7rem; padding-left: 1.1rem; }
+.liste-simple li { margin: .2rem 0; }
 .liste-choix .case { padding: .45rem .6rem; border: 1px solid var(--bord);
   border-radius: 6px; }
 .liste-choix .case:hover { background: var(--fond-doux); }

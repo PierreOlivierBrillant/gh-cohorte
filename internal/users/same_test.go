@@ -1,0 +1,208 @@
+package users_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
+)
+
+// deuxSessions est le cas de l'issue : @Mr-Commetuveux a suivi un cours à
+// l'automne, @commetuveuxx un autre à l'hiver, et c'est la même personne. Une
+// homonyme sans rapport suit le cours d'hiver.
+func deuxSessions() ([]classroom.Classroom, []groups.RepoInfo) {
+	defauts := classroom.DefaultsFrom(config.Default())
+	return []classroom.Classroom{
+		{
+			Org: "acme", Session: "a26", Course: "5n6", Group: "01", Defaults: defauts,
+			Students: []roster.Person{{FullName: "Jean Commetuveux", Username: "Mr-Commetuveux"}},
+		},
+		{
+			Org: "acme", Session: "h27", Course: "4w6", Group: "01", Defaults: defauts,
+			Students: []roster.Person{
+				{FullName: "Jean Comme-Tu-Veux", Username: "commetuveuxx", StudentID: "2412345"},
+				{FullName: "Jean Commetuveux", Username: "autre-jean"},
+			},
+		},
+	}, []groups.RepoInfo{
+		{Name: "a26.5n6.01.tp1.jean-commetuveux", PushedAt: "2026-09-20T10:00:00Z"},
+		{Name: "h27.4w6.01.tp1.jean-comme-tu-veux", PushedAt: "2027-02-10T10:00:00Z"},
+	}
+}
+
+// registreDe rend un registre qui a appris des personnes, puis appliqué des
+// changements.
+func registreDe(t *testing.T, changes ...registry.Change) *registry.Set {
+	t.Helper()
+	set := registry.Empty()
+	for _, change := range changes {
+		var err error
+		if set, _, err = set.With(change, "2026-10-07"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return set
+}
+
+// Une fois les deux comptes réunis au registre, l'annuaire n'a plus qu'une
+// ligne pour la personne : ses deux cours, ses deux dépôts, sous le compte
+// qu'on a choisi de garder.
+func TestLAnnuaireReunitDeuxComptesDUneMemePersonne(t *testing.T) {
+	cours, inventaire := deuxSessions()
+	if lignes := users.Directory(cours, inventaire, nil, nil, registreDe(t)); len(lignes) != 3 {
+		t.Fatalf("avant : %s", comptes(lignes))
+	}
+
+	set := registreDe(t, registry.Join("Mr-Commetuveux", "commetuveuxx"))
+	lignes := users.Directory(cours, inventaire, nil, nil, set)
+	if comptes(lignes) != "commetuveuxx,autre-jean" {
+		t.Fatalf("après : %s", comptes(lignes))
+	}
+	for _, ligne := range lignes {
+		if ligne.Username != "commetuveuxx" {
+			continue
+		}
+		if strings.Join(ligne.Accounts, ",") != "commetuveuxx,Mr-Commetuveux" ||
+			len(ligne.Enrollments) != 2 || len(ligne.Repos) != 2 {
+			t.Fatalf("ligne = %+v", ligne)
+		}
+		// Ce que dit le compte qui désigne l'emporte.
+		if ligne.FullName != "Jean Comme-Tu-Veux" || ligne.StudentID != "2412345" {
+			t.Errorf("nom = %q, matricule = %q", ligne.FullName, ligne.StudentID)
+		}
+	}
+
+	// La fiche, ouverte depuis l'un ou l'autre compte, montre l'ensemble.
+	for _, compte := range []string{"Mr-Commetuveux", "commetuveuxx"} {
+		fiche := users.ProfileOf(cours, inventaire, nil, nil, set, compte)
+		if fiche.Courses != 2 || len(fiche.Joined) != 2 || fiche.Username != "commetuveuxx" {
+			t.Errorf("%s : fiche = %+v", compte, fiche)
+		}
+	}
+}
+
+// Un enseignant à deux comptes n'a qu'une ligne, avec les cours donnés sous
+// l'un et sous l'autre.
+func TestUnEnseignantADeuxComptesNAQuUneLigne(t *testing.T) {
+	cours, inventaire := deuxSessions()
+	infos := []teams.Info{
+		{Slug: "a26-5n6-01-enseignants", Name: "a26.5n6.01.enseignants", Members: []string{"prof-perso"}},
+		{Slug: "h27-4w6-01-enseignants", Name: "h27.4w6.01.enseignants", Members: []string{"prof"}},
+	}
+	set := registreDe(t,
+		registry.Change{Learn: []registry.User{{Username: "prof", FullName: "Kathryn Janeway"}}},
+		registry.SetRole("prof", true),
+		registry.Join("prof-perso", "prof"))
+
+	var profs []users.Row
+	for _, ligne := range users.Directory(cours, inventaire, nil, infos, set) {
+		if ligne.IsTeacher {
+			profs = append(profs, ligne)
+		}
+	}
+	if len(profs) != 1 || profs[0].Username != "prof" || len(profs[0].Enrollments) != 2 ||
+		profs[0].FullName != "Kathryn Janeway" {
+		t.Fatalf("enseignants = %+v", profs)
+	}
+}
+
+// Réunir se prépare dans le domaine : ce qui l'emporte est dit avant d'écrire.
+func TestPreparerUneReunionDitCeQuiLEmporte(t *testing.T) {
+	cours, inventaire := deuxSessions()
+	set := registreDe(t)
+	lignes := users.Directory(cours, inventaire, nil, nil, set)
+
+	reunion, err := users.PlanJoin(lignes, set, "prof", "acme", "Mr-Commetuveux", "commetuveuxx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reunion.FullName != "Jean Comme-Tu-Veux" || reunion.StudentID != "2412345" ||
+		reunion.Role != users.AsStudent ||
+		strings.Join(reunion.Accounts, ",") != "commetuveuxx,Mr-Commetuveux" {
+		t.Fatalf("réunion = %+v", reunion)
+	}
+	// Dans l'autre sens, c'est l'autre nom qui l'emporte ; le matricule reste,
+	// faute d'un autre.
+	inverse, err := users.PlanJoin(lignes, set, "prof", "acme", "commetuveuxx", "Mr-Commetuveux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inverse.FullName != "Jean Commetuveux" || inverse.StudentID != "2412345" {
+		t.Errorf("inverse = %+v", inverse)
+	}
+}
+
+// Ce que le domaine refuse, et pourquoi : rien qui se déduirait d'une faute de
+// frappe, d'un geste déjà fait, ou d'un clic d'étudiant.
+func TestCeQuUneReunionRefuse(t *testing.T) {
+	cours, inventaire := deuxSessions()
+	reunis := registreDe(t, registry.Join("Mr-Commetuveux", "commetuveuxx"))
+	cooptes := registreDe(t,
+		registry.Change{Learn: []registry.User{{Username: "prof"}}},
+		registry.SetRole("prof", true))
+
+	cas := []struct {
+		nom               string
+		set               *registry.Set
+		viewer, a, b, mot string
+	}{
+		{"même compte", registreDe(t), "prof", "autre-jean", "Autre-Jean", "même compte"},
+		{"déjà réunis", reunis, "prof", "commetuveuxx", "Mr-Commetuveux", "déjà réunis"},
+		{"faute de frappe", registreDe(t), "prof", "autre-jean", "comettuveux", "nulle part"},
+		{"pas enseignant", cooptes, "autre-jean", "autre-jean", "commetuveuxx", "Seul un enseignant"},
+	}
+	for _, c := range cas {
+		lignes := users.Directory(cours, inventaire, nil, nil, c.set)
+		_, err := users.PlanJoin(lignes, c.set, c.viewer, "acme", c.a, c.b)
+		if err == nil || !strings.Contains(err.Error(), c.mot) {
+			t.Errorf("%s : err = %v", c.nom, err)
+		}
+	}
+
+	// Deux matricules différents sont deux personnes.
+	cours[0].Students[0].StudentID = "2400001"
+	lignes := users.Directory(cours, inventaire, nil, nil, registreDe(t))
+	if _, err := users.PlanJoin(lignes, registreDe(t), "prof", "acme",
+		"Mr-Commetuveux", "commetuveuxx"); err == nil || !strings.Contains(err.Error(), "deux personnes") {
+		t.Errorf("matricules : err = %v", err)
+	}
+}
+
+// Séparer n'est offert qu'à ce que le registre a réuni ; une liste de groupe
+// qui déclare deux comptes se corrige depuis ce groupe, et le domaine le dit.
+func TestSeparerNeDefaitQueCeQueLeRegistreAReuni(t *testing.T) {
+	cours, inventaire := deuxSessions()
+	set := registreDe(t, registry.Join("Mr-Commetuveux", "commetuveuxx"))
+	lignes := users.Directory(cours, inventaire, nil, nil, set)
+	separation, err := users.PlanSplit(lignes, set, "prof", "acme", "Mr-Commetuveux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(separation.Remaining, ",") != "commetuveuxx" {
+		t.Errorf("séparation = %+v", separation)
+	}
+
+	cours[1].Students[1].Also = []string{"jean-perso"}
+	lignes = users.Directory(cours, inventaire, nil, nil, registreDe(t))
+	_, err = users.PlanSplit(lignes, registreDe(t), "prof", "acme", "autre-jean")
+	if err == nil || !strings.Contains(err.Error(), "la liste d'un groupe") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// Les homonymes sont proposés d'abord : une suggestion, jamais une décision.
+func TestLesCandidatsDeMemeNomPassentDAbord(t *testing.T) {
+	cours, inventaire := deuxSessions()
+	candidats := users.Candidates(users.Directory(cours, inventaire, nil, nil, registreDe(t)),
+		"Mr-Commetuveux")
+	if len(candidats) != 2 || candidats[0].Username != "autre-jean" || !candidats[0].SameName ||
+		candidats[1].SameName {
+		t.Fatalf("candidats = %+v", candidats)
+	}
+}

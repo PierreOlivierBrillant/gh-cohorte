@@ -6,7 +6,7 @@ import (
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
 )
@@ -56,6 +56,8 @@ var directoryMenu = ui.Options(
 	"cours", "Ne garder qu'un cours",
 	"chercher", "Chercher un nom ou un compte",
 	"fiche", "Ouvrir la fiche de quelqu'un",
+	"reunir", "Réunir deux comptes d'une même personne",
+	"separer", "Séparer un compte réuni à tort",
 	"apres", "Ne garder que les envois postérieurs à une date",
 	"avant", "Ne garder que les envois antérieurs à une date",
 	"muets", "N'afficher que ceux qui n'ont jamais rien envoyé",
@@ -76,6 +78,8 @@ type directorySession struct {
 	filter    users.Filter
 	sortKey   users.Key
 	sortDesc  bool
+	// set est le registre qui a nommé les lignes : réunir deux comptes en part.
+	set *registry.Set
 	// avis dit ce qu'il faut savoir du registre : illisible, périmé, troué.
 	// Une liste de noms incomplète qu'on prend pour entière égare.
 	avis string
@@ -108,25 +112,13 @@ func (d *directorySession) run() (int, error) {
 // load dresse l'annuaire des groupes de l'organisation — déclarés ou lus dans
 // les noms de dépôts.
 func (d *directorySession) load(force bool) error {
-	repos, err := d.session.orgRepos(d.org, force)
+	vue, err := d.session.orgView(d.org, force)
 	if err != nil {
 		return err
 	}
-	store := classroom.Open(classroom.PathNextTo(d.session.ConfigFile))
-	set, avis := d.session.names(d.org)
-	d.avis = avis
-	visibles := store.Visible(d.org, repos,
-		classroom.DefaultsFrom(d.session.Settings), set)
-	// Les équipes disent deux choses : lesquels des dépôts appartiennent à une
-	// équipe plutôt qu'à personne, et qui enseigne chaque groupe. Sans elles,
-	// l'annuaire compterait les uns orphelins et ignorerait les autres.
-	infos, _ := d.session.Client.LoadOrgTeams(d.org, d.session.Options.Jobs)
-	equipes := make([]teams.Team, 0, len(infos))
-	for _, cours := range visibles {
-		equipes = append(equipes, cours.Teams(infos)...)
-	}
-	d.rows = users.Directory(visibles, d.session.activite(d.org, repos), equipes, infos, set)
-	d.orphelins = users.Unmatched(visibles, repos, equipes)
+	d.avis, d.set = vue.avis, vue.set
+	d.rows = vue.rows()
+	d.orphelins = users.Unmatched(vue.visibles, vue.repos, vue.equipes)
 	d.loaded = true
 	return nil
 }
@@ -312,6 +304,16 @@ func (d *directorySession) menu() (int, error) {
 		case "fiche":
 			if err := d.openProfile(); err != nil {
 				return ExitOK, err
+			}
+		case "reunir", "separer":
+			bouge, err := d.same(action == "reunir")
+			if err != nil {
+				return ExitOK, err
+			}
+			if bouge {
+				if err := d.load(false); err != nil {
+					d.session.Console.Failure("%v", err)
+				}
 			}
 		case "tri":
 			if err := d.askSort(); err != nil {

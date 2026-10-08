@@ -70,39 +70,55 @@ func (i Identity) Has(username string) bool {
 // deux comptes d'une même personne n'ont rien qui les rapproche.
 //
 // Sans matricule, chaque ligne reste une personne, et seule une déclaration
-// explicite les réunit. Rien n'est jamais déduit du nom.
+// explicite les réunit : deux lignes qui portent un même compte — l'une sous
+// son nom, l'autre parmi ses autres comptes — sont la même personne. C'est ce
+// qu'il advient de deux comptes inscrits chacun de son côté, une fois réunis
+// au registre. Rien n'est jamais déduit du nom.
 func (c Classroom) Identities() []Identity { return identitiesOf(c.Students) }
 
-// identitiesOf réunit des personnes par leur matricule.
+// identitiesOf réunit des personnes par leur matricule et par leurs comptes.
 func identitiesOf(people []roster.Person) []Identity {
-	rangs := map[string]int{}
+	parMatricule := map[string]int{}
+	parCompte := map[string]int{}
 	identites := make([]Identity, 0, len(people))
 	for _, student := range people {
 		matricule := strings.TrimSpace(student.StudentID)
-		if matricule == "" {
-			identites = append(identites, Identity{
-				FullName: student.FullName, Accounts: student.Accounts(),
-			})
-			continue
+		rang, deja := -1, false
+		if matricule != "" {
+			rang, deja = parMatricule[strings.ToLower(matricule)]
 		}
-		rang, deja := rangs[strings.ToLower(matricule)]
+		for _, compte := range student.Accounts() {
+			if deja {
+				break
+			}
+			rang, deja = parCompte[strings.ToLower(compte)]
+		}
 		if !deja {
-			rangs[strings.ToLower(matricule)] = len(identites)
+			rang = len(identites)
 			identites = append(identites, Identity{
 				FullName: student.FullName, StudentID: matricule,
 				Accounts: student.Accounts(),
 			})
-			continue
-		}
-		// Un nom vide n'efface pas celui qu'on connaît : une ligne sans nom
-		// n'apprend rien de plus que ses comptes.
-		if strings.TrimSpace(identites[rang].FullName) == "" {
-			identites[rang].FullName = student.FullName
-		}
-		for _, compte := range student.Accounts() {
-			if !identites[rang].Has(compte) {
-				identites[rang].Accounts = append(identites[rang].Accounts, compte)
+		} else {
+			// Un nom vide n'efface pas celui qu'on connaît : une ligne sans nom
+			// n'apprend rien de plus que ses comptes.
+			if strings.TrimSpace(identites[rang].FullName) == "" {
+				identites[rang].FullName = student.FullName
 			}
+			if identites[rang].StudentID == "" {
+				identites[rang].StudentID = matricule
+			}
+			for _, compte := range student.Accounts() {
+				if !identites[rang].Has(compte) {
+					identites[rang].Accounts = append(identites[rang].Accounts, compte)
+				}
+			}
+		}
+		if _, pris := parMatricule[strings.ToLower(matricule)]; matricule != "" && !pris {
+			parMatricule[strings.ToLower(matricule)] = rang
+		}
+		for _, compte := range identites[rang].Accounts {
+			parCompte[strings.ToLower(compte)] = rang
 		}
 	}
 	return identites

@@ -224,6 +224,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /api/users/{account}", s.handleUser)
 	mux.HandleFunc("POST /api/users/{account}/role", s.handleUserRole)
 	mux.HandleFunc("PUT /api/users/{account}/name", s.handleUserName)
+	mux.HandleFunc("GET /api/users/{account}/same-as", s.handleSameCandidates)
+	mux.HandleFunc("POST /api/users/{account}/same-as", s.handleJoin)
+	mux.HandleFunc("DELETE /api/users/{account}/same-as", s.handleSplit)
 
 	// --- groupes
 	// Un groupe se désigne par sa place — « a26.5n6.1010 » —, celle-là même qui

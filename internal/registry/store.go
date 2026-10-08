@@ -103,8 +103,8 @@ type Snapshot struct {
 // forme qu'on ne reconnaît pas n'est donc plus lue du tout : relire GitHub
 // coûte une requête, se tromper coûtait bien davantage.
 // La version 6 ajoute les demandes de levée du voile, la 7 ce que la lecture a
-// dû signaler.
-const keptSchema = 7
+// dû signaler, la 8 le renvoi d'un compte à un autre de la même personne.
+const keptSchema = 8
 
 // keptSet est ce que le cache local retient : le registre, et le commit qui le
 // scelle. Tant que la branche pointe sur ce commit, ce contenu vaut toujours.

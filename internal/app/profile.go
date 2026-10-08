@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
@@ -30,6 +31,14 @@ func (s *Session) showProfile(account string) (int, error) {
 	// donner, plutôt que d'afficher « nom inconnu » juste au-dessus.
 	if voulu := strings.TrimSpace(s.Options.FullName); voulu != "" {
 		if code, err := s.nameUser(org, compte, voulu); err != nil {
+			return code, err
+		}
+	}
+	// Réunir ou séparer avant de montrer, pour la même raison : la fiche dira
+	// alors la personne entière, ou ce qu'il en reste.
+	if strings.TrimSpace(s.Options.SameAs) != "" || s.Options.Separate {
+		fini, code, err := s.sameFromFlags(org, compte)
+		if err != nil || fini {
 			return code, err
 		}
 	}
@@ -66,7 +75,10 @@ func (s *Session) showProfile(account string) (int, error) {
 		}
 		s.conseillerRenommage(fiche)
 	}
-	return s.askRole(org, set, fiche)
+	if code, err := s.askRole(org, set, fiche); err != nil || code != ExitOK {
+		return code, err
+	}
+	return s.askSame(org, fiche)
 }
 
 // askName propose de nommer quelqu'un qui n'a pas de nom complet, ou de
@@ -193,24 +205,56 @@ func (s *Session) declared(org, account string) bool {
 
 // profileOf dresse la fiche d'un compte, avec le registre qui l'a nommée.
 func (s *Session) profileOf(org, account string) (users.Profile, *registry.Set, error) {
-	repos, err := s.orgRepos(org, false)
+	vue, err := s.orgView(org, false)
 	if err != nil {
 		return users.Profile{}, nil, err
 	}
+	if vue.avis != "" {
+		s.Console.Print(s.Console.Warn(vue.avis))
+	}
+	return users.ProfileOf(vue.visibles, vue.activite, vue.equipes, vue.infos, vue.set, account),
+		vue.set, nil
+}
+
+// orgView rassemble ce que l'annuaire et la fiche lisent d'une organisation.
+// Les deux partent du même, et les gestes qu'on y fait aussi : ce qu'on réunit
+// doit être ce qu'on voyait.
+type orgView struct {
+	repos    []groups.RepoInfo
+	activite []groups.RepoInfo
+	visibles []classroom.Classroom
+	infos    []teams.Info
+	equipes  []teams.Team
+	set      *registry.Set
+	// avis dit ce qu'il faut savoir du registre : illisible, périmé, troué.
+	avis string
+}
+
+func (s *Session) orgView(org string, force bool) (orgView, error) {
+	repos, err := s.orgRepos(org, force)
+	if err != nil {
+		return orgView{}, err
+	}
 	store := classroom.Open(classroom.PathNextTo(s.ConfigFile))
 	set, avis := s.names(org)
-	if avis != "" {
-		s.Console.Print(s.Console.Warn(avis))
-	}
 	visibles := store.Visible(org, repos, classroom.DefaultsFrom(s.Settings), set)
-
+	// Les équipes disent deux choses : lesquels des dépôts appartiennent à une
+	// équipe plutôt qu'à personne, et qui enseigne chaque groupe. Sans elles,
+	// l'annuaire compterait les uns orphelins et ignorerait les autres.
 	infos, _ := s.Client.LoadOrgTeams(org, s.Options.Jobs)
 	equipes := make([]teams.Team, 0, len(infos))
 	for _, cours := range visibles {
 		equipes = append(equipes, cours.Teams(infos)...)
 	}
-	return users.ProfileOf(visibles, s.activite(org, repos), equipes, infos, set, account),
-		set, nil
+	return orgView{
+		repos: repos, activite: s.activite(org, repos), visibles: visibles,
+		infos: infos, equipes: equipes, set: set, avis: avis,
+	}, nil
+}
+
+// rows dresse l'annuaire de ce qu'on a lu.
+func (v orgView) rows() []users.Row {
+	return users.Directory(v.visibles, v.activite, v.equipes, v.infos, v.set)
 }
 
 // printProfile écrit la fiche : l'identité, puis la chronologie.

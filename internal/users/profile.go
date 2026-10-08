@@ -30,8 +30,12 @@ type Profile struct {
 	// Username est le compte qui la désigne ; Accounts les porte tous. Une
 	// personne travaille parfois sous deux comptes — celui du collège et le
 	// sien —, et ils mènent tous à son profil GitHub.
-	Username  string   `json:"username"`
-	Accounts  []string `json:"accounts"`
+	Username string   `json:"username"`
+	Accounts []string `json:"accounts"`
+	// Joined sont ceux de ses comptes que le registre réunit — vide s'il n'en
+	// réunit aucun. Les autres de « Accounts », c'est la liste d'un groupe qui
+	// les déclare : seuls ceux-ci se séparent depuis la fiche.
+	Joined    []string `json:"joined,omitempty"`
 	StudentID string   `json:"student_id,omitempty"`
 	// IsTeacher est ce que le registre déclare, Role le mot qui le dit.
 	IsTeacher bool   `json:"is_teacher"`
@@ -109,6 +113,10 @@ type Registry interface {
 	// figurent sur aucune liste de classe, et rien d'autre ne les y ferait
 	// entrer.
 	Teachers() []registry.User
+	// Accounts rend tous les comptes de la personne derrière un compte, celui
+	// qui la désigne d'abord ; rien s'il est inconnu. C'est par là que deux
+	// lignes de l'annuaire se savent la même personne.
+	Accounts(username string) []string
 }
 
 // ProfileOf dresse la fiche d'un compte.
@@ -135,6 +143,9 @@ func ProfileOf(courses []classroom.Classroom, repos []groups.RepoInfo,
 		fiche.FullName = known.Name(compte)
 		fiche.IsTeacher = known.Teaches(compte)
 		fiche.Known = known.Knows(compte)
+		if reunis := known.Accounts(compte); len(reunis) > 1 {
+			fiche.Joined = reunis
+		}
 		if fiche.IsTeacher {
 			fiche.Role = AsTeacher
 		}
