@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 // Une liste sortie d'Omnivox a trois particularités qu'une lecture naïve rate.

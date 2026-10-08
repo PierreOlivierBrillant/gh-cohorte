@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/rules"
 )
 
 func prog3() rules.Rules {

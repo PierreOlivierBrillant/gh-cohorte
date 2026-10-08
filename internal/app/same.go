@@ -3,10 +3,10 @@ package app
 import (
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/users"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
 )
 
 // Une même personne travaille parfois sous deux comptes — celui d'une session

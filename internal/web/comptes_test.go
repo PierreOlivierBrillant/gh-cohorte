@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
 )
 
 // Une personne, plusieurs comptes.

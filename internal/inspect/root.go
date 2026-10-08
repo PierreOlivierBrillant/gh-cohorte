@@ -4,7 +4,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/tokens"
 )
 
 // Deux étudiants rendent le même travail : l'un met son projet à la racine du

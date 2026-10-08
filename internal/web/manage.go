@@ -5,10 +5,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/identity"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/config"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // target résout l'organisation et le dépôt désignés par l'adresse.

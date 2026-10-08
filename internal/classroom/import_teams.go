@@ -3,12 +3,12 @@ package classroom
 import (
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/identity"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/teams"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Reprendre un travail fait en équipe.

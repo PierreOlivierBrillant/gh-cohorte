@@ -9,13 +9,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/starter"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/teams"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Recipient est le destinataire d'un dépôt : un étudiant, une équipe, ou

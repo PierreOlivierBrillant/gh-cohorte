@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 // personne abrège l'écriture des cas.

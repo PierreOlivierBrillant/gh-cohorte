@@ -1,6 +1,6 @@
 'use strict';
 
-// Interface locale de Nestor, organisée comme GitHub Classroom.
+// Interface locale de Milou, organisée comme GitHub Classroom.
 //
 // Un groupe rassemble des étudiants ; un travail est distribué à ce groupe, un
 // dépôt par étudiant. Le groupe n'existe que dans le fichier local : sur GitHub,
@@ -133,7 +133,7 @@ function message(texte, ton = 'succes', duree = 6000) {
 
 // api envoie une requête et renvoie le JSON, ou lève l'erreur du serveur.
 async function api(methode, chemin, corps) {
-  const options = { method: methode, headers: { 'X-Nestor': '1' } };
+  const options = { method: methode, headers: { 'X-Milou': '1' } };
   if (corps !== undefined) {
     options.headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(corps);
@@ -5854,7 +5854,7 @@ async function regenererJeton(portees) {
   // quoi la page semblerait ne rien faire.
   const attente = el('div', { classe: 'avis', texte:
     "Renouvellement en cours : suivez les instructions dans le terminal d'où " +
-    'gh nestor a été lancé.' });
+    'gh milou a été lancé.' });
   $('messages').append(attente);
   $('jeton-etat').textContent = 'Suivez les instructions dans le terminal…';
   try {
@@ -5894,7 +5894,7 @@ async function proposerRegeneration(portee, contexte) {
     conteneur,
     el('p', { classe: 'note',
       texte: "GitHub demande une confirmation dans le navigateur : le code à recopier " +
-        "paraît dans le terminal d'où gh nestor a été lancé." }));
+        "paraît dans le terminal d'où gh milou a été lancé." }));
   const cochees = casesDePortees(conteneur, jeton, portee);
 
   if (!await demander('Générer un nouveau jeton', corps, 'Générer le jeton')) return false;
@@ -6570,7 +6570,7 @@ $('quitter').addEventListener('click', async () => {
 // L'écran du lancement dit ce qu'on attend et, si rien ne vient, laisse de
 // quoi réessayer : une fenêtre blanche ne disait ni l'un ni l'autre.
 function demarrageDit(texte, detail = '') {
-  $('demarrage-roue').hidden = false;
+  $('demarrage-milou').hidden = false;
   $('demarrage-texte').textContent = texte;
   $('demarrage-detail').textContent = detail;
   $('demarrage-reessayer').hidden = true;
@@ -6580,7 +6580,7 @@ function demarrageEchoue(raison) {
   for (const vue of document.querySelectorAll('.vue')) {
     vue.hidden = vue.id !== 'vue-demarrage';
   }
-  $('demarrage-roue').hidden = true;
+  $('demarrage-milou').hidden = true;
   $('demarrage-texte').textContent = "Le serveur local n'a pas répondu.";
   $('demarrage-detail').textContent = raison;
   $('demarrage-reessayer').hidden = false;
@@ -7982,7 +7982,7 @@ async function ajouterArchive() {
   const suite = await demander('Ajouter des copies reçues',
     el('div', {},
       el('p', {
-        texte: 'Un ZIP de copies anonymisées, tel que « gh nestor » le produit '
+        texte: 'Un ZIP de copies anonymisées, tel que « gh milou » le produit '
           + '— ou un ZIP ordinaire, un dossier par copie. Les copies reçues '
           + 'entrent dans l’analyse par le même chemin que les vôtres.',
       }),

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
 )
 
 // Reprendre au terminal un travail fait en équipe : ce qui suit le préfixe

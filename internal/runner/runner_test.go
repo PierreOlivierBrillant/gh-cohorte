@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/plan"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/runner"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/signature"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/config"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/runner"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/starter"
 )
 
 var cohorte = []roster.Person{

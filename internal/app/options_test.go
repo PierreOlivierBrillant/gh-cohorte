@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/users"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
 )
 
 func analyser(t *testing.T, args ...string) *app.Options {

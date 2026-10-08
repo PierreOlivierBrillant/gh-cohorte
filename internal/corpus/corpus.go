@@ -14,12 +14,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/signature"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/tokens"
 )
 
 // Motifs d'un dépôt non analysé, tels que les trois interfaces les affichent.

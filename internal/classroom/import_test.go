@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/config"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 func inscrits() []roster.Entry {

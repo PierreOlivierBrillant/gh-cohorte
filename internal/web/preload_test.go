@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
 )
 
 // ligneDeTravail est ce qu'une page montre d'un dépôt : ce que son historique

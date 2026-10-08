@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
 )
 
 // Durées de validité : la liste des dépôts bouge plus souvent qu'un nom de profil.

@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Accorder une demande.

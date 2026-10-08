@@ -24,7 +24,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/tokens"
 )
 
 // Motifs d'écartement, tels que les trois interfaces les affichent. Ils sont

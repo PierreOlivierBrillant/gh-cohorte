@@ -1,4 +1,4 @@
-/* Le thème de Nestor : tous les jetons, et rien d'autre. C'est ici — et
+/* Le thème de Milou : tous les jetons, et rien d'autre. C'est ici — et
    nulle part ailleurs — que se décident les couleurs, les contours, les
    ombres et les fontes ; app.css ne fait que les employer. Deux mondes s'y
    rejoignent : la structure de GitHub, que les enseignants connaissent, et la
@@ -16,7 +16,7 @@
   color-scheme: light dark;
 
   /* ---- palette : les couleurs par leur nom ------------------------------ */
-  --encre: #1c1d2b;            /* contours et barre du haut : le frac de Nestor */
+  --encre: #1c1d2b;            /* contours et barre du haut : le trait de l'album */
   --encre-douce: #4b4f63;      /* un contour qui ne crie pas */
   --papier: #fbf7ee;           /* le fond d'une page d'album */
   --papier-blanc: #fffdf7;     /* une case posée sur la page */
@@ -39,6 +39,8 @@
   --violet: #7b4fb6;
   --sarcelle: #0f7b6c;
   --gris: #7c8496;
+  --milou: #ffffff;            /* le poil de Milou */
+  --milou-trait: var(--encre); /* son contour, son nez, son œil */
 
   /* ---- rôles : ce que chaque couleur fait --------------------------------- */
   --fond-page: var(--papier);
@@ -130,6 +132,8 @@
     --violet: #b79af0;
     --sarcelle: #4fc4b0;
     --gris: #8c93a5;
+    --milou: #f3efe4;
+    --milou-trait: #1c1d2b;
 
     --texte: #ece6d8;
     --texte-doux: #a3a8b8;

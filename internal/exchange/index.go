@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // L'index publié : ce qui traverse le cloisonnement, et rien d'autre.
@@ -32,7 +32,7 @@ const (
 	// « .cohorte » : un index pèse des centaines de kilo-octets là où le
 	// registre entier en pèse quelques-uns, et l'historique du registre — qu'on
 	// relit pour comprendre qui a corrigé quel nom — deviendrait illisible.
-	// Le nom date d'avant Nestor et reste : le changer couperait chaque
+	// Le nom date d'avant Milou et reste : le changer couperait chaque
 	// organisation de ses index déjà publiés.
 	IndexRepo = ".cohorte-empreintes"
 	// IndexBranch est la seule branche écrite.

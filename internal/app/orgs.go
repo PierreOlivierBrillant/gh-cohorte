@@ -3,9 +3,9 @@ package app
 import (
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/orgs"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/orgs"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Valeur réservée du menu des organisations.

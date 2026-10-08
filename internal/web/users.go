@@ -4,13 +4,13 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/teams"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/users"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // L'annuaire regarde l'organisation entière plutôt qu'un groupe : c'est la

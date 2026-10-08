@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
 )
 
 // Le terminal lit ses couleurs dans brand, le navigateur dans theme.css. Rien
@@ -39,6 +39,30 @@ func TestLaPageChargeSonThemeAvantSesComposants(t *testing.T) {
 	}
 	if !strings.Contains(html, "<title>"+brand.Name+"</title>") {
 		t.Errorf("le titre de la page doit être « %s »", brand.Name)
+	}
+	if !strings.Contains(html, brand.Tagline) {
+		t.Errorf("l'accueil doit porter la devise de la marque : « %s »", brand.Tagline)
+	}
+}
+
+func TestLattenteDuDemarrageFaitCourirMilou(t *testing.T) {
+	// Le démarrage est le seul écran qui bloque toute la page ; c'est là, et
+	// là seulement, que Milou court. Les attentes locales gardent leur roue.
+	page, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(page)
+	demarrage := html[strings.Index(html, `id="vue-demarrage"`):]
+	demarrage = demarrage[:strings.Index(demarrage, "</section>")]
+	if !strings.Contains(demarrage, `class="milou-court"`) {
+		t.Error("la vue de démarrage doit montrer Milou qui court")
+	}
+	if strings.Contains(demarrage, `class="roue"`) {
+		t.Error("la roue n'a plus sa place sur l'écran de démarrage")
+	}
+	if strings.Count(html, `class="milou-court"`) != 1 {
+		t.Error("Milou ne court que sur l'écran de démarrage")
 	}
 }
 

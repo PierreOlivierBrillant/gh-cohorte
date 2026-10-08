@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Les noms accumulés poste par poste ne montent pas d'eux-mêmes au registre :

@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/scopes"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/scopes"
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/cli/go-gh/v2/pkg/auth"
 )

@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/users"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
 )
 
 // La fiche déroule le passage de quelqu'un, de la session la plus récente à la

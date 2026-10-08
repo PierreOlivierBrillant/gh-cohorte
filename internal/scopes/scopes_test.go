@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/scopes"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/scopes"
 )
 
 func TestUnionGardeCeQuiEstDejaAcquis(t *testing.T) {

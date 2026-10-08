@@ -8,13 +8,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/signature"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Le registre s'écrit par échange conditionnel, jamais par fusion.

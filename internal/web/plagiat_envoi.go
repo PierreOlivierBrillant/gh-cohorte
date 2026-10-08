@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/plagiarism"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Envoyer des copies à un collègue d'une autre organisation.

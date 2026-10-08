@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/similarity"
 )
 
 func catalogue() exchange.Catalog {

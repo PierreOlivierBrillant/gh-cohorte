@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/starter"
 )
 
 // squelette crée un dossier de départ représentatif et renvoie son chemin.

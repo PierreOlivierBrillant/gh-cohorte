@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Construit gh-nestor pour toutes les plateformes prises en charge.
+# Construit gh-milou pour toutes les plateformes prises en charge.
 # Appelé par le workflow de publication avec le tag en premier argument ;
 # utilisable aussi à la main : script/build.sh v1.0.0
 set -euo pipefail
 
-nom="gh-nestor"
+nom="gh-milou"
 tag="${1:-dev}"
 sortie="dist"
 

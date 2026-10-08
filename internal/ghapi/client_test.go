@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
 )
 
 // client monte un faux GitHub et le client qui l'interroge.

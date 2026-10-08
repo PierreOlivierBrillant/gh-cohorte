@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/broadcast"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/identity"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/broadcast"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Déposer un fichier dans tous les dépôts d'un travail, depuis le navigateur.

@@ -13,9 +13,9 @@ import (
 // Nom du cookie, du paramètre portant le jeton, et de l'en-tête que seule
 // l'interface envoie.
 const (
-	cookieName    = "nestor_jeton"
+	cookieName    = "milou_jeton"
 	tokenParam    = "jeton"
-	requestHeader = "X-Nestor"
+	requestHeader = "X-Milou"
 )
 
 // newToken tire le jeton d'ouverture de session : il figure une seule fois dans

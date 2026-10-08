@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // La demande, et la levée du voile.

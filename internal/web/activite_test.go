@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Un fichier que l'enseignant pousse dans le dépôt avance son « pushed_at » :

@@ -1,8 +1,8 @@
 package plagiarism
 
 import (
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/similarity"
 )
 
 // Une session passée ne change plus. Ses dépôts ne recevront plus de commit,

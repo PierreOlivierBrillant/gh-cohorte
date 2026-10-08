@@ -18,10 +18,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/teams"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // DateFormat est la forme attendue d'une date de filtre.

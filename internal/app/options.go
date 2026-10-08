@@ -8,12 +8,12 @@ import (
 	"io"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/plan"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/users"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Version de l'extension, renseignée à la compilation.
@@ -271,45 +271,45 @@ func Usage(out io.Writer) {
 Reproduit GitHub Classroom dans une organisation : une liste d'étudiants, un dépôt chacun.
 
 Utilisation :
-  gh nestor                                  interface graphique dans le navigateur
-  gh nestor --cli                            assistant interactif au terminal
-  gh nestor --manage tp1                     gérer le groupe « tp1 »
-  gh nestor --students --session a26         utilisateurs de la session a26
-  gh nestor --students --role enseignant     les enseignants de l'organisation
-  gh nestor --user ecote                     la fiche de @ecote et son passage
-  gh nestor --user jdupont --teacher         reconnaître @jdupont comme enseignant
-  gh nestor --user aleksilepaj --full-name "Aleksi Lepaj"
-  gh nestor --user Mr-Commetuveux --same-as commetuveuxx --dry-run
-  gh nestor --manage a26.5n6.01 --student ecote --full-name "Émilie Côté" --rename-repos -y
-  gh nestor --manage a26.5n6.01 --teachers "prof,jdupont" -y
-  gh nestor --import                         reprendre des dépôts nommés autrement
-  gh nestor --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
-  gh nestor --import projet --teams --into a26.5n6.01 -y
-  gh nestor --publish-registry --dry-run     ce que publier les noms ferait
-  gh nestor --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
-  gh nestor --manage a26.5n6.01.tp1 --rename-to projet-final -y
-  gh nestor --manage a26.5n6.01.tp1 --due 2026-10-01
-  gh nestor --manage a26.5n6.01.tp1 --handins
-  gh nestor --manage a26.5n6.01.tp1 --send-invitations
-  gh nestor --manage a26.5n6.01.tp1 --push-file consignes.md --push-path docs/CONSIGNES.md
-  gh nestor --plagiarism --manage a26.5n6.01.tp1
-  gh nestor --plagiarism --manage a26.5n6.01.tp1 --profile next --languages tsx,css
-  gh nestor --plagiarism --manage a26.5n6.01.tp1 --reach annees
-  gh nestor --publish-rules regles.json      déclarer « 5N6 devient 5M6 »
-  gh nestor --export-zip envoi.zip --manage a26.5n6.01.tp1
-  gh nestor --plagiarism --manage a26.5n6.01.tp1 --import-zip recu.zip
-  gh nestor --publish-index --manage a26.5n6.01.tp1
-  gh nestor --publish-index --org acme -y       rattraper les index manquants
-  gh nestor --plagiarism --manage a26.5n6.01.tp1 --against a26.5n6.02.tp1
-  gh nestor --ask a26.5n6.02.tp1:K7DM2X --reason "deux TP quasi identiques"
-  gh nestor --requests
-  gh nestor --grant D4K2M9 --export-zip envoi.zip
-  gh nestor --refresh-token --scopes delete_repo
-  gh nestor --roster cohorte.csv --dry-run   simulation, sans rien créer
-  gh nestor --org acme --assignment tp1 --roster cohorte.csv --yes
-  gh nestor --org acme --manage a26.5n6.01 --teams
-  gh nestor --org acme --manage a26.5n6.01 --team eq1 --team-members "ec,jlp"
-  gh nestor --org acme --assignment a26.5n6.01.tp1 --teams --team eq1,eq2 -y
+  gh milou                                  interface graphique dans le navigateur
+  gh milou --cli                            assistant interactif au terminal
+  gh milou --manage tp1                     gérer le groupe « tp1 »
+  gh milou --students --session a26         utilisateurs de la session a26
+  gh milou --students --role enseignant     les enseignants de l'organisation
+  gh milou --user ecote                     la fiche de @ecote et son passage
+  gh milou --user jdupont --teacher         reconnaître @jdupont comme enseignant
+  gh milou --user aleksilepaj --full-name "Aleksi Lepaj"
+  gh milou --user Mr-Commetuveux --same-as commetuveuxx --dry-run
+  gh milou --manage a26.5n6.01 --student ecote --full-name "Émilie Côté" --rename-repos -y
+  gh milou --manage a26.5n6.01 --teachers "prof,jdupont" -y
+  gh milou --import                         reprendre des dépôts nommés autrement
+  gh milou --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+  gh milou --import projet --teams --into a26.5n6.01 -y
+  gh milou --publish-registry --dry-run     ce que publier les noms ferait
+  gh milou --manage travail-de --move-to a26.5n6.01 --rename-to tp1 -y
+  gh milou --manage a26.5n6.01.tp1 --rename-to projet-final -y
+  gh milou --manage a26.5n6.01.tp1 --due 2026-10-01
+  gh milou --manage a26.5n6.01.tp1 --handins
+  gh milou --manage a26.5n6.01.tp1 --send-invitations
+  gh milou --manage a26.5n6.01.tp1 --push-file consignes.md --push-path docs/CONSIGNES.md
+  gh milou --plagiarism --manage a26.5n6.01.tp1
+  gh milou --plagiarism --manage a26.5n6.01.tp1 --profile next --languages tsx,css
+  gh milou --plagiarism --manage a26.5n6.01.tp1 --reach annees
+  gh milou --publish-rules regles.json      déclarer « 5N6 devient 5M6 »
+  gh milou --export-zip envoi.zip --manage a26.5n6.01.tp1
+  gh milou --plagiarism --manage a26.5n6.01.tp1 --import-zip recu.zip
+  gh milou --publish-index --manage a26.5n6.01.tp1
+  gh milou --publish-index --org acme -y       rattraper les index manquants
+  gh milou --plagiarism --manage a26.5n6.01.tp1 --against a26.5n6.02.tp1
+  gh milou --ask a26.5n6.02.tp1:K7DM2X --reason "deux TP quasi identiques"
+  gh milou --requests
+  gh milou --grant D4K2M9 --export-zip envoi.zip
+  gh milou --refresh-token --scopes delete_repo
+  gh milou --roster cohorte.csv --dry-run   simulation, sans rien créer
+  gh milou --org acme --assignment tp1 --roster cohorte.csv --yes
+  gh milou --org acme --manage a26.5n6.01 --teams
+  gh milou --org acme --manage a26.5n6.01 --team eq1 --team-members "ec,jlp"
+  gh milou --org acme --assignment a26.5n6.01.tp1 --teams --team eq1,eq2 -y
 
 Drapeaux :
   --org ORG                organisation GitHub cible
@@ -635,7 +635,7 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 	}
 	if rest := set.Args(); len(rest) > 0 {
 		return nil, valid.Errorf(
-			"Argument inattendu : « %s ». Lancez « gh nestor --help » pour la liste des drapeaux.",
+			"Argument inattendu : « %s ». Lancez « gh milou --help » pour la liste des drapeaux.",
 			rest[0])
 	}
 
@@ -810,7 +810,7 @@ func translateFlagError(err error) error {
 	message := err.Error()
 	if name, found := strings.CutPrefix(message, "flag provided but not defined: "); found {
 		return valid.Errorf(
-			"Drapeau inconnu : « %s ». Lancez « gh nestor --help » pour la liste des drapeaux.", name)
+			"Drapeau inconnu : « %s ». Lancez « gh milou --help » pour la liste des drapeaux.", name)
 	}
 	if rest, found := strings.CutPrefix(message, "flag needs an argument: "); found {
 		return valid.Errorf("Valeur manquante pour le drapeau %s.", rest)

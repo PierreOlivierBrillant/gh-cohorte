@@ -6,25 +6,47 @@ import (
 	"testing"
 )
 
-func TestLeDossierDeLancienNomEstRepris(t *testing.T) {
-	base := t.TempDir()
-	ancien := filepath.Join(base, LegacySlug)
-	if err := os.MkdirAll(ancien, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(ancien, "config.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+func TestLeDossierDunAncienNomEstRepris(t *testing.T) {
+	for _, ancien := range LegacySlugs {
+		t.Run(ancien, func(t *testing.T) {
+			base := t.TempDir()
+			dossier := filepath.Join(base, ancien)
+			if err := os.MkdirAll(dossier, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dossier, "config.json"), []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
 
-	obtenu := AdoptLegacyDir(base)
-	if obtenu != filepath.Join(base, Slug) {
-		t.Fatalf("dossier rendu : %s", obtenu)
+			obtenu := AdoptLegacyDir(base)
+			if obtenu != filepath.Join(base, Slug) {
+				t.Fatalf("dossier rendu : %s", obtenu)
+			}
+			if _, err := os.Stat(filepath.Join(obtenu, "config.json")); err != nil {
+				t.Errorf("le contenu de l'ancien dossier doit suivre : %v", err)
+			}
+			if _, err := os.Stat(dossier); !os.IsNotExist(err) {
+				t.Errorf("l'ancien dossier ne doit pas rester : %v", err)
+			}
+		})
 	}
-	if _, err := os.Stat(filepath.Join(obtenu, "config.json")); err != nil {
-		t.Errorf("le contenu de l'ancien dossier doit suivre : %v", err)
+}
+
+func TestLePlusRecentDesAnciensNomsLemporte(t *testing.T) {
+	base := t.TempDir()
+	for _, ancien := range LegacySlugs {
+		if err := os.MkdirAll(filepath.Join(base, ancien), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := os.Stat(ancien); !os.IsNotExist(err) {
-		t.Errorf("l'ancien dossier ne doit pas rester : %v", err)
+	if obtenu := AdoptLegacyDir(base); obtenu != filepath.Join(base, Slug) {
+		t.Errorf("dossier rendu : %s", obtenu)
+	}
+	if _, err := os.Stat(filepath.Join(base, LegacySlugs[0])); !os.IsNotExist(err) {
+		t.Error("c'est le dossier le plus récent qui est repris")
+	}
+	if _, err := os.Stat(filepath.Join(base, LegacySlugs[len(LegacySlugs)-1])); err != nil {
+		t.Error("le plus ancien est laissé tel quel : un seul dossier est adopté")
 	}
 }
 
@@ -40,7 +62,7 @@ func TestSansAncienDossierLeNouveauEstRendu(t *testing.T) {
 
 func TestLeNouveauDossierLemporteSurLancien(t *testing.T) {
 	base := t.TempDir()
-	for _, nom := range []string{Slug, LegacySlug} {
+	for _, nom := range append([]string{Slug}, LegacySlugs...) {
 		if err := os.MkdirAll(filepath.Join(base, nom), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -48,8 +70,10 @@ func TestLeNouveauDossierLemporteSurLancien(t *testing.T) {
 	if obtenu := AdoptLegacyDir(base); obtenu != filepath.Join(base, Slug) {
 		t.Errorf("dossier rendu : %s", obtenu)
 	}
-	if _, err := os.Stat(filepath.Join(base, LegacySlug)); err != nil {
-		t.Error("un ancien dossier qui coexiste avec le nouveau est laissé tel quel")
+	for _, ancien := range LegacySlugs {
+		if _, err := os.Stat(filepath.Join(base, ancien)); err != nil {
+			t.Errorf("un ancien dossier qui coexiste avec le nouveau est laissé tel quel : %v", err)
+		}
 	}
 }
 

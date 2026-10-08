@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
 )
 
 // Relever ce qu'un dépôt a reçu tient en deux requêtes, et il faut les deux.

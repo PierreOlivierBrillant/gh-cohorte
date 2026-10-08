@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/signature"
 )
 
 const solution = `

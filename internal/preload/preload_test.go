@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/identity"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/preload"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/preload"
 )
 
 // lecteur joue le résolveur : il note ce qu'on lui demande, sans rien lire.

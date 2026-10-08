@@ -1,21 +1,21 @@
-# Nestor
+# Milou
 
-[![tests](https://github.com/PierreOlivierBrillant/gh-nestor/actions/workflows/tests.yml/badge.svg)](https://github.com/PierreOlivierBrillant/gh-nestor/actions/workflows/tests.yml)
+[![tests](https://github.com/PierreOlivierBrillant/gh-milou/actions/workflows/tests.yml/badge.svg)](https://github.com/PierreOlivierBrillant/gh-milou/actions/workflows/tests.yml)
 
 Extension [GitHub CLI](https://cli.github.com) qui reproduit GitHub Classroom
 pour une personne qui enseigne : **un dépôt par étudiant** dans une
 organisation, créé à partir d'une liste « nom complet + compte GitHub », puis la
 gestion de ce qui existe déjà — accès, clonage, mises à jour, suppression.
-Nestor, comme le majordome de Moulinsart : il sert chaque dépôt sur un plateau
-et tient les groupes en ordre.
+Milou, comme le fox-terrier de Tintin : il court chercher chaque dépôt, le
+rapporte, et ne perd personne en route.
 
 Trois façons de s'en servir, pour les mêmes opérations : une interface web
 servie sur la boucle locale, un assistant au terminal, et des drapeaux
 scriptables.
 
 ```bash
-gh nestor          # interface web (défaut)
-gh nestor --cli    # assistant au terminal
+gh milou          # interface web (défaut)
+gh milou --cli    # assistant au terminal
 ```
 
 Écrite en Go et distribuée précompilée : aucune installation de Go n'est
@@ -24,13 +24,13 @@ nécessaire. Toute l'interface est en français.
 ## Installation
 
 ```bash
-gh extension install PierreOlivierBrillant/gh-nestor
+gh extension install PierreOlivierBrillant/gh-milou
 ```
 
 Mise à jour :
 
 ```bash
-gh extension upgrade nestor
+gh extension upgrade milou
 ```
 
 L'outil s'appelait `gh cohorte`. Une installation sous l'ancien nom se
@@ -71,19 +71,19 @@ personnes → vérification des comptes → paramètres → récapitulatif →
 confirmation → création → bilan :
 
 ```bash
-gh nestor --cli
+gh milou --cli
 ```
 
 Pour voir ce qui serait fait, sans rien créer :
 
 ```bash
-gh nestor --roster cohorte.csv --dry-run
+gh milou --roster cohorte.csv --dry-run
 ```
 
 Pour une exécution scriptée, sans aucune question :
 
 ```bash
-gh nestor --org acme --assignment tp1 --roster cohorte.csv --non-interactive --yes
+gh milou --org acme --assignment tp1 --roster cohorte.csv --non-interactive --yes
 ```
 
 En mode non interactif, une valeur requise mais absente est une erreur explicite
@@ -135,9 +135,9 @@ préfixe nomme une équipe et non une personne : il n'y a alors aucune liste à
 rapprocher, les membres venant des accès au dépôt.
 
 ```bash
-gh nestor --import                                    # lister les travaux repérés
-gh nestor --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
-gh nestor --import projet --teams --into a26.5n6.1030  # travail d'équipe
+gh milou --import                                    # lister les travaux repérés
+gh milou --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+gh milou --import projet --teams --into a26.5n6.1030  # travail d'équipe
 ```
 
 ## Nommage des dépôts
@@ -179,7 +179,7 @@ l'organisation, un nom complet par compte et le rôle tenu — étudiant ou
 enseignant —, écrit une fois pour tout le monde. Vos collègues voient donc les
 mêmes noms que vous sans rien avoir déclaré, et corriger une orthographe ne
 détache pas les dépôts créés sous l'ancienne. Les noms déjà accumulés sur un
-poste s'y versent en une fois (`gh nestor --publish-registry`). Le registre
+poste s'y versent en une fois (`gh milou --publish-registry`). Le registre
 porte aussi la **date de remise** de chaque travail, que rien dans un nom de
 dépôt ne peut dire : une échéance fixée sur un poste vaut pour l'équipe entière.
 Le fichier local ne garde plus que ce qui n'a de sens que sur cette machine :
@@ -282,7 +282,7 @@ des noms de dépôts, les collisions entre deux personnes, le drapeau
 `is_template` du dépôt modèle, la taille du dossier de départ.
 
 Les inventaires d'organisation sont mis en cache dans le répertoire du système
-(`~/.cache/nestor/cache.json` sous Linux, permissions `600`) ; `--no-cache` et
+(`~/.cache/milou/cache.json` sous Linux, permissions `600`) ; `--no-cache` et
 `--clear-cache` s'en passent ou le vident.
 
 ## Sécurité
@@ -328,17 +328,17 @@ Les plus courantes :
 | `--non-interactive` | échouer plutôt que poser une question |
 | `--cli` / `--no-browser` | rester au terminal / ne pas ouvrir le navigateur |
 
-`gh nestor --help` donne la liste complète. Codes de retour : `0` succès, `1`
+`gh milou --help` donne la liste complète. Codes de retour : `0` succès, `1`
 au moins un échec, `2` erreur de validation, `130` interruption.
 
 Trois variables d'environnement : `NO_COLOR` retire la couleur,
-`NESTOR_NO_ARROWS` force les listes numérotées, `NESTOR_NO_SHELL_COMPLETION`
+`MILOU_NO_ARROWS` force les listes numérotées, `MILOU_NO_SHELL_COMPLETION`
 complète les chemins sans interroger le shell.
 
 ## Développement
 
 ```bash
-go build .               # produit ./gh-nestor
+go build .               # produit ./gh-milou
 go test ./...            # toute la suite, sans aucun accès réseau
 gh extension install .   # installer la version locale
 ```

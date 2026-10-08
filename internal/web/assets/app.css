@@ -1,4 +1,4 @@
-/* Interface locale de Nestor : la structure de GitHub Classroom — barre
+/* Interface locale de Milou : la structure de GitHub Classroom — barre
    globale sombre, en-tête de cours, onglets, boîtes — dans la ligne claire des
    albums : contours d'encre, aplats, ombres portées d'un bloc.
 
@@ -885,7 +885,7 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
    n'a pas été choisie. */
 .accueil-organisation { max-width: 34rem; margin: 0 auto; }
 
-/* Nestor se présente — le nœud papillon, son nom, sa devise — avant de
+/* Milou se présente — sa tête, son nom, sa devise — avant de
    demander quoi que ce soit : c'est le seul écran où la marque a la place de
    respirer, et celui qu'on voit en premier. */
 .bienvenue {
@@ -1026,9 +1026,40 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   color: var(--texte-doux);
 }
 
-.demarrage .logo-grand { width: 56px; height: 56px; }
-.demarrage .roue { width: 1.75rem; height: 1.75rem; border-width: 3px; }
 .demarrage p { margin: 0; }
+
+/* Milou court le temps que la page attende le serveur. C'est le seul écran
+   qui bloque tout, et une roue qui tourne n'y disait rien de l'outil ; les
+   attentes locales, elles, gardent leur roue — un chien par boîte serait du
+   bruit.
+
+   Le dessin est une ligne claire tracée deux fois : une encre large dessous,
+   un poil plus étroit dessus. La différence des deux fait le contour, et les
+   pattes passent derrière le corps, dont le ventre les recouvre — c'est ce
+   qui évite de dessiner une jointure. Les pattes tournent autour de la hanche,
+   le corps rebondit, la queue frétille, le sol défile : quatre mouvements,
+   tous dans le même tempo. */
+.milou-court { display: block; width: 168px; height: 96px; overflow: visible; }
+.milou-encre { fill: none; stroke: var(--milou-trait); stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; }
+.milou-blanc { fill: none; stroke: var(--milou); stroke-width: 4.6; stroke-linecap: round; stroke-linejoin: round; }
+.milou-queue .milou-encre { stroke-width: 7; }
+.milou-queue .milou-blanc { stroke-width: 2.6; }
+.milou-trait { fill: var(--milou-trait); stroke: var(--milou-trait); stroke-width: 4.4; stroke-linejoin: round; }
+.milou-poil { fill: var(--milou); stroke: none; }
+.milou-visage { fill: var(--milou-trait); }
+.milou-bouche { fill: none; stroke: var(--milou-trait); stroke-width: 1.4; stroke-linecap: round; }
+.milou-sol { stroke: var(--encre); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 9 9; }
+
+.milou-corps { animation: milou-galop .42s ease-in-out infinite alternate; }
+.milou-patte { transform-box: fill-box; transform-origin: 0 0; animation: milou-foulee .42s ease-in-out infinite alternate; }
+.milou-patte.oppose { animation-direction: alternate-reverse; }
+.milou-queue { transform-box: fill-box; transform-origin: 100% 100%; animation: milou-fretille .28s ease-in-out infinite alternate; }
+.milou-sol { animation: milou-defile .5s linear infinite; }
+
+@keyframes milou-galop { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+@keyframes milou-foulee { from { transform: rotate(-34deg); } to { transform: rotate(34deg); } }
+@keyframes milou-fretille { from { transform: rotate(-10deg); } to { transform: rotate(14deg); } }
+@keyframes milou-defile { to { stroke-dashoffset: -18; } }
 
 /* Ce qui tourne doit pouvoir s'arrêter : certaines personnes règlent leur
    système pour bannir les animations. L'indication reste, seul le mouvement
@@ -1037,6 +1068,10 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   .attente-reseau::before { animation: none; width: 100%; opacity: .5; }
   .roue { animation: none; border-top-color: var(--bord-net); }
   .occupe { transition: none; }
+  /* Milou s'arrête en pleine foulée : la pose dit encore qu'on attend. */
+  .milou-corps, .milou-patte, .milou-queue, .milou-sol { animation: none; }
+  .milou-patte { transform: rotate(-20deg); }
+  .milou-patte.oppose { transform: rotate(20deg); }
 }
 
 /* ------------------------------------------------- fiche d'un utilisateur */

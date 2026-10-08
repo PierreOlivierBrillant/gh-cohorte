@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Garde-fous : au-delà, mieux vaut un dépôt modèle qu'un envoi fichier par fichier.

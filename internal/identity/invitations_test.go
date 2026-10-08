@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/identity"
 )
 
 // Un accès établi l'emporte sur tout, une invitation encore valable sur une

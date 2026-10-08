@@ -1,4 +1,4 @@
-// gh-nestor crée un dépôt GitHub par personne dans une organisation, à la
+// gh-milou crée un dépôt GitHub par personne dans une organisation, à la
 // manière de GitHub Classroom, puis aide à gérer les groupes déjà créés.
 package main
 
@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
 	"github.com/mattn/go-isatty"
 )
 
@@ -44,7 +44,7 @@ func prompter(console *ui.Console, options *app.Options) ui.Prompter {
 	if options.NonInteractive || !isTerminal(os.Stdin) {
 		return &ui.ScriptPrompter{}
 	}
-	if console.TTY && os.Getenv("NESTOR_NO_ARROWS") == "" {
+	if console.TTY && os.Getenv("MILOU_NO_ARROWS") == "" {
 		return ui.NewPrompter(console)
 	}
 	return ui.NewLinePrompter(console, os.Stdin)

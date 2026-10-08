@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
 )
 
 // Status est l'issue d'un dépôt, ou ce qu'elle serait en simulation.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/config"
 )
 
 func TestSaveEtLoad(t *testing.T) {
@@ -87,7 +87,7 @@ func TestLoadNormaliseLesValeursAberrantes(t *testing.T) {
 
 func TestPathRespecteXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
-	if chemin := config.Path(); chemin != filepath.Join("/tmp/xdg-test", "nestor", "config.json") {
+	if chemin := config.Path(); chemin != filepath.Join("/tmp/xdg-test", "milou", "config.json") {
 		t.Errorf("Path = %q", chemin)
 	}
 }

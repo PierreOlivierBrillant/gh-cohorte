@@ -1,4 +1,4 @@
-module github.com/PierreOlivierBrillant/gh-nestor
+module github.com/PierreOlivierBrillant/gh-milou
 
 go 1.27.0
 

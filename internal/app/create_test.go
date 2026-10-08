@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/complete"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/complete"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
 )
 
 func TestParcoursInteractifDeCreation(t *testing.T) {

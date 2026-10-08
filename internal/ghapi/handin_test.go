@@ -3,7 +3,7 @@ package ghapi_test
 import (
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
 )
 
 func TestHandinCompteLesCommitsEtLeursAuteurs(t *testing.T) {

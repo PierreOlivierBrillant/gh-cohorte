@@ -33,7 +33,7 @@ func NewConsoleFor(out io.Writer) *Console {
 		tty = isatty.IsTerminal(file.Fd()) || isatty.IsCygwinTerminal(file.Fd())
 	}
 	color := tty && os.Getenv("NO_COLOR") == ""
-	if os.Getenv("NESTOR_FORCE_COLOR") != "" {
+	if os.Getenv("MILOU_FORCE_COLOR") != "" {
 		color = true
 	}
 	return &Console{Out: out, Color: color, TTY: tty, Width: 100}

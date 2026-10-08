@@ -1,6 +1,6 @@
 # Consignes pour ce dépôt
 
-`gh nestor` est une extension du GitHub CLI, écrite en Go, qui reproduit
+`gh milou` est une extension du GitHub CLI, écrite en Go, qui reproduit
 GitHub Classroom : un dépôt par étudiant dans une organisation. Elle s'utilise
 de trois façons — interface web locale, assistant interactif au terminal, et
 ligne de commande scriptable. Le README présente l'outil à qui le découvre ; ce
@@ -58,17 +58,17 @@ Ce qui en est une :
 - un concept sans lequel l'outil ne se comprend pas — la nomenclature des dépôts
   en est un ; le détail d'un écran n'en est pas un.
 
-Le reste se documente ailleurs : `gh nestor --help` pour les drapeaux, les
+Le reste se documente ailleurs : `gh milou --help` pour les drapeaux, les
 commentaires du code pour le *pourquoi* d'une décision, ce fichier pour les
 règles. Une section ajoutée au README doit en remplacer une autre, ou tenir en
 quelques lignes.
 
 ## L'identité et le thème ont chacun un seul endroit
 
-L'outil s'appelle Nestor, du majordome de Moulinsart, et son thème marie la
+L'outil s'appelle Milou, du fox-terrier de Tintin, et son thème marie la
 structure de GitHub à la ligne claire des albums. Tout ce qui le nomme — nom,
 commande, devise, dépôt — vient de `internal/brand` ; aucune façade n'écrit
-« Nestor » ou « gh nestor » en dur en dehors des exemples de l'aide et des
+« Milou » ou « gh milou » en dur en dehors des exemples de l'aide et des
 gabarits émis. Le thème a deux feuilles et pas davantage : `internal/brand`
 pour le terminal, `internal/web/assets/theme.css` pour le navigateur, qui ne
 porte que des jetons. `app.css` décrit les composants et ne code aucune

@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/tokens"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Un score qu'on ne peut pas vérifier ne vaut rien. C'est ici que le rapport

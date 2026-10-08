@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/app"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 )
 
 // corriger prépare la correction d'un étudiant en ligne de commande.
@@ -156,7 +156,7 @@ func TestLaFicheDitCommentRenommerLesDepots(t *testing.T) {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	for _, place := range []string{"a26.5n6.01", "a26.4w6.01", "h27.5n6.02"} {
-		h.contient("gh nestor --manage " + place + " --student emilie-cote --rename-repos")
+		h.contient("gh milou --manage " + place + " --student emilie-cote --rename-repos")
 	}
 
 	meme := college(t)

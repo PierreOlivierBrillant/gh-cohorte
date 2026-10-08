@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/complete"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/complete"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

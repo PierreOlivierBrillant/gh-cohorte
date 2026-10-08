@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
 )
 
 // Ce fichier est le seul endroit où le terminal décide de son apparence :

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/ghapi"
 )
 
 // DefaultJobs borne les profils demandés de front.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
 )
 
 func TestDetectPrefixesLesPlusGeneraux(t *testing.T) {

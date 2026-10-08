@@ -35,13 +35,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/signature"
-	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
 // Emplacement du registre dans l'organisation.
@@ -49,7 +49,7 @@ const (
 	// RepoName est le dépôt de service qui le porte. Le point de tête le range
 	// avec « .github », le signale comme dépôt de service, et le met hors
 	// d'atteinte de la nomenclature : un nom à cinq niveaux ne peut pas
-	// commencer par un niveau vide. Il garde le nom d'avant Nestor : le
+	// commencer par un niveau vide. Il garde le nom d'avant Milou : le
 	// changer obligerait chaque organisation déjà amorcée à une migration,
 	// pour un mot que personne ne tape.
 	RepoName = ".cohorte"
