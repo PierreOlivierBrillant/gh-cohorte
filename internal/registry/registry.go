@@ -35,12 +35,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Emplacement du registre dans l'organisation.
@@ -48,7 +49,9 @@ const (
 	// RepoName est le dépôt de service qui le porte. Le point de tête le range
 	// avec « .github », le signale comme dépôt de service, et le met hors
 	// d'atteinte de la nomenclature : un nom à cinq niveaux ne peut pas
-	// commencer par un niveau vide.
+	// commencer par un niveau vide. Il garde le nom d'avant Nestor : le
+	// changer obligerait chaque organisation déjà amorcée à une migration,
+	// pour un mot que personne ne tape.
 	RepoName = ".cohorte"
 	// Branch est la seule branche écrite.
 	Branch = "main"
@@ -1351,7 +1354,7 @@ func fondue(gardee, autre User) (User, bool) {
 func Readme(org string) []byte {
 	return []byte(`# Registre de ` + org + `
 
-Ce dépôt appartient à l'extension ` + "`gh cohorte`" + `. Il retient ce que les noms
+Ce dépôt appartient à l'extension ` + "`" + brand.Command + "`" + `. Il retient ce que les noms
 de dépôts ne peuvent pas dire, pour tout le monde et depuis n'importe quel poste.
 
 ## ` + "`" + UsersFile + "`" + ` — qui est derrière chaque dépôt

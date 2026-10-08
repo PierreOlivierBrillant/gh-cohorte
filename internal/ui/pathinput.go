@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/complete"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )

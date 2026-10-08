@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/teams"
 )
 
 // Les équipes d'organisation sont ce que GitHub Classroom utilisait pour les

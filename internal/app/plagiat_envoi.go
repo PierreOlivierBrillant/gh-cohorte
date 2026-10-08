@@ -8,13 +8,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/complete"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Envoyer des copies à un collègue.

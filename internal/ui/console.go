@@ -33,7 +33,7 @@ func NewConsoleFor(out io.Writer) *Console {
 		tty = isatty.IsTerminal(file.Fd()) || isatty.IsCygwinTerminal(file.Fd())
 	}
 	color := tty && os.Getenv("NO_COLOR") == ""
-	if os.Getenv("COHORTE_FORCE_COLOR") != "" {
+	if os.Getenv("NESTOR_FORCE_COLOR") != "" {
 		color = true
 	}
 	return &Console{Out: out, Color: color, TTY: tty, Width: 100}
@@ -51,16 +51,6 @@ func (c *Console) Print(text string) {
 
 // Blank saute une ligne.
 func (c *Console) Blank() { fmt.Fprintln(c.Out) }
-
-var (
-	boldStyle  = lipgloss.NewStyle().Bold(true)
-	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	okStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	warnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	errStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	infoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
-)
 
 func (c *Console) style(style lipgloss.Style, text string) string {
 	if !c.Color {

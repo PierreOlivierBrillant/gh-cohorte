@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Réunir deux comptes d'une même personne se décide ici, une fois, pour les

@@ -5,17 +5,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/tokens"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // La détection de plagiat, vue du navigateur.

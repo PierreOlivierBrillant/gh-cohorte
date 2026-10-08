@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/plagiarism"
 )
 
 // publieUnIndex monte un groupe, publie son index, et écrit la table à côté —

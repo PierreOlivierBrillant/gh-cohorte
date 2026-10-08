@@ -10,14 +10,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/anonymize"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/exchange"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/anonymize"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/exchange"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
 )
 
 const gabaritTP = `
@@ -244,7 +244,7 @@ func TestLeGabaritDePasseSeDeposeEtSExplique(t *testing.T) {
 	// Ce qu'il doit dire avant d'être utilisé : le jeton qu'il demande, et la
 	// protection sans laquelle il annule le cloisonnement.
 	for _, attendu := range []string{
-		"COHORTE_TOKEN", "protégé en écriture", "--publish-index",
+		"NESTOR_TOKEN", "protégé en écriture", "--publish-index",
 		"ni code ni nom",
 		// Elle tourne toute seule, et il y a une chose qu'elle ne fera
 		// jamais : trancher une demande à la place du propriétaire.

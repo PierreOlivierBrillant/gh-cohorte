@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/scopes"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // grantedScopes énumère ce que le jeton annonce, et dit si on le sait : un

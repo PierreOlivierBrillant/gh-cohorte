@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/complete"
 )
 
 // séparateur est celui que portent les suggestions quand la saisie emploie
@@ -217,7 +217,7 @@ func TestSuggestSaisieDangereuseNExecuteRien(t *testing.T) {
 
 func TestSuggestSansShell(t *testing.T) {
 	racine := arborescence(t)
-	t.Setenv("COHORTE_NO_SHELL_COMPLETION", "1")
+	t.Setenv("NESTOR_NO_SHELL_COMPLETION", "1")
 	complete.Forget()
 
 	suggestions := complete.Suggest(filepath.Join(racine, "coh"), complete.Path)
@@ -234,11 +234,11 @@ func TestSuggestShellEtNatifSAccordent(t *testing.T) {
 	saisie := filepath.Join(racine, "c")
 
 	t.Setenv("SHELL", "/bin/bash")
-	t.Setenv("COHORTE_NO_SHELL_COMPLETION", "")
+	t.Setenv("NESTOR_NO_SHELL_COMPLETION", "")
 	complete.Forget()
 	parLeShell := complete.Suggest(saisie, complete.Path)
 
-	t.Setenv("COHORTE_NO_SHELL_COMPLETION", "1")
+	t.Setenv("NESTOR_NO_SHELL_COMPLETION", "1")
 	complete.Forget()
 	parLeNatif := complete.Suggest(saisie, complete.Path)
 

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/signature"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/signature"
 )
 
 func marque(t *testing.T) string {

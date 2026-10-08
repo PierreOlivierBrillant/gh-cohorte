@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
 )
 
 // Le premier commit est le dernier que GitHub rend : on saute à la dernière

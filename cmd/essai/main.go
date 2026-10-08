@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/complete"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
 )
 
 func main() {

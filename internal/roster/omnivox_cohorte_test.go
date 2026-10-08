@@ -3,7 +3,7 @@ package roster_test
 import (
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
 )
 
 // omnivox écrit un export de Léa octet par octet : Windows-1252, séparateur

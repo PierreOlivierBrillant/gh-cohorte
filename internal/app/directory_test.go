@@ -3,12 +3,12 @@ package app_test
 import (
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/users"
 )
 
 // college monte deux sessions et deux cours autour des mêmes personnes :

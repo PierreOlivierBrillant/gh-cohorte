@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // La passe automatisée.
 //
-// L'analyse est déjà scriptable : « gh cohorte --plagiarism … --non-interactive »
+// L'analyse est déjà scriptable : « gh nestor --plagiarism … --non-interactive »
 // ne demande rien à personne. La faire tourner dans une GitHub Action ne
 // demande donc presque rien de plus — un gabarit de workflow, une commande qui
 // rattrape les index manquants sans qu'on ait à nommer chaque travail, et deux
@@ -36,7 +36,7 @@ const WorkflowFile = ".github/workflows/plagiat.yml"
 // Workflow est le gabarit de passe automatisée.
 const Workflow = `# Comparaison des copies, tournée par GitHub Actions.
 #
-# Déposé par « gh cohorte --emit-workflow ». Ce qu'il fait par défaut : publier
+# Déposé par « gh nestor --emit-workflow ». Ce qu'il fait par défaut : publier
 # l'index d'empreintes des travaux annoncés qui n'en ont pas, pour que les
 # collègues de l'organisation puissent y comparer leurs copies. Un index ne
 # porte ni code ni nom — rien de ce que cette passe produit ne peut être lu
@@ -49,7 +49,7 @@ const Workflow = `# Comparaison des copies, tournée par GitHub Actions.
 #
 # ── Avant de s'en servir ────────────────────────────────────────────────────
 #
-# 1. Un jeton. « COHORTE_TOKEN » doit être un jeton à portée fine, ou celui
+# 1. Un jeton. « NESTOR_TOKEN » doit être un jeton à portée fine, ou celui
 #    d'une GitHub App installée sur l'organisation, avec « Contents: read » sur
 #    les dépôts à lire et « Contents: write » sur « .cohorte » et
 #    « .cohorte-empreintes ». Le jeton « GITHUB_TOKEN » ne suffit pas : il ne
@@ -86,10 +86,10 @@ jobs:
   publier:
     runs-on: ubuntu-latest
     steps:
-      - name: Installer gh cohorte
+      - name: Installer gh nestor
         env:
-          GH_TOKEN: ${{ secrets.COHORTE_TOKEN }}
-        run: gh extension install PierreOlivierBrillant/gh-cohorte
+          GH_TOKEN: ${{ secrets.NESTOR_TOKEN }}
+        run: gh extension install PierreOlivierBrillant/gh-nestor
 
       # Sans travail nommé — le cas du déclenchement périodique —, publie
       # l'index de chaque travail annoncé au catalogue qui n'en a pas encore.
@@ -97,9 +97,9 @@ jobs:
       - name: Publier les index manquants
         if: inputs.travail == ''
         env:
-          GH_TOKEN: ${{ secrets.COHORTE_TOKEN }}
+          GH_TOKEN: ${{ secrets.NESTOR_TOKEN }}
         run: |
-          gh cohorte --publish-index \
+          gh nestor --publish-index \
             --org "${{ github.repository_owner }}" \
             --profile "${{ inputs.profil || 'tout' }}" \
             --non-interactive --yes
@@ -109,9 +109,9 @@ jobs:
       - name: Publier l'index d'un travail
         if: inputs.travail != ''
         env:
-          GH_TOKEN: ${{ secrets.COHORTE_TOKEN }}
+          GH_TOKEN: ${{ secrets.NESTOR_TOKEN }}
         run: |
-          gh cohorte --publish-index \
+          gh nestor --publish-index \
             --org "${{ github.repository_owner }}" \
             --manage "${{ inputs.travail }}" \
             --profile "${{ inputs.profil }}" \
@@ -127,9 +127,9 @@ jobs:
       #
       # - name: Comparer
       #   env:
-      #     GH_TOKEN: ${{ secrets.COHORTE_TOKEN }}
+      #     GH_TOKEN: ${{ secrets.NESTOR_TOKEN }}
       #   run: |
-      #     gh cohorte --plagiarism \
+      #     gh nestor --plagiarism \
       #       --org "${{ github.repository_owner }}" \
       #       --manage "${{ inputs.travail }}" \
       #       --profile "${{ inputs.profil }}" \

@@ -5,23 +5,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/identity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plagiarism"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/plan"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/starter"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/teams"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/identity"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/plagiarism"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/plan"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/scopes"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/starter"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/teams"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Codes de retour de l'outil.
@@ -187,7 +188,7 @@ func (s *Session) require(value, flagName, label string) (string, error) {
 
 // Run enchaîne les étapes et renvoie le code de retour.
 func (s *Session) Run() int {
-	s.Console.Banner("gh cohorte "+Version, "Un dépôt GitHub par personne, pour une cohorte")
+	s.Console.Banner(brand.Name+" "+Version, brand.Tagline)
 
 	code, err := s.run()
 	// Les réglages sont mémorisés quoi qu'il arrive : une organisation choisie

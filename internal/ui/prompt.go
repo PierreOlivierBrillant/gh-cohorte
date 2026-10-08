@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/complete"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/huh"
 )

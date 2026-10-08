@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Les dates de remise vivent dans l'organisation, à côté des noms.

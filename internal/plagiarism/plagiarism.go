@@ -19,11 +19,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/corpus"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/inspect"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/rules"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/corpus"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/inspect"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/rules"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Version est celle du schéma de rapport écrit. Elle est relue, jamais

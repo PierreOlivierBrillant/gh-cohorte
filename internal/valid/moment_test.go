@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // GitHub date tout en UTC. Une remise du soir se lirait au lendemain si on

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
 )
 
 // Le nom du fichier d'Omnivox porte le cours et le groupe.

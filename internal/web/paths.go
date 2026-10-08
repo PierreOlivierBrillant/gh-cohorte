@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/picker"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/picker"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Choisir un fichier depuis une page web demande un détour : le navigateur ne

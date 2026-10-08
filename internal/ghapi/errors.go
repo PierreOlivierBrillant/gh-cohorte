@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/scopes"
 	"github.com/cli/go-gh/v2/pkg/api"
 )
 

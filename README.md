@@ -1,19 +1,21 @@
-# gh-cohorte
+# Nestor
 
-[![tests](https://github.com/PierreOlivierBrillant/gh-cohorte/actions/workflows/tests.yml/badge.svg)](https://github.com/PierreOlivierBrillant/gh-cohorte/actions/workflows/tests.yml)
+[![tests](https://github.com/PierreOlivierBrillant/gh-nestor/actions/workflows/tests.yml/badge.svg)](https://github.com/PierreOlivierBrillant/gh-nestor/actions/workflows/tests.yml)
 
 Extension [GitHub CLI](https://cli.github.com) qui reproduit GitHub Classroom
 pour une personne qui enseigne : **un dépôt par étudiant** dans une
 organisation, créé à partir d'une liste « nom complet + compte GitHub », puis la
 gestion de ce qui existe déjà — accès, clonage, mises à jour, suppression.
+Nestor, comme le majordome de Moulinsart : il sert chaque dépôt sur un plateau
+et tient les groupes en ordre.
 
 Trois façons de s'en servir, pour les mêmes opérations : une interface web
 servie sur la boucle locale, un assistant au terminal, et des drapeaux
 scriptables.
 
 ```bash
-gh cohorte          # interface web (défaut)
-gh cohorte --cli    # assistant au terminal
+gh nestor          # interface web (défaut)
+gh nestor --cli    # assistant au terminal
 ```
 
 Écrite en Go et distribuée précompilée : aucune installation de Go n'est
@@ -22,14 +24,18 @@ nécessaire. Toute l'interface est en français.
 ## Installation
 
 ```bash
-gh extension install PierreOlivierBrillant/gh-cohorte
+gh extension install PierreOlivierBrillant/gh-nestor
 ```
 
 Mise à jour :
 
 ```bash
-gh extension upgrade cohorte
+gh extension upgrade nestor
 ```
+
+L'outil s'appelait `gh cohorte`. Une installation sous l'ancien nom se
+remplace — `gh extension remove cohorte`, puis l'installation ci-dessus — et
+les réglages, les groupes déclarés et le cache sont repris tels quels.
 
 ### Prérequis
 
@@ -65,19 +71,19 @@ personnes → vérification des comptes → paramètres → récapitulatif →
 confirmation → création → bilan :
 
 ```bash
-gh cohorte --cli
+gh nestor --cli
 ```
 
 Pour voir ce qui serait fait, sans rien créer :
 
 ```bash
-gh cohorte --roster cohorte.csv --dry-run
+gh nestor --roster cohorte.csv --dry-run
 ```
 
 Pour une exécution scriptée, sans aucune question :
 
 ```bash
-gh cohorte --org acme --assignment tp1 --roster cohorte.csv --non-interactive --yes
+gh nestor --org acme --assignment tp1 --roster cohorte.csv --non-interactive --yes
 ```
 
 En mode non interactif, une valeur requise mais absente est une erreur explicite
@@ -129,9 +135,9 @@ préfixe nomme une équipe et non une personne : il n'y a alors aucune liste à
 rapprocher, les membres venant des accès au dépôt.
 
 ```bash
-gh cohorte --import                                    # lister les travaux repérés
-gh cohorte --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
-gh cohorte --import projet --teams --into a26.5n6.1030  # travail d'équipe
+gh nestor --import                                    # lister les travaux repérés
+gh nestor --import tp1 --into a26.5n6.1030 --roster liste.csv --dry-run
+gh nestor --import projet --teams --into a26.5n6.1030  # travail d'équipe
 ```
 
 ## Nommage des dépôts
@@ -173,7 +179,7 @@ l'organisation, un nom complet par compte et le rôle tenu — étudiant ou
 enseignant —, écrit une fois pour tout le monde. Vos collègues voient donc les
 mêmes noms que vous sans rien avoir déclaré, et corriger une orthographe ne
 détache pas les dépôts créés sous l'ancienne. Les noms déjà accumulés sur un
-poste s'y versent en une fois (`gh cohorte --publish-registry`). Le registre
+poste s'y versent en une fois (`gh nestor --publish-registry`). Le registre
 porte aussi la **date de remise** de chaque travail, que rien dans un nom de
 dépôt ne peut dire : une échéance fixée sur un poste vaut pour l'équipe entière.
 Le fichier local ne garde plus que ce qui n'a de sens que sur cette machine :
@@ -276,7 +282,7 @@ des noms de dépôts, les collisions entre deux personnes, le drapeau
 `is_template` du dépôt modèle, la taille du dossier de départ.
 
 Les inventaires d'organisation sont mis en cache dans le répertoire du système
-(`~/.cache/cohorte/cache.json` sous Linux, permissions `600`) ; `--no-cache` et
+(`~/.cache/nestor/cache.json` sous Linux, permissions `600`) ; `--no-cache` et
 `--clear-cache` s'en passent ou le vident.
 
 ## Sécurité
@@ -322,17 +328,17 @@ Les plus courantes :
 | `--non-interactive` | échouer plutôt que poser une question |
 | `--cli` / `--no-browser` | rester au terminal / ne pas ouvrir le navigateur |
 
-`gh cohorte --help` donne la liste complète. Codes de retour : `0` succès, `1`
+`gh nestor --help` donne la liste complète. Codes de retour : `0` succès, `1`
 au moins un échec, `2` erreur de validation, `130` interruption.
 
 Trois variables d'environnement : `NO_COLOR` retire la couleur,
-`COHORTE_NO_ARROWS` force les listes numérotées, `COHORTE_NO_SHELL_COMPLETION`
+`NESTOR_NO_ARROWS` force les listes numérotées, `NESTOR_NO_SHELL_COMPLETION`
 complète les chemins sans interroger le shell.
 
 ## Développement
 
 ```bash
-go build .               # produit ./gh-cohorte
+go build .               # produit ./gh-nestor
 go test ./...            # toute la suite, sans aucun accès réseau
 gh extension install .   # installer la version locale
 ```

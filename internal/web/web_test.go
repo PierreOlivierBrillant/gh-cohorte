@@ -16,15 +16,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/classroom"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/scopes"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/web"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/classroom"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/scopes"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/web"
 )
 
 // harnais monte l'interface web au-dessus d'un faux GitHub, sur un vrai port
@@ -141,7 +142,7 @@ func (h *harnais) requete(methode, chemin string, corps any) (*http.Response, []
 		h.t.Fatalf("requête : %v", err)
 	}
 	requete.Header.Set("Origin", h.Base)
-	requete.Header.Set("X-Cohorte", "1")
+	requete.Header.Set("X-Nestor", "1")
 	if corps != nil {
 		requete.Header.Set("Content-Type", "application/json")
 	}
@@ -372,7 +373,7 @@ func TestOrigineEtrangereRefusee(t *testing.T) {
 	h := nouveau(t, nil)
 	requete, _ := http.NewRequest(http.MethodPost, h.Base+"/api/cache/clear", nil)
 	requete.Header.Set("Origin", "http://exemple.test")
-	requete.Header.Set("X-Cohorte", "1")
+	requete.Header.Set("X-Nestor", "1")
 	reponse, err := h.Client.Do(requete)
 	if err != nil {
 		t.Fatalf("appel : %v", err)
@@ -1455,7 +1456,7 @@ func TestPageServie(t *testing.T) {
 	if reponse.StatusCode != http.StatusOK {
 		t.Fatalf("statut %d", reponse.StatusCode)
 	}
-	if !strings.Contains(string(contenu), "gh cohorte") {
+	if !strings.Contains(string(contenu), brand.Name) {
 		t.Fatalf("page inattendue : %.100s", contenu)
 	}
 	// Une adresse inconnue rend la page : l'interface se recharge sans erreur.

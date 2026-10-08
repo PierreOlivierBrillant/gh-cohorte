@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ghapi"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ghapi"
 )
 
 // États possibles d'un travail.

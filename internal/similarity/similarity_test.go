@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/tokens"
 )
 
 // copie fabrique une copie d'index à partir de fichiers sources.

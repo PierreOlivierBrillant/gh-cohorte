@@ -7,9 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/similarity"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/similarity"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // L'index publié : ce qui traverse le cloisonnement, et rien d'autre.
@@ -31,6 +32,8 @@ const (
 	// « .cohorte » : un index pèse des centaines de kilo-octets là où le
 	// registre entier en pèse quelques-uns, et l'historique du registre — qu'on
 	// relit pour comprendre qui a corrigé quel nom — deviendrait illisible.
+	// Le nom date d'avant Nestor et reste : le changer couperait chaque
+	// organisation de ses index déjà publiés.
 	IndexRepo = ".cohorte-empreintes"
 	// IndexBranch est la seule branche écrite.
 	IndexBranch = "main"
@@ -39,7 +42,7 @@ const (
 )
 
 // IndexDescription est ce que le dépôt annonce.
-const IndexDescription = "Index d'empreintes — gh cohorte. Aucun code, aucun nom."
+const IndexDescription = "Index d'empreintes — " + brand.Command + ". Aucun code, aucun nom."
 
 // IndexPath rend le chemin d'un index dans le dépôt.
 func IndexPath(assignment string) string {
@@ -214,8 +217,8 @@ func EncodePublished(published Published) ([]byte, error) {
 func IndexReadmeText(org string) []byte {
 	var texte strings.Builder
 	texte.WriteString("# Index d'empreintes de `" + org + "`\n\n")
-	texte.WriteString("Ce dépôt est tenu par [`gh cohorte`](https://github.com/" +
-		"PierreOlivierBrillant/gh-cohorte). Il porte des **index d'empreintes** : " +
+	texte.WriteString("Ce dépôt est tenu par [`" + brand.Command + "`](" + brand.URL +
+		"). Il porte des **index d'empreintes** : " +
 		"des hachés de fragments de code, publiés pour que les enseignants de " +
 		"l'organisation puissent comparer leurs travaux entre eux.\n\n")
 	texte.WriteString("**Il ne contient ni code, ni nom.** Une empreinte est le " +

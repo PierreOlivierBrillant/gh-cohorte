@@ -1,6 +1,6 @@
 'use strict';
 
-// Interface locale de gh cohorte, organisée comme GitHub Classroom.
+// Interface locale de Nestor, organisée comme GitHub Classroom.
 //
 // Un groupe rassemble des étudiants ; un travail est distribué à ce groupe, un
 // dépôt par étudiant. Le groupe n'existe que dans le fichier local : sur GitHub,
@@ -133,7 +133,7 @@ function message(texte, ton = 'succes', duree = 6000) {
 
 // api envoie une requête et renvoie le JSON, ou lève l'erreur du serveur.
 async function api(methode, chemin, corps) {
-  const options = { method: methode, headers: { 'X-Cohorte': '1' } };
+  const options = { method: methode, headers: { 'X-Nestor': '1' } };
   if (corps !== undefined) {
     options.headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(corps);
@@ -5854,7 +5854,7 @@ async function regenererJeton(portees) {
   // quoi la page semblerait ne rien faire.
   const attente = el('div', { classe: 'avis', texte:
     "Renouvellement en cours : suivez les instructions dans le terminal d'où " +
-    'gh cohorte a été lancé.' });
+    'gh nestor a été lancé.' });
   $('messages').append(attente);
   $('jeton-etat').textContent = 'Suivez les instructions dans le terminal…';
   try {
@@ -5894,7 +5894,7 @@ async function proposerRegeneration(portee, contexte) {
     conteneur,
     el('p', { classe: 'note',
       texte: "GitHub demande une confirmation dans le navigateur : le code à recopier " +
-        "paraît dans le terminal d'où gh cohorte a été lancé." }));
+        "paraît dans le terminal d'où gh nestor a été lancé." }));
   const cochees = casesDePortees(conteneur, jeton, portee);
 
   if (!await demander('Générer un nouveau jeton', corps, 'Générer le jeton')) return false;
@@ -7183,7 +7183,10 @@ function dessinerNuage() {
 // couleurOrigine colore un point selon la provenance des deux copies. Deux
 // copies du même groupe qui se ressemblent, cela s'explique ; deux copies de
 // deux sessions séparées par trois ans, beaucoup moins.
-const palettePlagiat = ['#0969da', '#8250df', '#1f883d', '#bc4c00', '#cf222e', '#0f7b6c'];
+// Les couleurs viennent du thème (theme.css), jamais d'ici : un nuage de
+// points doit suivre le mode sombre et la palette comme le reste de la page.
+const palettePlagiat = ['var(--serie-1)', 'var(--serie-2)', 'var(--serie-3)',
+  'var(--serie-4)', 'var(--serie-5)', 'var(--serie-6)'];
 
 function couleurOrigine(paire, origines) {
   if (origines.length < 2) return '';
@@ -7979,7 +7982,7 @@ async function ajouterArchive() {
   const suite = await demander('Ajouter des copies reçues',
     el('div', {},
       el('p', {
-        texte: 'Un ZIP de copies anonymisées, tel que « gh cohorte » le produit '
+        texte: 'Un ZIP de copies anonymisées, tel que « gh nestor » le produit '
           + '— ou un ZIP ordinaire, un dossier par copie. Les copies reçues '
           + 'entrent dans l’analyse par le même chemin que les vôtres.',
       }),

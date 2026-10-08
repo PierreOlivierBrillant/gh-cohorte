@@ -3,7 +3,7 @@ package groups_test
 import (
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/groups"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/groups"
 )
 
 // prof écarte l'enseignant, comme le registre le ferait.

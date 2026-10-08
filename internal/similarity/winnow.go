@@ -1,6 +1,6 @@
 package similarity
 
-import "github.com/PierreOlivierBrillant/gh-cohorte/internal/tokens"
+import "github.com/PierreOlivierBrillant/gh-nestor/internal/tokens"
 
 // Le hachage et le winnowing, c'est-à-dire tout ce qui transforme un flux de
 // jetons en empreintes.

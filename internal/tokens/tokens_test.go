@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/tokens"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/tokens"
 )
 
 // textes rend le flux comparé, pour le lire d'un coup d'œil dans un message

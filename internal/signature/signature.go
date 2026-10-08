@@ -40,7 +40,7 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // La marque tient en soixante-quatre blancs.

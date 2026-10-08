@@ -100,7 +100,7 @@ func writeCache(key string, value []string) {
 
 // shellName renvoie le shell à interroger, ou une chaîne vide.
 func shellName() string {
-	if os.Getenv("COHORTE_NO_SHELL_COMPLETION") != "" {
+	if os.Getenv("NESTOR_NO_SHELL_COMPLETION") != "" {
 		return ""
 	}
 	name := filepath.Base(strings.TrimSpace(os.Getenv("SHELL")))

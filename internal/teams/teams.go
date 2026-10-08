@@ -34,8 +34,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/naming"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Privacy est la visibilité donnée aux équipes créées par l'outil. « closed »
@@ -247,7 +248,7 @@ func TeacherTeam(session, course, group string, infos []Info) (Team, bool) {
 // DescribeTeachers compose la description de l'équipe enseignante sur GitHub.
 func DescribeTeachers(session, course, group string) string {
 	return "Enseignants du groupe " + group + ", " + strings.ToUpper(course) +
-		", " + naming.SessionLabel(session) + " — accès à ses dépôts (gh cohorte)"
+		", " + naming.SessionLabel(session) + " — accès à ses dépôts (" + brand.Command + ")"
 }
 
 // Describe compose la description déposée sur GitHub. Elle ne sert qu'à qui lit
@@ -256,5 +257,5 @@ func DescribeTeachers(session, course, group string) string {
 // porter une vérité serait donc lui demander plus qu'elle ne peut tenir.
 func Describe(session, course, group, short string) string {
 	return "Équipe " + short + " — groupe " + group + ", " +
-		strings.ToUpper(course) + ", " + naming.SessionLabel(session) + " (gh cohorte)"
+		strings.ToUpper(course) + ", " + naming.SessionLabel(session) + " (" + brand.Command + ")"
 }

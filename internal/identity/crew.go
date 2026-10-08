@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/cache"
 )
 
 // Qui a fait un travail d'équipe ? Trois choses peuvent le dire, et aucune ne

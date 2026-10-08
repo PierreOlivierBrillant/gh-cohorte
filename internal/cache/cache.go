@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
 )
 
 // Durées de validité : la liste des dépôts bouge plus souvent qu'un nom de profil.
@@ -69,16 +71,17 @@ func CrewKey(org, repo string) string {
 	return "crew:" + strings.ToLower(org) + "/" + strings.ToLower(repo)
 }
 
-// Dir renvoie l'emplacement du cache, conforme au standard du système.
+// Dir renvoie l'emplacement du cache, conforme au standard du système. Un
+// cache laissé par l'ancien nom de l'outil est repris plutôt qu'abandonné.
 func Dir() string {
 	if base := os.Getenv("XDG_CACHE_HOME"); base != "" {
-		return filepath.Join(base, "cohorte")
+		return brand.AdoptLegacyDir(base)
 	}
 	base, err := os.UserCacheDir()
 	if err != nil {
-		return filepath.Join(".", ".cache", "cohorte")
+		return brand.AdoptLegacyDir(filepath.Join(".", ".cache"))
 	}
-	return filepath.Join(base, "cohorte")
+	return brand.AdoptLegacyDir(base)
 }
 
 type entry struct {

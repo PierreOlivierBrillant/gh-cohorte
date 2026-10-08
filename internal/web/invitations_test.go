@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
 )
 
 // travailAuxQuatreInvitations monte un travail où chaque étudiant en est à un

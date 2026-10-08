@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
 )
 
 // Le cas qui motive la fonctionnalité : un groupe rassemble les travaux de deux

@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/app"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/config"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/app"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/config"
 )
 
 func TestOrganisationMemoriseeApresUnParcoursComplet(t *testing.T) {

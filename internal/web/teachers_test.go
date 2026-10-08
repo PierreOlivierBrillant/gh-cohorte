@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
 )
 
 // ficheRendu est ce que l'API rend pour une personne.

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/complete"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/complete"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
 )
 
 // séparateur est celui que portent les suggestions quand la saisie emploie
@@ -237,10 +237,10 @@ func TestTableSansLigne(t *testing.T) {
 
 func TestBanniereEtTitres(t *testing.T) {
 	c, tampon := console()
-	c.Banner("gh cohorte 1.0", "Un dépôt par personne")
+	c.Banner("gh nestor 1.0", "Un dépôt par personne")
 	c.Heading("Organisation cible")
 	sortie := tampon.String()
-	if !strings.Contains(sortie, "gh cohorte 1.0") || !strings.Contains(sortie, "Organisation cible") {
+	if !strings.Contains(sortie, "gh nestor 1.0") || !strings.Contains(sortie, "Organisation cible") {
 		t.Errorf("sortie = %q", sortie)
 	}
 }

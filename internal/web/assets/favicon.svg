@@ -1,15 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Une cohorte : plusieurs dépôts issus d'un même point. -->
-  <rect width="32" height="32" rx="7" fill="#1f6feb"/>
-  <g fill="none" stroke="#ffffff" stroke-width="2.1" stroke-linecap="round">
-    <path d="M16 7v4"/>
-    <path d="M8 21v-3a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3"/>
-    <path d="M16 16v5"/>
+  <!-- Le nœud papillon de Nestor, en ligne claire : un aplat du bleu de la
+       marque cerné d'encre, posé sur le papier de l'album. -->
+  <rect x="1.5" y="1.5" width="29" height="29" rx="8" fill="#fbf7ee" stroke="#1c1d2b" stroke-width="2"/>
+  <g fill="#2466b0" stroke="#1c1d2b" stroke-width="1.6" stroke-linejoin="round">
+    <path d="M5 10.5 L14 14.6 V17.4 L5 21.5 Z"/>
+    <path d="M27 10.5 L18 14.6 V17.4 L27 21.5 Z"/>
+    <rect x="13" y="12.6" width="6" height="6.8" rx="1.8"/>
   </g>
-  <g fill="#ffffff">
-    <circle cx="16" cy="6" r="3.1"/>
-    <circle cx="8" cy="24" r="3.1"/>
-    <circle cx="16" cy="24" r="3.1"/>
-    <circle cx="24" cy="24" r="3.1"/>
+  <g fill="none" stroke="#8cc3f2" stroke-width="1.2" stroke-linecap="round">
+    <path d="M7.6 13 L10.8 14.5"/>
+    <path d="M24.4 13 L21.2 14.5"/>
   </g>
 </svg>

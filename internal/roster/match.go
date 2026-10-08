@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Rapprocher un compte GitHub d'un étudiant, quand rien ne les relie

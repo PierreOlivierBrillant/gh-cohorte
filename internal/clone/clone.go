@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/roster"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/roster"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 	"github.com/cli/go-gh/v2"
 )
 
@@ -160,7 +160,7 @@ func PrepareDestination(path string) (string, error) {
 		return "", valid.Errorf("Destination inutilisable : %v", err)
 	}
 	// Un dossier non accessible en écriture ferait échouer chaque clone.
-	probe := filepath.Join(absolute, ".cohorte-ecriture")
+	probe := filepath.Join(absolute, ".nestor-ecriture")
 	file, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return "", valid.Errorf("Destination : « %s » n'est pas accessible en écriture.", absolute)

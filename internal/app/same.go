@@ -3,9 +3,10 @@ package app
 import (
 	"strings"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/registry"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/ui"
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/users"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/registry"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/users"
 )
 
 // Une même personne travaille parfois sous deux comptes — celui d'une session
@@ -238,7 +239,7 @@ func (s *Session) applyJoin(org string, reunion users.Joining) int {
 	}
 	s.Console.Success("@%s et @%s sont désormais une même personne.",
 		reunion.Account, reunion.Principal)
-	s.Console.Note("Pour défaire : gh cohorte --user %s --separate", reunion.Account)
+	s.Console.Note("Pour défaire : %s --user %s --separate", brand.Command, reunion.Account)
 	return ExitOK
 }
 

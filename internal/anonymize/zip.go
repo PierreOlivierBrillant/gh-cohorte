@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/valid"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/brand"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/valid"
 )
 
 // Le ZIP et la table de correspondance.
@@ -224,7 +225,7 @@ func add(archive *zip.Writer, name string, content []byte) error {
 func notice(manifest Manifest) []byte {
 	var texte strings.Builder
 	texte.WriteString("# Copies anonymisées\n\n")
-	texte.WriteString("Ces copies viennent de `gh cohorte`. Les noms, les comptes " +
+	texte.WriteString("Ces copies viennent de `" + brand.Command + "`. Les noms, les comptes " +
 		"GitHub et les matricules y ont été remplacés par des jetons de longueur " +
 		"égale : `A7F3K2`, et `A7F3K2A7` là où le nom d'origine était plus long.\n\n")
 	if manifest.Assignment != "" {

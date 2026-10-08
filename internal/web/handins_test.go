@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/PierreOlivierBrillant/gh-cohorte/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-nestor/internal/fakegh"
 )
 
 // travailAvecHistoriques monte un groupe de deux étudiantes, chacune avec son

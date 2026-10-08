@@ -1,4 +1,4 @@
-module github.com/PierreOlivierBrillant/gh-cohorte
+module github.com/PierreOlivierBrillant/gh-nestor
 
 go 1.27.0
 
