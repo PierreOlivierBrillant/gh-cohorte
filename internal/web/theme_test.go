@@ -64,6 +64,34 @@ func TestLattenteDuDemarrageFaitCourirMilou(t *testing.T) {
 	if strings.Count(html, `class="milou-court"`) != 1 {
 		t.Error("Milou ne court que sur l'écran de démarrage")
 	}
+	if !strings.Contains(demarrage, `class="milou-confus"`) {
+		t.Error("quand le serveur ne répond pas, c'est Milou étourdi qui le dit")
+	}
+}
+
+func TestLesDessinsDeMilouSontEmbarques(t *testing.T) {
+	// L'icône et les dessins sont servis par le binaire lui-même : une image
+	// absente de l'embarquement serait un carré vide dans l'interface.
+	for _, nom := range []string{
+		"assets/favicon.png", "assets/milou/tete.png", "assets/milou/astronaute.png",
+		"assets/milou/confus.png", "assets/milou/habille.png", "assets/milou/roi.png",
+	} {
+		contenu, err := assets.ReadFile(nom)
+		if err != nil {
+			t.Errorf("%s : %v", nom, err)
+			continue
+		}
+		if !strings.HasPrefix(string(contenu), "\x89PNG") {
+			t.Errorf("%s n'est pas un PNG", nom)
+		}
+	}
+	page, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), `href="/favicon.png"`) {
+		t.Error("l'icône de la page est le PNG de la tête de Milou")
+	}
 }
 
 func TestLesComposantsNeCodentAucuneCouleur(t *testing.T) {

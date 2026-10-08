@@ -39,8 +39,6 @@
   --violet: #7b4fb6;
   --sarcelle: #0f7b6c;
   --gris: #7c8496;
-  --milou: #ffffff;            /* le poil de Milou */
-  --milou-trait: var(--encre); /* son contour, son nez, son œil */
 
   /* ---- rôles : ce que chaque couleur fait --------------------------------- */
   --fond-page: var(--papier);
@@ -132,8 +130,6 @@
     --violet: #b79af0;
     --sarcelle: #4fc4b0;
     --gris: #8c93a5;
-    --milou: #f3efe4;
-    --milou-trait: #1c1d2b;
 
     --texte: #ece6d8;
     --texte-doux: #a3a8b8;

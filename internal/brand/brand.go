@@ -51,8 +51,8 @@ const (
 	Encre = "#1c1d2b"
 	// Papier est le fond des pages, celui d'un album.
 	Papier = "#fbf7ee"
-	// Bleu est l'accent — le chandail de Tintin — : liens, ligne retenue, et
-	// le carré sur lequel Milou pose sa tête dans le logo.
+	// Bleu est l'accent — le chandail de Tintin — : liens, ligne retenue,
+	// trait sous la barre du haut.
 	Bleu = "#2466b0"
 	// BleuClair est le même accent porté par du texte, lisible sur fond sombre
 	// comme sur fond clair.

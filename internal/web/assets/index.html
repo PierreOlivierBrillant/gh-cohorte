@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>Milou</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="mask-icon" href="/favicon.svg" color="#2466b0">
+<link rel="icon" href="/favicon.png" type="image/png">
 <!-- Les jetons du thème d'abord, les composants ensuite : app.css ne
      fait qu'employer ce que theme.css déclare. -->
 <link rel="stylesheet" href="/theme.css">
@@ -22,7 +21,7 @@
 <!-- Barre globale, à la manière de l'en-tête sombre de GitHub — Milou devant
      son nom. -->
 <header class="barre-globale">
-  <button type="button" id="accueil" class="produit"><img class="logo" src="/favicon.svg" alt="" width="22" height="22">Milou <span class="version" id="version"></span></button>
+  <button type="button" id="accueil" class="produit"><img class="logo" src="/milou/tete.png" alt="" width="24" height="24">Milou <span class="version" id="version"></span></button>
   <span class="espace"></span>
   <span class="compte" id="compte"></span>
   <button type="button" id="ouvrir-reglages" class="bouton discret inverse">Réglages</button>
@@ -57,41 +56,14 @@
        serveur réponde, et cède la place à la première vraie vue. -->
   <section id="vue-demarrage" class="vue">
     <div class="demarrage" aria-live="polite">
-      <!-- Milou court tant qu'on attend. Chaque forme est définie une fois et
-           tracée deux fois : une encre large dessous, le poil dessus. Les
-           pattes passent derrière le corps, dont le ventre les recouvre. Les
-           mouvements vivent dans app.css, les couleurs dans theme.css. -->
-      <svg class="milou-court" id="demarrage-milou" viewBox="0 0 140 80" aria-hidden="true">
-        <defs>
-          <path id="milou-patte-forme" d="M0 0 V21 h5"/>
-          <path id="milou-queue-forme" d="M0 0 Q-9 -6 -7 -18"/>
-          <path id="milou-oreille-forme" d="M85 24 Q80 15 87 14 Q91 16 92 22 Z"/>
-          <g id="milou-silhouette">
-            <ellipse cx="60" cy="42" rx="25" ry="13"/>
-            <circle cx="92" cy="30" r="11"/>
-            <ellipse cx="104" cy="35" rx="9" ry="6.5"/>
-            <ellipse cx="101" cy="41.5" rx="5.5" ry="3.2"/>
-            <circle cx="93" cy="20.5" r="3"/>
-          </g>
-        </defs>
-        <line class="milou-sol" x1="4" y1="74" x2="136" y2="74"/>
-        <g class="milou-corps">
-          <g transform="translate(44 48)"><g class="milou-patte"><use href="#milou-patte-forme" class="milou-encre"/><use href="#milou-patte-forme" class="milou-blanc"/></g></g>
-          <g transform="translate(52 48)"><g class="milou-patte oppose"><use href="#milou-patte-forme" class="milou-encre"/><use href="#milou-patte-forme" class="milou-blanc"/></g></g>
-          <g transform="translate(70 48)"><g class="milou-patte oppose"><use href="#milou-patte-forme" class="milou-encre"/><use href="#milou-patte-forme" class="milou-blanc"/></g></g>
-          <g transform="translate(78 48)"><g class="milou-patte"><use href="#milou-patte-forme" class="milou-encre"/><use href="#milou-patte-forme" class="milou-blanc"/></g></g>
-          <g transform="translate(36 40)"><g class="milou-queue"><use href="#milou-queue-forme" class="milou-encre"/><use href="#milou-queue-forme" class="milou-blanc"/></g></g>
-          <use href="#milou-silhouette" class="milou-trait"/>
-          <use href="#milou-silhouette" class="milou-poil"/>
-          <use href="#milou-oreille-forme" class="milou-trait"/>
-          <use href="#milou-oreille-forme" class="milou-poil"/>
-          <g class="milou-visage">
-            <circle cx="95" cy="28" r="1.9"/>
-            <ellipse cx="112" cy="33.5" rx="3.2" ry="2.5"/>
-            <path class="milou-bouche" d="M105 40 q3.5 2.5 7 0"/>
-          </g>
-        </g>
-      </svg>
+      <!-- Milou court tant qu'on attend, et a vu trente-six chandelles si le
+           serveur ne répond pas. Ce sont des dessins d'Hergé, employés tels
+           quels ; le mouvement vit dans app.css. -->
+      <div class="milou-course" id="demarrage-milou" aria-hidden="true">
+        <img class="milou-court" src="/milou/astronaute.png" alt="" width="160" height="194">
+        <span class="milou-sol"></span>
+      </div>
+      <img class="milou-confus" id="demarrage-confus" src="/milou/confus.png" alt="" width="200" height="219" hidden>
       <p id="demarrage-texte">Connexion au serveur local…</p>
       <p class="note" id="demarrage-detail"></p>
       <button type="button" id="demarrage-reessayer" class="bouton" hidden>Réessayer</button>
@@ -101,7 +73,7 @@
   <!-- ------------------------------------------------- choix de l'organisation -->
   <section id="vue-organisation" class="vue" hidden>
     <div class="bienvenue">
-      <img class="logo-grand" src="/favicon.svg" alt="" width="72" height="72">
+      <img class="logo-grand" src="/milou/tete.png" alt="" width="120" height="120">
       <h2>Milou</h2>
       <p class="note">Un dépôt GitHub par personne, rapporté au pas de course.</p>
     </div>

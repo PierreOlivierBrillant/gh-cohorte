@@ -73,7 +73,9 @@ gabarits émis. Le thème a deux feuilles et pas davantage : `internal/brand`
 pour le terminal, `internal/web/assets/theme.css` pour le navigateur, qui ne
 porte que des jetons. `app.css` décrit les composants et ne code aucune
 couleur, aucune ombre, aucune fonte : il emploie un jeton, ou on en ajoute un.
-Un test tient les deux palettes ensemble.
+Un test tient les deux palettes ensemble. Les images de Milou, dans
+`internal/web/assets/milou/`, sont des dessins d'Hergé employés tels quels :
+on ne les redessine pas, et on n'anime que leur mouvement d'ensemble.
 
 Les dépôts de service de l'organisation — `.cohorte` et `.cohorte-empreintes` —
 gardent leur nom : les renommer imposerait une migration à chaque organisation

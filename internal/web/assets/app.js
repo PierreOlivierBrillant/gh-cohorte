@@ -1066,6 +1066,7 @@ function dessinerSessions(conteneur) {
 
   if (parSession.size === 0 && herites().length === 0) {
     conteneur.append(el('div', { classe: 'boite-vide' },
+      el('img', { classe: 'milou-vide', src: '/milou/roi.png', alt: '' }),
       el('p', { texte: 'Aucun groupe déclaré pour le moment.' }),
       el('p', { classe: 'note',
         texte: 'Déclarez-en un de toutes pièces, ou reprenez des dépôts qu\'une autre ' +
@@ -6558,11 +6559,20 @@ $('quitter').addEventListener('click', async () => {
     el('p', { texte: "Le serveur local s'arrête et la commande rend la main au terminal." }),
     'Fermer');
   if (!confirme) return;
-  await api('POST', '/api/quit').catch(() => {});
+  // Milou s'en va avant que le serveur ne ferme : son image doit être arrivée,
+  // car plus rien ne la servira ensuite. Si elle tarde, on ne retient pas la
+  // fermeture pour autant.
+  const adieu = el('img', { classe: 'milou-adieu', src: '/milou/habille.png', alt: '' });
   document.body.textContent = '';
   document.body.append(el('main', {},
+    adieu,
     el('h2', { texte: 'Interface fermée.' }),
     el('p', { classe: 'note', texte: 'Vous pouvez fermer cet onglet.' })));
+  await Promise.race([
+    adieu.decode().catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 1500)),
+  ]);
+  await api('POST', '/api/quit').catch(() => {});
 });
 
 // ------------------------------------------------------------------ démarrage
@@ -6571,6 +6581,7 @@ $('quitter').addEventListener('click', async () => {
 // quoi réessayer : une fenêtre blanche ne disait ni l'un ni l'autre.
 function demarrageDit(texte, detail = '') {
   $('demarrage-milou').hidden = false;
+  $('demarrage-confus').hidden = true;
   $('demarrage-texte').textContent = texte;
   $('demarrage-detail').textContent = detail;
   $('demarrage-reessayer').hidden = true;
@@ -6581,6 +6592,7 @@ function demarrageEchoue(raison) {
     vue.hidden = vue.id !== 'vue-demarrage';
   }
   $('demarrage-milou').hidden = true;
+  $('demarrage-confus').hidden = false;
   $('demarrage-texte').textContent = "Le serveur local n'a pas répondu.";
   $('demarrage-detail').textContent = raison;
   $('demarrage-reessayer').hidden = false;
