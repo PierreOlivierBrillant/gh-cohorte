@@ -28,12 +28,14 @@ import (
 func main() {
 	state := fakegh.NewState()
 	for nom, envoi := range map[string]string{
-		"a26.5n6.01.tp1.jean-luc-picard": "2026-09-01T10:00:00Z",
-		"a26.5n6.01.tp1.emilie-cote":     "2026-09-20T10:00:00Z",
-		"a26.5n6.01.tp2.emilie-cote":     "",
-		"a26.4w6.01.projet.emilie-cote":  "2026-11-05T10:00:00Z",
-		"h27.5n6.02.tp1.emilie-cote":     "2027-02-10T10:00:00Z",
-		"h27.5n6.02.tp1.aleksilepaj":     "2027-02-11T10:00:00Z",
+		"a26.5n6.01.tp1.jean-luc-picard":     "2026-09-01T10:00:00Z",
+		"a26.5n6.01.tp1.emilie-cote":         "2026-09-20T10:00:00Z",
+		"a26.5n6.01.tp2.emilie-cote":         "",
+		"a26.4w6.01.projet.emilie-cote":      "2026-11-05T10:00:00Z",
+		"h27.5n6.02.tp1.emilie-cote":         "2027-02-10T10:00:00Z",
+		"h27.5n6.02.tp1.aleksilepaj":         "2027-02-11T10:00:00Z",
+		"a26.4w6.01.projet.jean-commetuveux": "2026-11-02T10:00:00Z",
+		"h27.5n6.02.tp1.jean-commetuveux":    "2027-02-09T10:00:00Z",
 	} {
 		state.AddRepo("acme", nom, true).PushedAt = envoi
 	}
@@ -74,10 +76,14 @@ func main() {
 			}},
 		{Org: "acme", Session: "a26", Course: "4w6", Group: "01", Students: []roster.Person{
 			{FullName: "Émilie Côté", Username: "emilie-cote", StudentID: "2100123"},
+			// La même personne qu'à l'hiver, sous un autre compte : rien ne le
+			// dit tant qu'on ne les a pas réunis depuis l'annuaire.
+			{FullName: "Jean Commetuveux", Username: "Mr-Commetuveux"},
 		}},
 		{Org: "acme", Session: "h27", Course: "5n6", Group: "02", Students: []roster.Person{
 			{FullName: "Émilie Côté", Username: "emilie-cote", StudentID: "2100123"},
 			{FullName: "Aminata Diallo", Username: "aminata-d"},
+			{FullName: "Jean Commetuveux", Username: "commetuveuxx"},
 			// Un compte repris de dépôts hérités : personne ne l'a jamais nommé.
 			{Username: "aleksilepaj"},
 		}},

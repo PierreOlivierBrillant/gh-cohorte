@@ -16,6 +16,7 @@
 package classroom
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -101,6 +102,11 @@ type Classroom struct {
 	// adopté sous un autre nom. Sans eux, corriger une faute de frappe
 	// détacherait de leur personne tous les dépôts déjà créés.
 	aliases map[string]roster.Person
+	// borrowed retient, par compte, les autres comptes que le registre a
+	// joints à une personne de la liste. Ils ne sont pas écrits non plus : la
+	// réunion vit au registre, et la recopier ici la rendrait indéfaisable —
+	// séparer les deux comptes là-bas les laisserait réunis dans ce groupe.
+	borrowed map[string][]string
 	// horaire dit quand les travaux du groupe sont attendus. Il n'est pas
 	// écrit non plus : les dates vivent dans le registre de l'organisation, et
 	// les redire ici en ferait un second exemplaire libre de diverger.
@@ -297,6 +303,7 @@ func (c Classroom) Enrich(names Names, repos []groups.RepoInfo) Classroom {
 	}
 	complets := make([]roster.Person, 0, len(c.Students))
 	connus := map[string]bool{}
+	empruntes := map[string][]string{}
 	for _, student := range c.Students {
 		if trouve, ok := names.Lookup(student.Username); ok {
 			if strings.TrimSpace(student.FullName) == "" {
@@ -307,6 +314,17 @@ func (c Classroom) Enrich(names Names, repos []groups.RepoInfo) Classroom {
 			// à l'autre.
 			if strings.TrimSpace(student.StudentID) == "" {
 				student.StudentID = trouve.StudentID
+			}
+			// Ses autres comptes aussi : réunis une fois au registre, ils
+			// valent pour tous ses groupes. Elle est alors invitée sous
+			// chacun, et un dépôt arrivé sous l'un est le sien.
+			for _, compte := range trouve.Accounts() {
+				if student.Owns(compte) {
+					continue
+				}
+				student.Also = append(slices.Clone(student.Also), compte)
+				cle := strings.ToLower(student.Username)
+				empruntes[cle] = append(empruntes[cle], compte)
 			}
 		}
 		// Tous ses comptes comptent comme connus : un dépôt arrivé sous l'un
@@ -340,7 +358,7 @@ func (c Classroom) Enrich(names Names, repos []groups.RepoInfo) Classroom {
 	}
 
 	c.Students = complets
-	c.derived, c.aliases = deduits, alias
+	c.derived, c.aliases, c.borrowed = deduits, alias, empruntes
 	return c
 }
 
@@ -372,16 +390,28 @@ func (c Classroom) Trimmed(names Names) Classroom {
 // declared retire ce que le registre a révélé, pour ne garder que ce qui a été
 // déclaré ici. C'est cette liste-là qui s'écrit sur le disque.
 func (c Classroom) declared() Classroom {
-	if len(c.derived) == 0 {
+	if len(c.derived) == 0 && len(c.borrowed) == 0 {
 		return c
 	}
 	gardes := make([]roster.Person, 0, len(c.Students))
 	for _, student := range c.Students {
-		if !c.derived[strings.ToLower(student.Username)] {
-			gardes = append(gardes, student)
+		cle := strings.ToLower(student.Username)
+		if c.derived[cle] {
+			continue
 		}
+		if empruntes := c.borrowed[cle]; len(empruntes) > 0 {
+			student.Also = slices.DeleteFunc(slices.Clone(student.Also), func(compte string) bool {
+				return slices.ContainsFunc(empruntes, func(emprunte string) bool {
+					return strings.EqualFold(emprunte, compte)
+				})
+			})
+			if len(student.Also) == 0 {
+				student.Also = nil
+			}
+		}
+		gardes = append(gardes, student)
 	}
-	c.Students, c.derived = gardes, nil
+	c.Students, c.derived, c.borrowed = gardes, nil, nil
 	return c
 }
 

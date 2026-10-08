@@ -187,7 +187,8 @@ func TestLeFichierEstStableEtTrie(t *testing.T) {
 	if err := json.Unmarshal(premier, &lu); err != nil {
 		t.Fatal(err)
 	}
-	if lu.Version != registry.Version {
+	// Sans renvoi d'un compte à un autre, rien n'exige la version 3.
+	if lu.Version != 2 {
 		t.Errorf("version écrite = %d", lu.Version)
 	}
 	comptes := make([]string, 0, len(lu.Users))

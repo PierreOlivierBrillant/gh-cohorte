@@ -50,6 +50,11 @@ type Options struct {
 	// lui, la fiche se contente de s'afficher.
 	Teacher    bool
 	TeacherSet bool
+	// SameAs dit que le compte visé par User est la même personne que celui-ci,
+	// qui la désigne ensuite ; Separate l'en sépare. La réunion s'écrit au
+	// registre : aucune liste ni aucun dépôt n'est touché, et elle se défait.
+	SameAs   string
+	Separate bool
 	// Teachers est la composition exacte de l'équipe enseignante du groupe
 	// géré, comptes séparés par des virgules. TeachersOn distingue le drapeau
 	// absent — qui ne fait qu'afficher le cloisonnement — d'une liste vide,
@@ -272,6 +277,7 @@ Utilisation :
   gh cohorte --user ecote                     la fiche de @ecote et son passage
   gh cohorte --user jdupont --teacher         reconnaître @jdupont comme enseignant
   gh cohorte --user aleksilepaj --full-name "Aleksi Lepaj"
+  gh cohorte --user Mr-Commetuveux --same-as commetuveuxx --dry-run
   gh cohorte --manage a26.5n6.01 --student ecote --full-name "Émilie Côté" --rename-repos -y
   gh cohorte --manage a26.5n6.01 --teachers "prof,jdupont" -y
   gh cohorte --import                         reprendre des dépôts nommés autrement
@@ -316,6 +322,9 @@ Drapeaux :
   --rename-repos           renommer aussi les dépôts de l'étudiant de --student pour
                            qu'ils portent son nom (aperçu avec --dry-run)
   --teacher[=false]        reconnaître le compte de --user comme enseignant, ou l'en défaire
+  --same-as COMPTE         dire que le compte de --user est la même personne que COMPTE,
+                           qui la désigne ensuite (aperçu avec --dry-run)
+  --separate               séparer le compte de --user des autres comptes de sa personne
   --teachers COMPTES       composition de l'équipe enseignante du groupe de --manage ;
                            elle reçoit ses dépôts, et elle seule les voit
   --import [TRAVAIL]       reprendre des dépôts « travail-compte » ; vide, les lister
@@ -495,6 +504,10 @@ func Parse(args []string, out io.Writer) (*Options, error) {
 		"nouveau compte GitHub de l'étudiant de --student")
 	set.BoolVar(&options.RenameRepos, "rename-repos", false,
 		"renommer aussi les dépôts de l'étudiant de --student")
+	set.StringVar(&options.SameAs, "same-as", "",
+		"dire que le compte de --user est la même personne que celui-ci")
+	set.BoolVar(&options.Separate, "separate", false,
+		"séparer le compte de --user des autres comptes de sa personne")
 	enseignant := set.String("teacher", unset,
 		"reconnaître le compte visé comme enseignant (--teacher=false le retire)")
 	enseignants := set.String("teachers", unset,
@@ -756,6 +769,15 @@ func (o *Options) checkStudent() error {
 	if !etudiant && (o.RenameRepos || strings.TrimSpace(o.StudentAccount) != "") {
 		return valid.Errorf("--rename-repos et --student-account accompagnent " +
 			"« --student COMPTE » : ajoutez-le pour dire de qui il s'agit.")
+	}
+	reunir := strings.TrimSpace(o.SameAs) != ""
+	if (reunir || o.Separate) && strings.TrimSpace(o.User) == "" {
+		return valid.Errorf("--same-as et --separate accompagnent « --user COMPTE » : " +
+			"ajoutez-le pour dire de quel compte il s'agit.")
+	}
+	if reunir && o.Separate {
+		return valid.Errorf("--same-as réunit deux comptes, --separate les sépare : " +
+			"choisissez l'un ou l'autre.")
 	}
 	return nil
 }

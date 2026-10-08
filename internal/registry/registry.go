@@ -31,6 +31,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -92,7 +93,17 @@ const (
 // La version 2 ajoute le rôle et range les fiches sous « users ». Une version 1
 // se relit telle quelle — sans rôle, tout le monde est étudiant —, et se
 // réécrit en version 2 à la première écriture.
-const Version = 2
+//
+// La version 3 ajoute le renvoi d'un compte à un autre de la même personne
+// (« same_as »). Elle n'est écrite que lorsqu'un renvoi existe : un poste resté
+// en version 2 relit sans perte un registre qui n'en porte aucun, et l'avertir
+// pour rien lui apprendrait à ignorer l'avertissement. Quand il y en a un, en
+// revanche, l'avertissement est mérité : ce poste-là montrerait deux personnes,
+// et réécrirait le fichier sans le renvoi.
+const Version = 3
+
+// plainVersion est celle qu'on écrit quand rien n'exige la suivante.
+const plainVersion = 2
 
 // User est une personne connue de l'organisation : un étudiant, ou quelqu'un
 // qui enseigne.
@@ -125,6 +136,20 @@ type User struct {
 	// nom courant et quelques heuristiques. Ici il est déclaré.
 	Slugs   []string `json:"slugs,omitempty"`
 	AddedAt string   `json:"added_at,omitempty"`
+	// SameAs renvoie à l'autre compte de la même personne : celui qui la
+	// désigne, et dont le nom et le matricule l'emportent. Vide, la fiche est
+	// la sienne propre.
+	//
+	// C'est un renvoi plutôt qu'une fusion des deux fiches. Fondre l'une dans
+	// l'autre perdrait ce que celle qu'on retire savait — son nom, ses slugs,
+	// sa date d'ajout —, et la fusion ne pourrait plus se défaire : or une
+	// fusion erronée réunit deux vraies personnes sous un seul dépôt, ce que
+	// le refus des homonymes protège justement. Le renvoi se retire, et chaque
+	// fiche retrouve alors exactement ce qu'elle portait.
+	//
+	// Rien ne l'écrit qu'une décision : « Join » et « Split ». Un nom ne se
+	// rapproche jamais d'un autre tout seul.
+	SameAs string `json:"same_as,omitempty"`
 }
 
 // Key sert au rangement : le compte GitHub est insensible à la casse.
@@ -185,6 +210,17 @@ func (u User) validate() (User, error) {
 	}
 	u.StudentID = strings.TrimSpace(u.StudentID)
 	u.Slugs = cleanSlugs(u.Slugs)
+	// Un renvoi illisible est retiré plutôt que de faire écarter la fiche :
+	// une faute de frappe dans « same_as » ne doit pas priver la personne de
+	// son nom. « Decode » le signale.
+	u.SameAs = strings.TrimSpace(u.SameAs)
+	if u.SameAs != "" {
+		autre, err := valid.Login(u.SameAs, "Même personne que")
+		if err != nil || strings.EqualFold(autre, u.Username) {
+			autre = ""
+		}
+		u.SameAs = autre
+	}
 	return u, nil
 }
 
@@ -217,6 +253,11 @@ type Set struct {
 	users   []User // rangés par compte, casse ignorée
 	byLogin map[string]int
 	bySlug  map[string]int
+	// roots donne, pour chaque fiche, la position de celle qui désigne sa
+	// personne ; others, pour chacune de celles-là, les fiches qui y renvoient.
+	// Une personne à un seul compte est sa propre racine, sans autres.
+	roots  []int
+	others map[int][]int
 	// Le registre a deux sections, dans deux fichiers : les utilisateurs, et
 	// les dates de remise. Elles sont tenues ensemble parce qu'un seul commit
 	// les scelle — ce qu'on a lu de l'une vaut aussi longtemps que l'autre.
@@ -274,7 +315,49 @@ func newSet(users []User, assignments []Assignment, declared rules.Rules,
 			set.bySlug[slug] = position
 		}
 	}
+	set.roots = rootsOf(rangees)
+	set.others = map[int][]int{}
+	for position, racine := range set.roots {
+		if racine != position {
+			set.others[racine] = append(set.others[racine], position)
+		}
+	}
 	return set
+}
+
+// rootsOf rend, pour chaque fiche, la position de celle qui désigne sa
+// personne.
+//
+// Les renvois s'écrivent toujours vers la fiche qui désigne, si bien qu'un seul
+// saut suffit d'ordinaire. Le fichier se modifie pourtant à la main : une
+// chaîne se suit jusqu'au bout, un renvoi vers un compte inconnu se lit comme
+// absent, et une boucle désigne la première de ses fiches — la même, d'où
+// qu'on y entre, sans quoi deux comptes de la boucle se croiraient chacun la
+// personne entière.
+func rootsOf(fiches []User) []int {
+	position := make(map[string]int, len(fiches))
+	for index, fiche := range fiches {
+		position[fiche.Key()] = index
+	}
+	racines := make([]int, len(fiches))
+	for index := range fiches {
+		chemin := []int{index}
+		courant := index
+		for {
+			cible, connue := position[strings.ToLower(fiches[courant].SameAs)]
+			if fiches[courant].SameAs == "" || !connue {
+				break
+			}
+			if deja := slices.Index(chemin, cible); deja >= 0 {
+				courant = slices.Min(chemin[deja:])
+				break
+			}
+			chemin = append(chemin, cible)
+			courant = cible
+		}
+		racines[index] = courant
+	}
+	return racines
 }
 
 // Empty rend un registre vide : celui d'une organisation qu'on n'a pas encore
@@ -364,14 +447,70 @@ func (s *Set) Find(username string) (User, bool) {
 	return s.users[position], true
 }
 
-// Teachers rend ceux qui enseignent, rangés par compte. C'est ce qui permet de
+// PersonOf rend la personne entière derrière un compte : celui qui la désigne,
+// avec ce que ses autres comptes savent d'elle.
+//
+// Ce qui l'emporte est dit ici, une fois. Le nom complet et le matricule sont
+// ceux du compte qui la désigne, et ceux d'un autre de ses comptes à défaut : le
+// renvoi a été écrit vers ce compte-là, c'est lui qu'on a choisi de garder. Le
+// rôle, lui, est celui du plus haut : si l'un de ses comptes enseigne, elle
+// enseigne. Les slugs s'additionnent — chacun rattache des dépôts déjà créés.
+func (s *Set) PersonOf(username string) (User, bool) {
+	position, connu := s.byLogin[strings.ToLower(strings.TrimSpace(username))]
+	if !connu {
+		return User{}, false
+	}
+	return s.whole(position), true
+}
+
+// whole compose la personne entière à partir de l'une de ses fiches.
+func (s *Set) whole(position int) User {
+	racine := s.roots[position]
+	fiche := s.users[racine]
+	fiche.SameAs = ""
+	for _, autre := range s.others[racine] {
+		suivante := s.users[autre]
+		if strings.TrimSpace(fiche.FullName) == "" {
+			fiche.FullName = suivante.FullName
+		}
+		if fiche.StudentID == "" {
+			fiche.StudentID = suivante.StudentID
+		}
+		fiche.IsTeacher = fiche.IsTeacher || suivante.IsTeacher
+		fiche.Slugs = cleanSlugs(append(append([]string(nil), fiche.Slugs...),
+			suivante.Slugs...))
+	}
+	return fiche
+}
+
+// Accounts rend tous les comptes de la personne derrière un compte : celui qui
+// la désigne d'abord, puis les autres par ordre alphabétique. Un compte que le
+// registre ignore n'en a aucun.
+func (s *Set) Accounts(username string) []string {
+	position, connu := s.byLogin[strings.ToLower(strings.TrimSpace(username))]
+	if !connu {
+		return nil
+	}
+	racine := s.roots[position]
+	comptes := []string{s.users[racine].Username}
+	for _, autre := range s.others[racine] {
+		comptes = append(comptes, s.users[autre].Username)
+	}
+	return comptes
+}
+
+// Teachers rend ceux qui enseignent, rangés par compte : une fois chacun, sous
+// le compte qui le désigne, même s'il en a plusieurs. C'est ce qui permet de
 // chercher les cours qu'un collègue a déjà donnés, et de proposer un nom quand
 // il faut désigner l'enseignant d'un groupe.
 func (s *Set) Teachers() []User {
 	enseignants := make([]User, 0)
-	for _, fiche := range s.users {
-		if fiche.IsTeacher {
-			enseignants = append(enseignants, fiche)
+	for position := range s.users {
+		if s.roots[position] != position {
+			continue
+		}
+		if personne := s.whole(position); personne.IsTeacher {
+			enseignants = append(enseignants, personne)
 		}
 	}
 	return enseignants
@@ -384,24 +523,28 @@ func (s *Set) Knows(username string) bool {
 	return connu
 }
 
-// Teaches dit si un compte est déclaré enseignant. Un compte inconnu ne
-// l'est pas : le registre est la liste de ce qu'on sait, et ce qu'il ignore
-// n'enseigne pas.
+// Teaches dit si un compte est déclaré enseignant — lui, ou un autre compte de
+// la même personne. Un compte inconnu ne l'est pas : le registre est la liste
+// de ce qu'on sait, et ce qu'il ignore n'enseigne pas.
 func (s *Set) Teaches(username string) bool {
-	fiche, connu := s.Find(username)
-	return connu && fiche.IsTeacher
+	personne, connue := s.PersonOf(username)
+	return connue && personne.IsTeacher
 }
 
-// Name rend le nom complet d'un compte, ou une chaîne vide s'il est inconnu.
+// Name rend le nom complet de la personne derrière un compte, ou une chaîne
+// vide s'il est inconnu.
 func (s *Set) Name(username string) string {
-	fiche, connu := s.Find(username)
-	if !connu {
+	personne, connue := s.PersonOf(username)
+	if !connue {
 		return ""
 	}
-	return fiche.FullName
+	return personne.FullName
 }
 
-// Resolve retrouve à qui appartient le dernier niveau d'un nom de dépôt.
+// Resolve retrouve à qui appartient le dernier niveau d'un nom de dépôt : la
+// personne entière, sous le compte qui la désigne. Les slugs de chacun de ses
+// comptes y mènent, si bien qu'un dépôt créé sous l'un ou l'autre nom reste le
+// sien.
 //
 // La marque que GitHub ajoute à un nom déjà pris — « -1 », puis « -2 » — n'en
 // fait pas quelqu'un d'autre : « emilie-cote-1 » est « emilie-cote ». Elle
@@ -417,7 +560,7 @@ func (s *Set) Resolve(slug string) (User, bool) {
 		return User{}, false
 	}
 	if position, connu := s.bySlug[fragment]; connu {
-		return s.users[position], true
+		return s.whole(position), true
 	}
 	base, marque := roster.WithoutDuplicateMarker(fragment)
 	if !marque {
@@ -427,7 +570,7 @@ func (s *Set) Resolve(slug string) (User, bool) {
 	if !connu {
 		return User{}, false
 	}
-	return s.users[position], true
+	return s.whole(position), true
 }
 
 // Lookup répond à la question que « classroom » pose au registre : qui se
@@ -438,12 +581,20 @@ func (s *Set) Resolve(slug string) (User, bool) {
 // d'un slug orphelin. Refuser de le dire rendait invisibles — donc
 // innommables et indéplaçables — les personnes qu'on n'a jamais eu l'occasion
 // de nommer, celles des dépôts repris qui portent leur compte.
+//
+// La personne rendue porte tous ses comptes : c'est par là que « classroom »
+// apprend qu'un étudiant en a un autre, et qu'il l'invite, le reconnaît dans
+// une remise et lui attribue ses dépôts sous l'un comme sous l'autre.
 func (s *Set) Lookup(fragment string) (roster.Person, bool) {
 	fiche, trouve := s.Resolve(fragment)
 	if !trouve {
 		return roster.Person{}, false
 	}
-	return fiche.Person(), true
+	personne := fiche.Person()
+	if comptes := s.Accounts(fiche.Username); len(comptes) > 1 {
+		personne.Also = comptes[1:]
+	}
+	return personne, true
 }
 
 // ---------------------------------------------------------------- changement
@@ -468,6 +619,12 @@ type Change struct {
 	// redescendre étudiant l'enseignant qui s'y trouve. Le rôle ne change donc
 	// que lorsqu'on l'a demandé, et pour les comptes qu'on a nommés.
 	Roles []RoleChange
+	// Links réunit des comptes d'une même personne, ou les sépare.
+	//
+	// Il est à part de « Learn » pour la même raison que le rôle : apprendre
+	// quelqu'un ne dit rien de ses autres comptes, et réimporter une liste ne
+	// doit ni réunir deux personnes ni défaire ce qu'une décision a réuni.
+	Links []Link
 	// Deadlines fixe la date cible de travaux. Une date vide la retire : il
 	// n'y a pas de geste séparé pour cela, c'est la même décision prise dans
 	// l'autre sens.
@@ -494,6 +651,13 @@ type Change struct {
 type RoleChange struct {
 	Username  string `json:"username"`
 	IsTeacher bool   `json:"is_teacher"`
+}
+
+// Link dit à quel compte un autre renvoie : « Username » est la même personne
+// que « SameAs ». Un « SameAs » vide l'en sépare.
+type Link struct {
+	Username string `json:"username"`
+	SameAs   string `json:"same_as"`
 }
 
 // Learn compose le changement qui fait connaître des personnes.
@@ -552,6 +716,32 @@ func SetRole(username string, teacher bool) Change {
 	}
 }
 
+// Join compose le changement qui fait d'un compte la même personne qu'un autre.
+// C'est « principal » qui la désigne ensuite : son nom complet et son matricule
+// l'emportent, et c'est sous lui que l'annuaire la montre.
+//
+// Rien n'est retiré ni renommé. Les deux fiches restent entières, l'une
+// renvoyant à l'autre ; les dépôts créés sous l'un ou l'autre nom restent les
+// siens, et aucune liste de groupe n'est touchée.
+func Join(account, principal string) Change {
+	compte, autre := strings.TrimSpace(account), strings.TrimSpace(principal)
+	return Change{
+		Links:  []Link{{Username: compte, SameAs: autre}},
+		Reason: "Réunit @" + compte + " à @" + autre + " : une même personne",
+	}
+}
+
+// Split compose le changement qui défait une réunion : le compte redevient une
+// personne à lui seul, avec exactement ce que sa fiche portait. Les autres
+// comptes de la personne restent ensemble.
+func Split(account string) Change {
+	compte := strings.TrimSpace(account)
+	return Change{
+		Links:  []Link{{Username: compte}},
+		Reason: "Sépare @" + compte + " des autres comptes de sa personne",
+	}
+}
+
 // Schedule compose le changement qui fixe la date cible d'un travail, désigné
 // par son identifiant complet — « a26.5n6.01.tp1 ». Une date vide la retire.
 func Schedule(assignmentID, due string) Change {
@@ -568,7 +758,7 @@ func Reschedule(travaux ...Assignment) Change {
 
 // Empty dit qu'il n'y a rien à écrire.
 func (c Change) Empty() bool {
-	return len(c.Learn) == 0 && len(c.Forget) == 0 &&
+	return len(c.Learn) == 0 && len(c.Forget) == 0 && len(c.Links) == 0 &&
 		len(c.Roles) == 0 && len(c.Deadlines) == 0 && c.Rules == nil &&
 		len(c.Teaching) == 0 && len(c.Marks) == 0 && len(c.Asks) == 0
 }
@@ -616,6 +806,8 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 		index, connu := position[valide.Key()]
 		if !connu {
 			valide.AddedAt = today
+			// Seul « Links » écrit un renvoi : une fiche apprise n'en apporte pas.
+			valide.SameAs = ""
 			position[valide.Key()] = len(fiches)
 			fiches = append(fiches, valide)
 			bouge = true
@@ -626,6 +818,20 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 			fiches[index] = fondu
 			bouge = true
 		}
+	}
+
+	// Les renvois se posent après l'apprentissage, pour la même raison que le
+	// rôle, et avant lui : retirer le rôle doit atteindre tous les comptes
+	// qu'on vient de réunir.
+	for _, lien := range change.Links {
+		relies, relieOnt, err := linked(fiches, lien, today)
+		if err != nil {
+			return nil, false, err
+		}
+		fiches, bouge = relies, bouge || relieOnt
+	}
+	for index, fiche := range fiches {
+		position[fiche.Key()] = index
 	}
 
 	// Le rôle se pose après l'apprentissage : coopter quelqu'un qu'on vient
@@ -641,17 +847,30 @@ func (s *Set) With(change Change, today string) (*Set, bool, error) {
 				"Le registre ne connaît pas @%s : son rôle ne peut pas être changé "+
 					"tant qu'il n'y figure pas.", compte)
 		}
-		if fiches[index].IsTeacher == role.IsTeacher {
-			continue
+		// Reconnaître quelqu'un se pose sur le compte nommé : il suffit que
+		// l'un des siens enseigne. Le lui retirer, en revanche, doit atteindre
+		// tous ses comptes — sans quoi un autre continuerait d'enseigner pour
+		// lui, et le geste n'aurait rien fait.
+		touchees := []int{index}
+		if !role.IsTeacher {
+			touchees = samePerson(fiches, index)
 		}
-		fiches[index].IsTeacher = role.IsTeacher
-		bouge = true
+		for _, touchee := range touchees {
+			if fiches[touchee].IsTeacher == role.IsTeacher {
+				continue
+			}
+			fiches[touchee].IsTeacher = role.IsTeacher
+			bouge = true
+		}
 	}
 
 	if len(change.Forget) > 0 {
 		oublies := map[string]bool{}
 		for _, username := range change.Forget {
 			oublies[strings.ToLower(strings.TrimSpace(username))] = true
+			// Oublier le compte qui désigne une personne ne doit pas séparer
+			// les autres : ils restent ensemble, sous l'un d'eux.
+			fiches = unlinked(fiches, strings.TrimSpace(username))
 		}
 		restantes := make([]User, 0, len(fiches))
 		for _, fiche := range fiches {
@@ -762,10 +981,142 @@ func (s *Set) scheduled(demandes []Assignment, today string) ([]Assignment, bool
 	return gardes, bouge, nil
 }
 
+// samePerson rend les positions des fiches de la même personne qu'une autre,
+// elle comprise.
+func samePerson(fiches []User, index int) []int {
+	racines := rootsOf(fiches)
+	memes := make([]int, 0, 2)
+	for position, racine := range racines {
+		if racine == racines[index] {
+			memes = append(memes, position)
+		}
+	}
+	return memes
+}
+
+// linked pose ou retire un renvoi, et dit si le registre a bougé.
+//
+// Redire une réunion qui existe déjà, ou défaire une qui n'existe plus, ne
+// change rien plutôt que d'échouer : c'est ce qui rend le rejeu sûr quand un
+// collègue a fait le même geste entre la lecture et l'écriture. C'est aux
+// interfaces de dire avant d'écrire que le geste n'a pas lieu d'être.
+func linked(fiches []User, lien Link, today string) ([]User, bool, error) {
+	compte, err := valid.Login(lien.Username, "Compte GitHub")
+	if err != nil {
+		return nil, false, err
+	}
+	if strings.TrimSpace(lien.SameAs) == "" {
+		separees := unlinked(fiches, compte)
+		return separees, !sameLinks(fiches, separees), nil
+	}
+	principal, err := valid.Login(lien.SameAs, "Même personne que")
+	if err != nil {
+		return nil, false, err
+	}
+	if strings.EqualFold(compte, principal) {
+		return nil, false, valid.Errorf(
+			"@%s et @%s sont le même compte : il n'y a rien à réunir.", compte, principal)
+	}
+
+	// Un compte que le registre ignore y entre, nu : un enseignant ne figure
+	// sur aucune liste, et c'est justement lui qui a le plus souvent deux
+	// comptes. Son nom viendra d'ailleurs, ou de l'autre compte.
+	ajoute := false
+	for _, voulu := range []string{compte, principal} {
+		if !slices.ContainsFunc(fiches, func(fiche User) bool {
+			return strings.EqualFold(fiche.Username, voulu)
+		}) {
+			fiches = append(slices.Clone(fiches), User{Username: voulu, AddedAt: today})
+			ajoute = true
+		}
+	}
+	position := make(map[string]int, len(fiches))
+	for index, fiche := range fiches {
+		position[fiche.Key()] = index
+	}
+	racines := rootsOf(fiches)
+	deCompte := racines[position[strings.ToLower(compte)]]
+	duPrincipal := racines[position[strings.ToLower(principal)]]
+	if deCompte == duPrincipal {
+		return fiches, ajoute, nil
+	}
+
+	// Deux matricules différents sont deux étudiants pour le collège : c'est
+	// la seule chose qui identifie vraiment quelqu'un, et le registre ne la
+	// contredira pas sur la foi d'un clic.
+	matricules := map[int]string{}
+	for index, racine := range racines {
+		if matricule := fiches[index].StudentID; matricule != "" && matricules[racine] == "" {
+			matricules[racine] = matricule
+		}
+	}
+	if a, b := matricules[deCompte], matricules[duPrincipal]; a != "" && b != "" &&
+		!strings.EqualFold(a, b) {
+		return nil, false, valid.Errorf(
+			"@%s porte le matricule %s et @%s le matricule %s : pour le collège, ce "+
+				"sont deux personnes. Si l'un des deux est erroné, corrigez-le d'abord.",
+			compte, a, principal, b)
+	}
+
+	relies := slices.Clone(fiches)
+	cible := relies[duPrincipal].Username
+	for index, racine := range racines {
+		if racine == deCompte {
+			relies[index].SameAs = cible
+		}
+	}
+	// La fiche qui désigne ne renvoie à personne, quoi que le fichier ait pu
+	// lui faire dire à la main.
+	relies[duPrincipal].SameAs = ""
+	return relies, true, nil
+}
+
+// unlinked sépare un compte de sa personne. S'il la désignait, le suivant de
+// ses comptes la désigne désormais : les autres restent ensemble.
+func unlinked(fiches []User, compte string) []User {
+	index := slices.IndexFunc(fiches, func(fiche User) bool {
+		return strings.EqualFold(fiche.Username, compte)
+	})
+	if index < 0 {
+		return fiches
+	}
+	racines := rootsOf(fiches)
+	autres := make([]int, 0, 1)
+	for position, racine := range racines {
+		if position != index && racine == racines[index] {
+			autres = append(autres, position)
+		}
+	}
+	if len(autres) == 0 {
+		return fiches
+	}
+	separees := slices.Clone(fiches)
+	nouvelle := racines[index]
+	if nouvelle == index {
+		nouvelle = autres[0]
+	}
+	for _, autre := range autres {
+		separees[autre].SameAs = ""
+		if autre != nouvelle {
+			separees[autre].SameAs = separees[nouvelle].Username
+		}
+	}
+	separees[index].SameAs = ""
+	return separees
+}
+
+// sameLinks dit si deux suites de fiches portent les mêmes renvois.
+func sameLinks(gauche, droite []User) bool {
+	return slices.EqualFunc(gauche, droite, func(a, b User) bool {
+		return strings.EqualFold(a.SameAs, b.SameAs)
+	})
+}
+
 // merge fond ce qu'on vient d'apprendre dans ce qu'on savait déjà.
 //
 // Le rôle n'en fait pas partie : il ne s'apprend pas, il se décide. « Roles »
-// est le seul chemin qui le change.
+// est le seul chemin qui le change. Le renvoi non plus, et pour la même
+// raison : « Links » est le seul à l'écrire.
 func merge(connu, appris User) User {
 	// Un nom vide n'efface jamais un nom connu : apprendre un compte sans son
 	// nom — ce que fait l'adoption de dépôts hérités — n'est pas l'oublier.
@@ -792,7 +1143,7 @@ func merge(connu, appris User) User {
 func same(left, right User) bool {
 	return left.Username == right.Username && left.FullName == right.FullName &&
 		left.StudentID == right.StudentID && left.AddedAt == right.AddedAt &&
-		left.IsTeacher == right.IsTeacher &&
+		left.IsTeacher == right.IsTeacher && strings.EqualFold(left.SameAs, right.SameAs) &&
 		strings.Join(left.Slugs, "\x00") == strings.Join(right.Slugs, "\x00")
 }
 
@@ -862,8 +1213,12 @@ func (d document) entries() []User {
 // pareil : c'est ce qui rend ses différences lisibles sur github.com, où deux
 // personnes viendront les relire.
 func (s *Set) Encode() ([]byte, error) {
+	version := plainVersion
+	if slices.ContainsFunc(s.users, func(fiche User) bool { return fiche.SameAs != "" }) {
+		version = Version
+	}
 	payload, err := json.MarshalIndent(
-		document{Version: Version, Users: s.users}, "", "  ")
+		document{Version: version, Users: s.users}, "", "  ")
 	if err != nil {
 		return nil, valid.Errorf("Registre illisible à l'écriture : %v", err)
 	}
@@ -903,6 +1258,11 @@ func Decode(content []byte) (*Set, []string) {
 			soucis = append(soucis, "Fiche écartée : "+err.Error())
 			continue
 		}
+		if strings.TrimSpace(fiche.SameAs) != "" && valide.SameAs == "" {
+			soucis = append(soucis, "@"+valide.Username+" renvoie à « "+
+				strings.TrimSpace(fiche.SameAs)+" », qui ne désigne aucun autre compte : "+
+				"le renvoi est ignoré.")
+		}
 		if index, deja := position[valide.Key()]; deja {
 			fusionnee, contredit := fondue(fiches[index], valide)
 			fiches[index] = fusionnee
@@ -916,6 +1276,16 @@ func Decode(content []byte) (*Set, []string) {
 		}
 		position[valide.Key()] = len(fiches)
 		fiches = append(fiches, valide)
+	}
+	// Un renvoi vers un compte que le registre ignore se lit comme absent :
+	// le taire laisserait croire réunis deux comptes qui ne le sont plus.
+	for _, fiche := range fiches {
+		if fiche.SameAs != "" && !slices.ContainsFunc(fiches, func(autre User) bool {
+			return strings.EqualFold(autre.Username, fiche.SameAs)
+		}) {
+			soucis = append(soucis, "@"+fiche.Username+" renvoie à @"+fiche.SameAs+
+				", que le registre ne connaît pas : le renvoi est ignoré.")
+		}
 	}
 	if doublons > 0 {
 		soucis = append(soucis, plural(doublons,
@@ -964,6 +1334,10 @@ func fondue(gardee, autre User) (User, bool) {
 	// Le rôle ne s'oublie pas : un enseignant déclaré sur l'une des deux lignes
 	// le reste.
 	gardee.IsTeacher = gardee.IsTeacher || autre.IsTeacher
+	// Un renvoi non plus : il a été décidé, et la ligne qui le porte le dit.
+	if gardee.SameAs == "" {
+		gardee.SameAs = autre.SameAs
+	}
 	// La plus ancienne date d'ajout l'emporte : c'est celle qui dit depuis
 	// quand ce compte est connu.
 	if autre.AddedAt != "" && (gardee.AddedAt == "" || autre.AddedAt < gardee.AddedAt) {

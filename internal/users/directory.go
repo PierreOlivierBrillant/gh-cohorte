@@ -1,6 +1,7 @@
 package users
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -55,19 +56,11 @@ func (e Enrollment) Teaching() bool { return e.Role == AsTeacher }
 // jusqu'ici.
 func Directory(courses []classroom.Classroom, repos []groups.RepoInfo,
 	equipes []teams.Team, infos []teams.Info, known Registry) []Row {
-	parCompte := map[string]int{}
-	annuaire := make([]Row, 0)
+	lignes := make([]Row, 0)
 	for _, cours := range courses {
-		for _, ligne := range Build(cours, repos, equipes) {
-			cle := strings.ToLower(ligne.Username)
-			if position, connu := parCompte[cle]; connu {
-				annuaire[position] = fusionner(annuaire[position], ligne)
-				continue
-			}
-			parCompte[cle] = len(annuaire)
-			annuaire = append(annuaire, ligne)
-		}
+		lignes = append(lignes, Build(cours, repos, equipes)...)
 	}
+	annuaire := together(lignes, known)
 
 	if known != nil {
 		// Le rôle vient du registre, jamais des dépôts : rien dans
@@ -75,7 +68,7 @@ func Directory(courses []classroom.Classroom, repos []groups.RepoInfo,
 		for position := range annuaire {
 			annuaire[position].IsTeacher = teaches(known, annuaire[position])
 		}
-		annuaire, parCompte = withTeachers(annuaire, parCompte, courses, infos, known)
+		annuaire = withTeachers(annuaire, courses, infos, known)
 	}
 
 	sort.SliceStable(annuaire, func(i, j int) bool {
@@ -85,6 +78,126 @@ func Directory(courses []classroom.Classroom, repos []groups.RepoInfo,
 		sortEnrollments(annuaire[position].Enrollments)
 	}
 	return annuaire
+}
+
+// together réunit les lignes d'une même personne, vues par plusieurs groupes ou
+// sous plusieurs comptes.
+//
+// Deux lignes sont la même personne dès qu'elles ont un compte en commun — ce
+// que chaque groupe lui connaît, et ce que le registre a réuni. La clé n'est
+// donc pas le compte qui désigne chaque ligne : deux groupes qui déclarent
+// chacun l'un de ses deux comptes donnaient deux lignes, et ses cours restaient
+// coupés en deux. Rien n'y est déduit du nom.
+//
+// Le compte qui désigne la personne est celui que le registre désigne, et sa
+// ligne passe la première : ce qu'elle dit du nom et du matricule l'emporte.
+func together(lignes []Row, known Registry) []Row {
+	parent := make([]int, len(lignes))
+	for position := range parent {
+		parent[position] = position
+	}
+	racine := func(position int) int {
+		for parent[position] != position {
+			parent[position] = parent[parent[position]]
+			position = parent[position]
+		}
+		return position
+	}
+	parCompte := map[string]int{}
+	for position, ligne := range lignes {
+		for _, compte := range accountsOf(ligne, known) {
+			cle := strings.ToLower(compte)
+			autre, vu := parCompte[cle]
+			if !vu {
+				parCompte[cle] = position
+				continue
+			}
+			// La plus ancienne des deux racines reste : l'ordre des groupes
+			// décide de celui des lignes, comme avant.
+			if a, b := racine(position), racine(autre); a != b {
+				parent[max(a, b)] = min(a, b)
+			}
+		}
+	}
+
+	groupes := map[int][]int{}
+	ordre := make([]int, 0, len(lignes))
+	for position := range lignes {
+		cle := racine(position)
+		if _, vu := groupes[cle]; !vu {
+			ordre = append(ordre, cle)
+		}
+		groupes[cle] = append(groupes[cle], position)
+	}
+	annuaire := make([]Row, 0, len(ordre))
+	for _, cle := range ordre {
+		membres := groupes[cle]
+		principal := principalOf(accountsOf(lignes[membres[0]], known), known)
+		sort.SliceStable(membres, func(i, j int) bool {
+			return holds(lignes[membres[i]].Accounts, principal) &&
+				!holds(lignes[membres[j]].Accounts, principal)
+		})
+		ligne := lignes[membres[0]]
+		ligne.Accounts = append([]string(nil), ligne.Accounts...)
+		for _, autre := range membres[1:] {
+			ligne = fusionner(ligne, lignes[autre])
+		}
+		annuaire = append(annuaire, designated(ligne, known))
+	}
+	return annuaire
+}
+
+// accountsOf rend tous les comptes d'une ligne : les siens, et ceux que le
+// registre leur réunit. Un compte vide n'en est pas un — une liste peut porter
+// quelqu'un dont on ne connaît pas encore le compte —, et le prendre pour une
+// clé réunirait tous ceux-là en une seule personne.
+func accountsOf(ligne Row, known Registry) []string {
+	comptes := make([]string, 0, 1+len(ligne.Accounts))
+	for _, compte := range append([]string{ligne.Username}, ligne.Accounts...) {
+		if strings.TrimSpace(compte) != "" {
+			comptes = append(comptes, compte)
+		}
+	}
+	if known == nil {
+		return comptes
+	}
+	for _, compte := range append([]string(nil), comptes...) {
+		comptes = append(comptes, known.Accounts(compte)...)
+	}
+	return comptes
+}
+
+// principalOf rend le compte qui désigne la personne au registre, ou rien s'il
+// ne la connaît pas.
+func principalOf(comptes []string, known Registry) string {
+	if known == nil {
+		return ""
+	}
+	for _, compte := range comptes {
+		if reunis := known.Accounts(compte); len(reunis) > 0 {
+			return reunis[0]
+		}
+	}
+	return ""
+}
+
+// designated range les comptes d'une ligne, celui qui désigne la personne
+// d'abord, en y ajoutant ceux que le registre lui réunit sans qu'aucun groupe
+// ne les connaisse.
+func designated(ligne Row, known Registry) Row {
+	comptes := accountsOf(ligne, known)
+	principal := principalOf(comptes, known)
+	if principal == "" {
+		return ligne
+	}
+	ranges := []string{principal}
+	for _, compte := range comptes {
+		if !holds(ranges, compte) {
+			ranges = append(ranges, compte)
+		}
+	}
+	ligne.Username, ligne.Accounts = principal, ranges
+	return ligne
 }
 
 // teaches dit si l'un des comptes d'une personne est déclaré enseignant. Elle
@@ -113,19 +226,33 @@ func teaches(known Registry, ligne Row) bool {
 //
 // Ceux qui sont déjà là — un ancien étudiant devenu collègue — gardent leur
 // ligne et ses inscriptions ; seuls les cours donnés s'y ajoutent.
-func withTeachers(annuaire []Row, parCompte map[string]int,
-	courses []classroom.Classroom, infos []teams.Info, known Registry) ([]Row, map[string]int) {
-	noms := map[string]string{}
+//
+// Un enseignant à deux comptes n'a qu'une ligne : ses équipes peuvent porter
+// l'un ou l'autre, et le registre dit qu'ils sont à la même personne.
+func withTeachers(annuaire []Row, courses []classroom.Classroom, infos []teams.Info,
+	known Registry) []Row {
+	parCompte := map[string]int{}
+	for position, ligne := range annuaire {
+		for _, compte := range ligne.Accounts {
+			parCompte[strings.ToLower(compte)] = position
+		}
+	}
+	noms := map[string][]string{}
 	ordre := make([]string, 0)
 	ajouter := func(compte string) {
-		cle := strings.ToLower(strings.TrimSpace(compte))
-		if cle == "" {
+		compte = strings.TrimSpace(compte)
+		if compte == "" {
 			return
 		}
+		comptes := known.Accounts(compte)
+		if len(comptes) == 0 {
+			comptes = []string{compte}
+		}
+		cle := strings.ToLower(comptes[0])
 		if _, vu := noms[cle]; vu {
 			return
 		}
-		noms[cle] = compte
+		noms[cle] = comptes
 		ordre = append(ordre, cle)
 	}
 	for _, fiche := range known.Teachers() {
@@ -140,36 +267,43 @@ func withTeachers(annuaire []Row, parCompte map[string]int,
 	}
 
 	for _, cle := range ordre {
-		compte := noms[cle]
-		donnes := taughtIn(courses, infos, compte)
-		position, connu := parCompte[cle]
+		comptes := noms[cle]
+		donnes := taughtIn(courses, infos, comptes)
+		position, connu := -1, false
+		for _, compte := range comptes {
+			if position, connu = parCompte[strings.ToLower(compte)]; connu {
+				break
+			}
+		}
 		if !connu {
-			parCompte[cle] = len(annuaire)
+			for _, compte := range comptes {
+				parCompte[strings.ToLower(compte)] = len(annuaire)
+			}
 			annuaire = append(annuaire, Row{
-				FullName: known.Name(compte), Username: compte,
-				Accounts: []string{compte}, IsTeacher: true,
+				FullName: known.Name(comptes[0]), Username: comptes[0],
+				Accounts: comptes, IsTeacher: true,
 				Repos: []Repo{}, Enrollments: donnes,
 			})
 			continue
 		}
 		annuaire[position].IsTeacher = true
 		if annuaire[position].FullName == "" {
-			annuaire[position].FullName = known.Name(compte)
+			annuaire[position].FullName = known.Name(comptes[0])
 		}
 		annuaire[position].Enrollments = append(annuaire[position].Enrollments, donnes...)
 	}
-	return annuaire, parCompte
+	return annuaire
 }
 
-// taughtIn énumère les groupes qu'un compte enseigne, lus dans leurs équipes
-// enseignantes. C'est la seule trace qu'un enseignement laisse : rien ne
-// l'inscrit ailleurs.
+// taughtIn énumère les groupes qu'une personne enseigne, sous l'un ou l'autre
+// de ses comptes, lus dans leurs équipes enseignantes. C'est la seule trace
+// qu'un enseignement laisse : rien ne l'inscrit ailleurs.
 func taughtIn(courses []classroom.Classroom, infos []teams.Info,
-	account string) []Enrollment {
+	accounts []string) []Enrollment {
 	donnes := make([]Enrollment, 0)
 	for _, cours := range courses {
 		equipe, existe := cours.TeacherTeam(infos)
-		if !existe || !equipe.Has(account) {
+		if !existe || !slices.ContainsFunc(accounts, equipe.Has) {
 			continue
 		}
 		inscription := Enrollment{

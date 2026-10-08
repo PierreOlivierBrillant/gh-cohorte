@@ -22,6 +22,9 @@ import (
 type directoryRow struct {
 	FullName string `json:"full_name"`
 	Username string `json:"username"`
+	// Accounts les porte tous : une ligne peut réunir deux comptes, et c'est
+	// en les voyant côte à côte qu'on sait qu'une réunion a eu lieu.
+	Accounts []string `json:"accounts"`
 	// IsTeacher est ce que le registre déclare, Role le mot qui le dit.
 	IsTeacher   bool                  `json:"is_teacher"`
 	Role        string                `json:"role"`
@@ -77,20 +80,12 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 		fail(writer, err)
 		return
 	}
-	repos, source, err := s.repos(org, request.URL.Query().Get("refresh") == "1")
+	annuaire, err := s.directoryOf(org, request.URL.Query().Get("refresh") == "1")
 	if err != nil {
 		fail(writer, err)
 		return
 	}
-
-	visibles := s.visibles(org, repos)
-	// Les équipes disent deux choses : lesquels des dépôts appartiennent à une
-	// équipe plutôt qu'à personne, et qui enseigne chaque groupe. Sans elles,
-	// l'annuaire compterait les uns orphelins et ignorerait les autres.
-	infos, _ := s.orgTeams(org, false)
-	equipes := teamsOfAll(visibles, infos)
-	set, avis := s.names(org)
-	toutes := users.Directory(visibles, s.activite(org, repos), equipes, infos, set)
+	toutes, set := annuaire.rows, annuaire.set
 	retenues := users.Apply(toutes, filtre, tri, decroissant)
 
 	lignes := make([]directoryRow, 0, len(retenues))
@@ -108,9 +103,45 @@ func (s *Server) handleDirectory(writer http.ResponseWriter, request *http.Reque
 		"total":    len(toutes), "shown": len(lignes),
 		// Les dépôts que personne ne réclame : sans eux, une liste incomplète
 		// se lirait comme si elle était entière.
-		"unmatched": users.Unmatched(visibles, repos, equipes),
-		"org":       org, "source": source, "notice": avis,
+		"unmatched": users.Unmatched(annuaire.visibles, annuaire.repos, annuaire.equipes),
+		"org":       org, "source": annuaire.source, "notice": annuaire.avis,
+		// Réunir deux comptes est une décision d'enseignant : la page n'a pas
+		// à deviner la règle pour savoir si elle le propose.
+		"may_decide": users.MayDecide(set, s.deps.Viewer),
 	})
+}
+
+// annuaireDe est l'annuaire d'une organisation, avec ce qui a servi à le
+// dresser.
+type annuaireDe struct {
+	rows     []users.Row
+	set      *registry.Set
+	avis     string
+	source   string
+	visibles []classroom.Classroom
+	repos    []groups.RepoInfo
+	equipes  []teams.Team
+}
+
+// directoryOf dresse l'annuaire d'une organisation. La liste et les gestes
+// qu'on y fait partent du même : ce qu'on réunit doit être ce qu'on voyait.
+func (s *Server) directoryOf(org string, refresh bool) (annuaireDe, error) {
+	repos, source, err := s.repos(org, refresh)
+	if err != nil {
+		return annuaireDe{}, err
+	}
+	visibles := s.visibles(org, repos)
+	// Les équipes disent deux choses : lesquels des dépôts appartiennent à une
+	// équipe plutôt qu'à personne, et qui enseigne chaque groupe. Sans elles,
+	// l'annuaire compterait les uns orphelins et ignorerait les autres.
+	infos, _ := s.orgTeams(org, false)
+	equipes := teamsOfAll(visibles, infos)
+	set, avis := s.names(org)
+	return annuaireDe{
+		rows: users.Directory(visibles, s.activite(org, repos), equipes, infos, set),
+		set:  set, avis: avis, source: source,
+		visibles: visibles, repos: repos, equipes: equipes,
+	}, nil
 }
 
 // directoryRow rassemble les dépôts d'une personne sous le groupe d'où ils
@@ -140,7 +171,7 @@ func (s *Server) directoryRow(org string, ligne users.Row) directoryRow {
 		})
 	}
 	return directoryRow{
-		FullName: ligne.FullName, Username: ligne.Username,
+		FullName: ligne.FullName, Username: ligne.Username, Accounts: ligne.Accounts,
 		IsTeacher: ligne.IsTeacher, Role: ligne.Role(),
 		Enrollments: inscriptions, Repos: len(ligne.Repos), PushedAt: ligne.PushedAt,
 	}
@@ -202,6 +233,7 @@ func (s *Server) handleUser(writer http.ResponseWriter, request *http.Request) {
 		// bouton ne laisserait aucun chemin pour le faire.
 		"viewer": s.deps.Viewer, "viewer_teaches": set.Teaches(s.deps.Viewer),
 		"teachers": len(set.Teachers()), "host": s.hostName(),
+		"may_decide": users.MayDecide(set, s.deps.Viewer),
 		// Les équipes disent quels cours quelqu'un a donnés ; elles ne disent
 		// pas quels travaux — leurs noms ne se lisent que dans des dépôts qu'un
 		// collègue cloisonné ne voit pas. C'est le catalogue qui comble ce trou,
@@ -276,6 +308,88 @@ func (s *Server) handleUserRole(writer http.ResponseWriter, request *http.Reques
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"username": compte, "is_teacher": fiche.IsTeacher, "role": fiche.Role(),
 	})
+}
+
+// --------------------------------------------------------- même personne
+
+// Réunir deux comptes se décide dans « users » : qui peut, ce qui est refusé,
+// ce qui l'emporte. Le serveur ne fait que transmettre les deux comptes et
+// rendre ce qui revient.
+
+// handleSameCandidates énumère les personnes qu'on peut réunir à celle d'un
+// compte, les homonymes d'abord. Elle part de l'annuaire entier, pas de ce
+// qu'un filtre laisse voir : l'autre compte est souvent justement caché.
+func (s *Server) handleSameCandidates(writer http.ResponseWriter, request *http.Request) {
+	compte, err := valid.Login(request.PathValue("account"), "Compte GitHub")
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	annuaire, err := s.directoryOf(s.org(), false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"username":   compte,
+		"candidates": users.Candidates(annuaire.rows, compte),
+	})
+}
+
+// handleJoin réunit le compte de l'adresse à un autre, qui désigne ensuite la
+// personne. « dry_run » dit ce que la réunion fera sans l'écrire : la page le
+// montre avant de demander de confirmer.
+func (s *Server) handleJoin(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		SameAs string `json:"same_as"`
+		DryRun bool   `json:"dry_run"`
+	}
+	if err := decode(request, &body); err != nil {
+		fail(writer, err)
+		return
+	}
+	org := s.org()
+	annuaire, err := s.directoryOf(org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	reunion, err := users.PlanJoin(annuaire.rows, annuaire.set, s.deps.Viewer, org,
+		request.PathValue("account"), body.SameAs)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if !body.DryRun {
+		if _, err := s.registryOf(org).Apply(reunion.Change); err != nil {
+			fail(writer, err)
+			return
+		}
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"joining": reunion, "dry_run": body.DryRun,
+	})
+}
+
+// handleSplit sépare le compte de l'adresse des autres comptes de sa personne.
+func (s *Server) handleSplit(writer http.ResponseWriter, request *http.Request) {
+	org := s.org()
+	annuaire, err := s.directoryOf(org, false)
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	separation, err := users.PlanSplit(annuaire.rows, annuaire.set, s.deps.Viewer, org,
+		request.PathValue("account"))
+	if err != nil {
+		fail(writer, err)
+		return
+	}
+	if _, err := s.registryOf(org).Apply(separation.Change); err != nil {
+		fail(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"splitting": separation})
 }
 
 // newcomer compose la fiche de quelqu'un que le registre ne connaît pas encore,

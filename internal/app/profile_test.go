@@ -268,8 +268,8 @@ func TestCorrigerUnNomDepuisLaFicheInteractive(t *testing.T) {
 	h.Options.StudentsRequested = false
 	h.Options.User = "emilie-cote"
 
-	// Corriger ? oui ; le nom ; coopter ? non.
-	code, scripte := h.script("o", "Émilie Côté-Roy", "n")
+	// Corriger ? oui ; le nom ; coopter ? non ; ses comptes : rien.
+	code, scripte := h.script("o", "Émilie Côté-Roy", "n", "rien")
 	if code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
@@ -294,8 +294,9 @@ func TestUnNomInchangeNEcritRienAuTerminal(t *testing.T) {
 	h.Options.StudentsRequested = false
 	h.Options.User = "emilie-cote"
 
-	// Corriger ? oui ; Entrée garde le nom proposé ; coopter ? non.
-	if code, _ := h.script("o", "", "n"); code != app.ExitOK {
+	// Corriger ? oui ; Entrée garde le nom proposé ; coopter ? non ; ses
+	// comptes : rien.
+	if code, _ := h.script("o", "", "n", "rien"); code != app.ExitOK {
 		t.Fatalf("code = %d\n%s", code, h.texte())
 	}
 	h.contient("Le nom n'a pas changé.")
