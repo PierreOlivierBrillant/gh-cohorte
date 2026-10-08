@@ -986,21 +986,6 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   100% { left: 100%; }
 }
 
-/* La roue des attentes locales : une zone qui se remplit, un écran qui se
-   prépare. */
-.roue {
-  display: inline-block;
-  width: 1rem;
-  height: 1rem;
-  border: 2px solid var(--bord-net);
-  border-top-color: var(--lien);
-  border-radius: 50%;
-  animation: tourne .8s linear infinite;
-  vertical-align: -.2rem;
-}
-
-@keyframes tourne { to { transform: rotate(360deg); } }
-
 .attente {
   display: flex;
   gap: .6rem;
@@ -1028,10 +1013,8 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 
 .demarrage p { margin: 0; }
 
-/* Milou court le temps que la page attende le serveur. C'est le seul écran
-   qui bloque tout, et une roue qui tourne n'y disait rien de l'outil ; les
-   attentes locales, elles, gardent leur roue — un chien par boîte serait du
-   bruit.
+/* Milou court le temps que la page attende le serveur — c'est le seul écran
+   qui bloque tout, et une roue qui tourne n'y disait rien de l'outil.
 
    Les dessins sont ceux d'Hergé, jamais redessinés. L'animation est donc
    celle d'une marionnette de papier : Milou rebondit et tangue au rythme
@@ -1046,14 +1029,7 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
   height: 200px;
 }
 
-.milou-court {
-  display: block;
-  width: 160px;
-  height: auto;
-  margin-bottom: 14px;
-  transform-origin: 50% 100%;
-  animation: milou-trot .3s ease-in-out infinite alternate;
-}
+.milou-court { display: block; width: 160px; height: auto; margin-bottom: 14px; }
 
 .milou-sol {
   position: absolute;
@@ -1066,17 +1042,19 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
 }
 
 /* Quand le serveur ne répond pas, Milou a vu trente-six chandelles. */
-.milou-confus {
-  display: block;
-  width: 200px;
-  height: auto;
-  transform-origin: 50% 90%;
-  animation: milou-tangue 1.8s ease-in-out infinite alternate;
-}
+.milou-grand { display: block; width: 200px; height: auto; }
 
-/* Milou s'en va quand l'interface se ferme, et attend sur un parcours vide. */
+/* Milou ponctue le reste de l'interface — un seul par écran. L'humeur dit le
+   dessin et son mouvement (app.js choisit l'image) ; l'emplacement dit la
+   taille. Un emplacement nouveau se déclare ici, pas dans le script. */
+.milou-trotte { transform-origin: 50% 100%; animation: milou-trot .3s ease-in-out infinite alternate; }
+.milou-confus { transform-origin: 50% 90%; animation: milou-tangue 1.8s ease-in-out infinite alternate; }
+.milou-vide { display: block; width: 72px; height: auto; margin: 0 auto .25rem; }
+.milou-attente { width: 40px; height: auto; flex: none; }
+.milou-operation { width: 34px; height: 34px; object-fit: contain; flex: none; }
+.milou-dialogue { display: block; width: 84px; height: auto; margin: 0 auto; }
 .milou-adieu { display: block; width: 140px; height: auto; margin: 1.5rem 0 1rem; }
-.milou-vide { display: block; width: 130px; height: auto; margin: 0 auto .75rem; }
+.boite-vide p { margin: .25rem 0; }
 
 @keyframes milou-trot { from { transform: translateY(0) rotate(-1.5deg); } to { transform: translateY(-8px) rotate(1.5deg); } }
 @keyframes milou-defile { to { background-position: -26px 0; } }
@@ -1087,10 +1065,9 @@ dialog .corps-dialogue > * + * { margin-top: .75rem; }
    s'en va. */
 @media (prefers-reduced-motion: reduce) {
   .attente-reseau::before { animation: none; width: 100%; opacity: .5; }
-  .roue { animation: none; border-top-color: var(--bord-net); }
   .occupe { transition: none; }
   /* Milou s'arrête ; sa pose dit encore qu'on attend. */
-  .milou-court, .milou-sol, .milou-confus { animation: none; }
+  .milou-trotte, .milou-sol, .milou-confus { animation: none; }
 }
 
 /* ------------------------------------------------- fiche d'un utilisateur */

@@ -60,10 +60,10 @@
            serveur ne répond pas. Ce sont des dessins d'Hergé, employés tels
            quels ; le mouvement vit dans app.css. -->
       <div class="milou-course" id="demarrage-milou" aria-hidden="true">
-        <img class="milou-court" src="/milou/astronaute.png" alt="" width="160" height="194">
+        <img class="milou-trotte milou-court" src="/milou/astronaute.png" alt="" width="160" height="194">
         <span class="milou-sol"></span>
       </div>
-      <img class="milou-confus" id="demarrage-confus" src="/milou/confus.png" alt="" width="200" height="219" hidden>
+      <img class="milou-confus milou-grand" id="demarrage-confus" src="/milou/confus.png" alt="" width="200" height="219" hidden>
       <p id="demarrage-texte">Connexion au serveur local…</p>
       <p class="note" id="demarrage-detail"></p>
       <button type="button" id="demarrage-reessayer" class="bouton" hidden>Réessayer</button>
@@ -1388,6 +1388,7 @@
 <!-- Opérations longues : distribution, clonage, vérifications. -->
 <aside id="operation" hidden>
   <div class="operation-entete">
+    <img id="operation-milou" class="milou-trotte milou-operation" src="/milou/astronaute.png" alt="" aria-hidden="true">
     <strong id="operation-titre"></strong>
     <span class="note" id="operation-etat"></span>
     <button type="button" id="operation-annuler" class="bouton petit">Annuler</button>

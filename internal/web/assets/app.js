@@ -194,20 +194,46 @@ function finRequete() {
   document.body.removeAttribute('aria-busy');
 }
 
+// ------------------------------------------------------------------- milou
+
+// Milou ponctue l'interface, et chaque dessin dit une chose : l'astronaute
+// trotte quand on attend, le roi règne sur ce qui est vide, l'habillé se
+// promène quand il n'y a rien à faire, l'étourdi dit qu'une chose cloche. Un
+// seul par écran : ce sont des signes, pas une décoration. L'humeur choisit
+// le dessin et son mouvement ; l'emplacement, donné par la classe, choisit la
+// taille (voir app.css).
+const dessinsDeMilou = { trotte: 'astronaute', roi: 'roi', promene: 'habille', confus: 'confus' };
+
+function milou(humeur, emplacement) {
+  return el('img', { classe: `milou-${humeur} ${emplacement}`,
+    src: `/milou/${dessinsDeMilou[humeur]}.png`, alt: '', 'aria-hidden': 'true' });
+}
+
+// direVide remplit un emplacement vide : Milou d'abord, le mot ensuite. Quand
+// on attend, il trotte à côté du mot plutôt qu'au-dessus.
+function direVide(mot, texte, humeur) {
+  vider(mot);
+  const attente = humeur === 'trotte';
+  mot.classList.toggle('attente', attente);
+  mot.append(milou(humeur, attente ? 'milou-attente' : 'milou-vide'), el('p', { texte }));
+}
+
 // enAttente occupe une zone encore vide le temps qu'elle se remplisse : sans
 // cela, rien ne distingue une liste vide d'une liste qui arrive.
 function enAttente(conteneur, texte) {
   vider(conteneur);
-  conteneur.append(el('div', { classe: 'boite-vide attente' },
-    el('span', { classe: 'roue', 'aria-hidden': 'true' }),
-    el('span', { texte })));
+  const mot = el('div', { classe: 'boite-vide' });
+  direVide(mot, texte, 'trotte');
+  conteneur.append(mot);
 }
 
 // enEchec remplace l'attente quand la réponse n'est jamais venue : rester sur
 // « chargement… » ferait croire que ça arrive encore.
 function enEchec(conteneur, texte) {
   vider(conteneur);
-  conteneur.append(el('div', { classe: 'boite-vide', texte }));
+  const mot = el('div', { classe: 'boite-vide' });
+  direVide(mot, texte, 'confus');
+  conteneur.append(mot);
 }
 
 // occuper estompe une zone déjà remplie pendant qu'elle se recharge : trier ou
@@ -231,12 +257,12 @@ function attendreTable(table, vide, texte) {
     occuper(corps, true);
   } else {
     mot.hidden = false;
-    mot.textContent = texte;
+    direVide(mot, texte, 'trotte');
   }
   return {
     fini(donnees, echec) {
       occuper(corps, false);
-      if (!donnees && !remplie) mot.textContent = echec;
+      if (!donnees && !remplie) direVide(mot, echec, 'confus');
       return !!donnees;
     },
   };
@@ -350,11 +376,20 @@ function ouvrirOperation(fiche) {
     miroirOperation.barre.value = 0;
   }
   $('operation').hidden = false;
+  operationMilou('trotte');
   $('operation-titre').textContent = fiche.label;
   $('operation-etat').textContent = fiche.status;
   $('operation-annuler').hidden = false;
   $('operation-barre').value = 0;
   vider($('operation-journal'));
+}
+
+// Dans le panneau d'opération, Milou dit où on en est : il trotte tant que ça
+// tourne, règne quand c'est fini, et a vu des chandelles si ça a cassé.
+function operationMilou(humeur) {
+  const neuf = milou(humeur, 'milou-operation');
+  neuf.id = 'operation-milou';
+  $('operation-milou').replaceWith(neuf);
 }
 
 function journaliser(texte, ton = '') {
@@ -386,6 +421,7 @@ function appliquerEvenement(evenement) {
       const fin = evenement.data || {};
       $('operation-etat').textContent = fin.status || 'terminé';
       $('operation-annuler').hidden = true;
+      operationMilou(fin.failure ? 'confus' : 'roi');
       if (fin.failure) {
         journaliser(fin.failure, 'err');
       } else {
@@ -1066,7 +1102,7 @@ function dessinerSessions(conteneur) {
 
   if (parSession.size === 0 && herites().length === 0) {
     conteneur.append(el('div', { classe: 'boite-vide' },
-      el('img', { classe: 'milou-vide', src: '/milou/roi.png', alt: '' }),
+      milou('roi', 'milou-vide'),
       el('p', { texte: 'Aucun groupe déclaré pour le moment.' }),
       el('p', { classe: 'note',
         texte: 'Déclarez-en un de toutes pièces, ou reprenez des dépôts qu\'une autre ' +
@@ -1430,6 +1466,7 @@ function dessinerTravaux() {
   $('travaux-bandeau').hidden = sesTravaux.length === 0;
   if (sesTravaux.length === 0) {
     conteneur.append(el('div', { classe: 'boite-vide' },
+      milou('promene', 'milou-vide'),
       el('p', { texte: 'Aucun travail dans ce groupe.' }),
       el('p', { classe: 'note',
         texte: '« Nouveau travail » crée un dépôt par étudiant du groupe.' })));
@@ -1637,7 +1674,7 @@ function dessinerTravail() {
 
   $('detail-table').hidden = depots.length === 0;
   $('detail-vide').hidden = depots.length > 0;
-  $('detail-vide').textContent = 'Aucun dépôt ne répond à ces critères.';
+  direVide($('detail-vide'), 'Aucun dépôt ne répond à ces critères.', 'roi');
 
   const corps = $('detail-table').querySelector('tbody');
   vider(corps);
@@ -2207,6 +2244,7 @@ async function rafraichirAcces(repo) {
 async function supprimerDepot(repo) {
   const saisie = el('input', { type: 'text', classe: 'champ', placeholder: repo.name });
   const confirme = await demander(`Supprimer « ${repo.name} » ?`, el('div', {},
+    milou('confus', 'milou-dialogue'),
     el('p', { classe: 'avis erreur', texte: 'Suppression définitive : le contenu, les tickets et ' +
       "l'historique seront perdus." }),
     el('label', { classe: 'champ-bloc' },
@@ -2792,9 +2830,9 @@ async function chargerEtudiants(force) {
   vider(corps);
   $('etudiants-table').hidden = etat.etudiants.length === 0;
   $('etudiants-vide').hidden = etat.etudiants.length > 0;
-  $('etudiants-vide').textContent = donnees.total === 0
+  direVide($('etudiants-vide'), donnees.total === 0
     ? 'Aucun étudiant dans ce groupe. Importez une liste « nom complet, compte GitHub ».'
-    : 'Aucun étudiant ne répond à ces critères.';
+    : 'Aucun étudiant ne répond à ces critères.', 'roi');
 
   for (const ligne of etat.etudiants) {
     corps.append(el('tr', {},
@@ -3411,9 +3449,9 @@ function resumerAnnuaire(donnees) {
   // liste trouée comme si elle était entière.
   if (donnees.unmatched) parts.push(`${donnees.unmatched} dépôt(s) sans étudiant connu`);
   $('annuaire-resume').textContent = parts.join(' · ');
-  $('annuaire-vide').textContent = donnees.total === 0
+  direVide($('annuaire-vide'), donnees.total === 0
     ? "Aucun utilisateur connu dans cette organisation. Déclarez un groupe et importez sa liste."
-    : 'Personne ne répond à ces critères.';
+    : 'Personne ne répond à ces critères.', 'roi');
 }
 
 function remplirSessionsDuFiltre(liste) {
@@ -3825,9 +3863,9 @@ function dessinerFrise(personne) {
   const rien = personne.timeline.length === 0;
   frise.hidden = rien;
   $('fiche-vide').hidden = !rien;
-  $('fiche-vide').textContent = rien
+  direVide($('fiche-vide'), rien
     ? "Aucun cours suivi ni donné dans cette organisation."
-    : '';
+    : '', 'roi');
   for (const etape of personne.timeline) {
     frise.append(etapeDeLaFrise(etape));
   }
@@ -4012,9 +4050,8 @@ function dessinerEquipes() {
     : `${etat.equipes.length} équipe(s) · ${places} étudiant(s) sur ${total} en font partie`;
 
   $('equipes-vide').hidden = etat.equipes.length > 0;
-  $('equipes-vide').textContent =
-    "Aucune équipe. « Nouvelle équipe » en crée une sur GitHub ; « Adopter une équipe » " +
-    "reprend une équipe déjà présente dans l'organisation.";
+  direVide($('equipes-vide'), "Aucune équipe. « Nouvelle équipe » en crée une sur GitHub ; « Adopter une équipe » " +
+    "reprend une équipe déjà présente dans l'organisation.", 'promene');
 
   for (const equipe of etat.equipes) {
     const attente = new Set(equipe.waiting || []);
@@ -4455,6 +4492,7 @@ async function supprimerEquipe(equipe) {
                 'seront perdus.' }))),
           confirmation));
 
+  corps.prepend(milou('confus', 'milou-dialogue'));
   if (!await demander('Supprimer une équipe', corps, 'Supprimer')) return;
   const bilan = await tenter(() => api('DELETE',
     `/api/classrooms/${encode(etat.groupe.scope)}/teams/${encode(equipe.short)}`,
@@ -4732,6 +4770,7 @@ $('mig-lancer').addEventListener('click', async () => {
 
 $('gr-supprimer').addEventListener('click', async () => {
   const confirme = await demander(`Oublier « ${etat.groupe.label} » ?`, el('div', {},
+    milou('confus', 'milou-dialogue'),
     el('p', { texte: 'La liste des étudiants et les réglages retenus pour ce groupe sont ' +
       'oubliés.' }),
     el('p', { classe: 'note',
@@ -5771,6 +5810,7 @@ $('registre-oublier').addEventListener('click', async () => {
   const cible = `${org}/.cohorte`;
   const saisie = el('input', { type: 'text', classe: 'champ', placeholder: cible });
   const accord = await demander('Effacer l\'historique du registre ?', el('div', {},
+    milou('confus', 'milou-dialogue'),
     el('p', { classe: 'avis erreur',
       texte: 'Le registre garde son contenu ; c\'est son passé qui disparaît, sans retour.' }),
     el('p', { classe: 'note',

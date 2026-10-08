@@ -75,7 +75,13 @@ porte que des jetons. `app.css` décrit les composants et ne code aucune
 couleur, aucune ombre, aucune fonte : il emploie un jeton, ou on en ajoute un.
 Un test tient les deux palettes ensemble. Les images de Milou, dans
 `internal/web/assets/milou/`, sont des dessins d'Hergé employés tels quels :
-on ne les redessine pas, et on n'anime que leur mouvement d'ensemble.
+on ne les redessine pas, et on n'anime que leur mouvement d'ensemble. Chaque
+dessin dit une chose — l'astronaute trotte quand on attend, le roi règne sur
+ce qui est vide, l'habillé se promène quand il n'y a rien à faire, l'étourdi
+dit qu'une chose cloche — et il n'y en a qu'un par écran : ce sont des signes,
+pas une décoration. Dans `app.js`, `milou(humeur, emplacement)` est le seul
+endroit qui choisisse une image ; les tailles se règlent dans `app.css`, par
+emplacement.
 
 Les dépôts de service de l'organisation — `.cohorte` et `.cohorte-empreintes` —
 gardent leur nom : les renommer imposerait une migration à chaque organisation

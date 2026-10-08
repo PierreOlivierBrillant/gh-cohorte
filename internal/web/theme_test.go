@@ -55,16 +55,16 @@ func TestLattenteDuDemarrageFaitCourirMilou(t *testing.T) {
 	html := string(page)
 	demarrage := html[strings.Index(html, `id="vue-demarrage"`):]
 	demarrage = demarrage[:strings.Index(demarrage, "</section>")]
-	if !strings.Contains(demarrage, `class="milou-court"`) {
+	if !strings.Contains(demarrage, "milou-court") {
 		t.Error("la vue de démarrage doit montrer Milou qui court")
 	}
-	if strings.Contains(demarrage, `class="roue"`) {
-		t.Error("la roue n'a plus sa place sur l'écran de démarrage")
+	if strings.Contains(html, "roue") {
+		t.Error("la roue n'a plus sa place : c'est Milou qui attend")
 	}
-	if strings.Count(html, `class="milou-court"`) != 1 {
-		t.Error("Milou ne court que sur l'écran de démarrage")
+	if strings.Count(html, "milou-court") != 1 {
+		t.Error("le grand Milou ne court que sur l'écran de démarrage")
 	}
-	if !strings.Contains(demarrage, `class="milou-confus"`) {
+	if !strings.Contains(demarrage, "milou-confus") {
 		t.Error("quand le serveur ne répond pas, c'est Milou étourdi qui le dit")
 	}
 }
