@@ -2,8 +2,10 @@ package users
 
 import (
 	"slices"
+	"sort"
 	"strings"
 
+	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-milou/internal/registry"
 	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
@@ -101,6 +103,59 @@ func Candidates(rows []Row, account string) []Candidate {
 		autres = append(autres, candidat)
 	}
 	return append(memes, autres...)
+}
+
+// Seen nomme les comptes qui ont commis dans les dépôts d'une personne sans
+// être les siens ni enseigner : le plus souvent elle-même, sous un autre
+// compte. Ce sont les premiers à proposer quand on la réunit à un autre
+// compte — et souvent le seul qu'on cherche. Sans registre, rien ne dit qui
+// enseigne, et rien n'est proposé plutôt qu'un enseignant.
+func Seen(rows []Row, known Registry, remises map[string]groups.Handin, account string) []string {
+	ligne, trouvee := rowOf(rows, account)
+	if !trouvee || known == nil {
+		return nil
+	}
+	siens := accountsOf(ligne, known)
+	vus := map[string]bool{}
+	comptes := make([]string, 0)
+	for _, depot := range ligne.Repos {
+		remise, lue := remises[depot.Name]
+		if !lue {
+			continue
+		}
+		for _, login := range remise.Strangers(siens, known.Teaches) {
+			if !vus[login] {
+				vus[login] = true
+				comptes = append(comptes, login)
+			}
+		}
+	}
+	sort.Strings(comptes)
+	return comptes
+}
+
+// Witness ajoute à l'annuaire les comptes qu'un historique relevé porte, pour
+// qu'une réunion les accepte. Ils n'y figurent pas — d'aucun groupe, ni du
+// registre —, mais ce ne sont pas des fautes de frappe non plus : quelqu'un a
+// commis sous ce nom dans un dépôt de l'organisation.
+func Witness(rows []Row, remises map[string]groups.Handin, accounts ...string) []Row {
+	temoignees := append(make([]Row, 0, len(rows)+len(accounts)), rows...)
+	for _, compte := range accounts {
+		compte = strings.TrimSpace(compte)
+		if compte == "" {
+			continue
+		}
+		if _, connue := rowOf(temoignees, compte); connue {
+			continue
+		}
+		for _, remise := range remises {
+			if remise.By([]string{compte}) > 0 {
+				temoignees = append(temoignees, Row{Username: compte, Accounts: []string{compte}})
+				break
+			}
+		}
+	}
+	return temoignees
 }
 
 // PlanJoin vérifie qu'on peut réunir deux comptes et dit ce que la réunion

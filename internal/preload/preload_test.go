@@ -20,15 +20,50 @@ type lecteur struct {
 	// préchargement coupé en plein travail.
 	avant   chan struct{}
 	retenir *preload.Warmer
-	remises []string
-	acces   []string
-	lots    int
+	// histoires est ce que la mémoire sait déjà des dépôts.
+	histoires map[string]groups.Handin
+	remises   []string
+	// relus nomme les dépôts relus d'office, mémoire comprise.
+	relus []string
+	acces []string
+	lots  int
 }
 
 func (l *lecteur) Handins(_ string, repos []string, jusqua identity.Reading,
 	_ func(done, total int, repo string)) map[string]groups.Handin {
+	if jusqua == identity.Refresh {
+		l.relire(repos)
+		return nil
+	}
 	l.note(&l.remises, repos, jusqua)
 	return nil
+}
+
+func (l *lecteur) Histories(_ string, repos []string) map[string]groups.Handin {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	trouvees := make(map[string]groups.Handin, len(repos))
+	for _, repo := range repos {
+		if histoire, connue := l.histoires[repo]; connue {
+			trouvees[repo] = histoire
+		}
+	}
+	return trouvees
+}
+
+// relire note une relecture d'office. Elle n'a de sens que pour un historique
+// déjà relevé qu'un envoi a dépassé : relire la mémoire pour autre chose, ce
+// serait payer ce que le préchargement prétend épargner.
+func (l *lecteur) relire(repos []string) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	for _, repo := range repos {
+		if _, releve := l.histoires[repo]; !releve {
+			panic("un préchargement ne relit d'office que ce qu'un envoi a dépassé")
+		}
+	}
+	l.relus = append(l.relus, repos...)
+	l.lots++
 }
 
 func (l *lecteur) Accesses(_ string, repos []string, jusqua identity.Reading,
@@ -64,6 +99,12 @@ func (l *lecteur) vu() (string, string) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	return strings.Join(l.remises, " "), strings.Join(l.acces, " ")
+}
+
+func (l *lecteur) relu() string {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	return strings.Join(l.relus, " ")
 }
 
 func cours(session, matiere, groupe string) classroom.Classroom {
@@ -127,6 +168,33 @@ func TestWarmPrepareLesDeuxLecturesUneSeuleFoisParOrganisation(t *testing.T) {
 	chauffage.Wait()
 	if encore, _ := journal.vu(); encore != attendu {
 		t.Fatalf("le préchargement a recommencé : %q", encore)
+	}
+}
+
+// Un historique qu'un envoi a dépassé est relu d'office, si récent soit-il :
+// l'écran ne le montre plus, et attendre qu'il vieillisse le laisserait vide.
+// Les autres — jamais relevés, ou relevés et encore complets — ne sont lus que
+// s'ils manquent.
+func TestWarmRelitDOfficeLesHistoriquesDepasses(t *testing.T) {
+	journal := &lecteur{histoires: map[string]groups.Handin{
+		"a26.5n6.01.tp1.emilie-cote": {Seen: "2026-09-30T12:00:00Z"},
+		"a26.5n6.01.tp1.jlpicard":    {Seen: "2026-09-30T12:00:00Z"},
+	}}
+	inventaire := []groups.RepoInfo{
+		{Name: "a26.5n6.01.tp1.emilie-cote", PushedAt: "2026-09-30T18:00:00Z"},
+		{Name: "a26.5n6.01.tp1.jlpicard", PushedAt: "2026-09-30T11:00:00Z"},
+		{Name: "a26.5n6.01.tp1.nouveau", PushedAt: "2026-09-30T18:00:00Z"},
+	}
+	chauffage := preload.New()
+	chauffage.Warm(journal, "acme", []classroom.Classroom{cours("a26", "5n6", "01")},
+		inventaire)
+	chauffage.Wait()
+
+	if relus := journal.relu(); relus != "a26.5n6.01.tp1.emilie-cote" {
+		t.Errorf("relus d'office : %q", relus)
+	}
+	if remises, _ := journal.vu(); remises != "a26.5n6.01.tp1.jlpicard a26.5n6.01.tp1.nouveau" {
+		t.Errorf("lus s'ils manquent : %q", remises)
 	}
 }
 

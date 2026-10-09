@@ -1,6 +1,7 @@
 package groups
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -84,6 +85,29 @@ func (h Handin) Covers(pushedAt string) bool {
 	return !envoi.After(vu.Add(seenSkew))
 }
 
+// Complete rend, parmi les historiques relevés, ceux qui couvrent encore tout
+// ce que leur dépôt a reçu. C'est ce qu'un écran peut montrer comme relevé.
+//
+// L'âge n'y entre pas. Un historique que rien n'a dépassé dit encore la vérité
+// une journée plus tard, et un historique qu'un envoi a dépassé ne la dit plus
+// une minute après. Le périmer à l'heure ferait disparaître d'un écran des
+// relevés exacts sans qu'aucun geste l'ait demandé — c'est l'inventaire qui
+// sait si quelque chose a bougé. Un dépôt absent de l'inventaire garde son
+// historique : rien ne dit qu'il a reçu quoi que ce soit.
+func Complete(repos []RepoInfo, remises map[string]Handin) map[string]Handin {
+	envois := make(map[string]string, len(repos))
+	for _, repo := range repos {
+		envois[strings.ToLower(repo.Name)] = repo.PushedAt
+	}
+	completes := make(map[string]Handin, len(remises))
+	for nom, remise := range remises {
+		if remise.Covers(envois[strings.ToLower(nom)]) {
+			completes[nom] = remise
+		}
+	}
+	return completes
+}
+
 // Activity rend l'inventaire tel que les étudiants l'ont fait : le dernier
 // envoi de chaque dépôt y ignore ce que les comptes écartés — ceux qui
 // enseignent — y ont poussé.
@@ -152,6 +176,29 @@ func (h Handin) By(accounts []string) int {
 		total += h.Authors[strings.ToLower(strings.TrimSpace(compte))]
 	}
 	return total
+}
+
+// Strangers nomme les comptes qui ont commis dans le dépôt sans y être
+// attendus : ni l'un des comptes donnés, ni quelqu'un que « ignore » écarte —
+// qui enseigne. Le plus souvent, c'est la personne attendue elle-même sous un
+// autre compte : un courriel resté configuré sur un vieux compte suffit, et
+// GitHub attribue le commit à ce compte-là, quel que soit celui qui a poussé.
+// Parfois c'est quelqu'un d'autre. Dans les deux cas, c'est à qui enseigne de
+// trancher, et il faut d'abord qu'il le voie.
+func (h Handin) Strangers(expected []string, ignore func(login string) bool) []string {
+	attendus := make(map[string]bool, len(expected))
+	for _, compte := range expected {
+		attendus[strings.ToLower(strings.TrimSpace(compte))] = true
+	}
+	etrangers := make([]string, 0)
+	for login := range h.Authors {
+		if login == "" || attendus[login] || (ignore != nil && ignore(login)) {
+			continue
+		}
+		etrangers = append(etrangers, login)
+	}
+	sort.Strings(etrangers)
+	return etrangers
 }
 
 // Signed dit si un auteur sans compte porte ce nom ou cette adresse. C'est le

@@ -50,6 +50,41 @@ func registreDe(t *testing.T, changes ...registry.Change) *registry.Set {
 	return set
 }
 
+// Un compte qui a commis dans les dépôts d'une personne sans être le sien est
+// proposé d'abord : c'est le plus souvent elle-même, sous un autre compte. Et
+// la réunion l'accepte même s'il n'est d'aucun groupe — il a commis ici, ce
+// n'est pas une faute de frappe. Un compte vu nulle part, lui, l'est encore.
+func TestUnCompteVuDansSesDepotsSeProposeEtSeReunit(t *testing.T) {
+	cours, inventaire := deuxSessions()
+	set := registreDe(t)
+	lignes := users.Directory(cours, inventaire, nil, nil, set)
+	remises := map[string]groups.Handin{
+		"a26.5n6.01.tp1.jean-commetuveux": {Authors: map[string]int{"mr-commetuveux": 2, "vieux-jean": 5}},
+	}
+	if vus := users.Seen(lignes, set, remises, "Mr-Commetuveux"); strings.Join(vus, " ") != "vieux-jean" {
+		t.Fatalf("vus = %v", vus)
+	}
+	if _, err := users.PlanJoin(lignes, set, "prof", "acme", "vieux-jean", "Mr-Commetuveux"); err == nil {
+		t.Fatal("un compte inconnu de l'annuaire devait être refusé sans témoin")
+	}
+
+	temoins := users.Witness(lignes, remises, "vieux-jean", "Mr-Commetuveux")
+	if len(temoins) != len(lignes)+1 {
+		t.Fatalf("%d ligne(s) après témoignage, attendu %d", len(temoins), len(lignes)+1)
+	}
+	reunion, err := users.PlanJoin(temoins, set, "prof", "acme", "vieux-jean", "Mr-Commetuveux")
+	if err != nil {
+		t.Fatalf("réunion refusée : %v", err)
+	}
+	if reunion.Principal != "Mr-Commetuveux" ||
+		strings.Join(reunion.Accounts, ",") != "Mr-Commetuveux,vieux-jean" {
+		t.Errorf("réunion = %+v", reunion)
+	}
+	if sans := users.Witness(lignes, remises, "inconnu"); len(sans) != len(lignes) {
+		t.Error("un compte vu nulle part a été ajouté à l'annuaire")
+	}
+}
+
 // Une fois les deux comptes réunis au registre, l'annuaire n'a plus qu'une
 // ligne pour la personne : ses deux cours, ses deux dépôts, sous le compte
 // qu'on a choisi de garder.

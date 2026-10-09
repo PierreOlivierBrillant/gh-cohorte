@@ -1597,6 +1597,9 @@ async function chargerTravail(travail, force, toutCocher) {
     // La nature vient du serveur, qui la lit dans le nom des dépôts : elle
     // n'est déclarée nulle part, et la fiche du groupe peut être plus vieille.
     kind: detail.kind || travail.kind,
+    // Réunir deux comptes depuis une ligne est une décision d'enseignant : le
+    // serveur dit si la page peut le proposer, comme il le dit à la fiche.
+    may_decide: !!detail.may_decide,
   };
   // Le serveur verse ce qu'il sait déjà des accès : ceux qu'un préchargement a
   // lus, et ceux qu'une inspection précédente a mémorisés. La colonne est
@@ -1754,14 +1757,14 @@ const etatsDeRemise = {
 // pastillesDuDepot dit ce que l'historique d'un dépôt a révélé : où en est la
 // remise, et — dans une équipe qui a remis — de qui rien ne porte la trace.
 function pastillesDuDepot(repo) {
-  const etat = etatsDeRemise[repo.state] || etatsDeRemise['non relevé'];
+  const aspect = etatsDeRemise[repo.state] || etatsDeRemise['non relevé'];
   const jetons = [];
   if (repo.state === 'remis') {
     // Une remise à temps se montre par sa date : c'est ce qu'on vient lire.
     jetons.push(el('span', { classe: 'jeton oui', texte: instantLisible(repo.last) }));
   } else if (repo.state === 'en retard') {
     jetons.push(el('span', {
-      classe: etat.classe, texte: etat.texte,
+      classe: aspect.classe, texte: aspect.texte,
       title: `Remis le ${instantLisible(repo.last)}, après la date cible`,
     }));
   } else if (repo.state === 'non remis' && !repo.commits && !(repo.silent || []).length) {
@@ -1769,7 +1772,7 @@ function pastillesDuDepot(repo) {
     // faute — un dépôt hors liste en est —, mais il se voit.
     jetons.push(el('span', { classe: 'jeton', texte: 'aucun commit' }));
   } else {
-    jetons.push(el('span', { classe: etat.classe, texte: etat.texte, title: etat.title }));
+    jetons.push(el('span', { classe: aspect.classe, texte: aspect.texte, title: aspect.title }));
   }
   // Une équipe où l'un seulement se tait est un autre cas : le dépôt a reçu
   // quelque chose, et savoir de qui il ne porte rien est tout ce qui compte.
@@ -1780,6 +1783,27 @@ function pastillesDuDepot(repo) {
       jetons.push(el('span', {
         classe: 'jeton alerte', title: 'Aucun commit de sa part dans ce dépôt',
         texte: personne.full_name || '@' + personne.username,
+      }));
+    }
+  }
+  // Un compte qui a commis ici sans y être attendu : le plus souvent la
+  // personne visée sous un autre compte. Le dire ne suffit pas — il faut
+  // pouvoir les réunir d'ici, sans aller chercher sa fiche puis son compte
+  // parmi des centaines. Un dépôt d'équipe ne dit pas lequel des membres
+  // c'est : il montre le compte, sans proposer le geste.
+  for (const compte of repo.strangers || []) {
+    jetons.push(el('span', {
+      classe: 'jeton alerte', texte: '@' + compte,
+      title: 'A commis dans ce dépôt sans y être attendu : la personne visée sous un '
+        + 'autre compte, ou quelqu’un d’autre',
+    }));
+    if (etat.travail.may_decide && repo.username && !repo.team) {
+      jetons.push(el('button', {
+        classe: 'lien', type: 'button', texte: 'Réunir…',
+        title: `Dire que @${compte} est ${repo.full_name || '@' + repo.username}`,
+        onclick: () => reunirDeuxComptes(
+          { username: repo.username, full_name: repo.full_name }, rechargerTravail,
+          { suggere: compte, garderLeSien: true }),
       }));
     }
   }
@@ -1920,19 +1944,12 @@ $('detail-remises').addEventListener('click', async () => {
   if (!fiche) return;
   const bilans = await suivre(fiche);
   if (!Array.isArray(bilans)) return;
-  // Le serveur a confronté chaque dépôt à la date cible et aux personnes qu'il
-  // vise : la page n'a plus qu'à poser le résultat sur ses lignes.
-  const parNom = new Map(bilans.map((bilan) => [bilan.repo, bilan]));
-  for (const repo of etat.travail.depots) {
-    const bilan = parNom.get(repo.name);
-    if (!bilan) continue;
-    repo.seen = true;
-    repo.commits = bilan.commits;
-    repo.last = bilan.last || '';
-    repo.late = !!bilan.late;
-    repo.silent = bilan.silent || [];
-  }
-  dessinerTravail();
+  // L'état de chaque remise — remis, en retard, non accepté — se décide au
+  // serveur, à partir de l'historique et des accès qu'il vient de relever, et
+  // le dernier envoi d'un dépôt relevé devient celui de l'étudiant. Poser le
+  // bilan sur les lignes en oublierait la moitié : il suffit de relire le
+  // travail, sans réseau, comme après l'inspection des accès.
+  rechargerTravail();
   // La liste des travaux porte les mêmes pastilles : la laisser en arrière
   // ferait dire deux choses différentes au même écran.
   await releverLesRemises(false);
@@ -3754,48 +3771,123 @@ function dessinerReunion(donnees, personne) {
 
 // reunirDeuxComptes demande l'autre compte et lequel des deux désigne la
 // personne, montre ce que la réunion fera, puis l'écrit.
-async function reunirDeuxComptes(personne, ensuite) {
+//
+// Avec des centaines d'anciens étudiants, une liste déroulante ne se lit plus :
+// c'est un champ de recherche qui la remplace. Et l'autre compte est souvent
+// déjà sous les yeux — celui qui a commis dans le dépôt de la personne, que
+// « suggere » apporte, ou ceux que le serveur a vus dans ses dépôts : ils
+// passent en tête, le premier coché. Les homonymes suivent, puis l'annuaire.
+async function reunirDeuxComptes(personne, ensuite, { suggere = '', garderLeSien = false } = {}) {
   const donnees = await tenter(() => api('GET',
     `/api/users/${encode(personne.username)}/same-as`), 'Candidats');
   if (!donnees) return;
   const candidats = donnees.candidates || [];
-  if (candidats.length === 0) {
+  const parCompte = new Map(candidats.map((candidat) => [candidat.username.toLowerCase(), candidat]));
+  // Un compte vu dans un historique n'est parfois d'aucun groupe : il n'a
+  // alors pas de ligne, et il en reçoit une ici — le serveur l'acceptera,
+  // puisqu'il a commis dans l'organisation.
+  const vus = [...new Set([suggere, ...(donnees.seen || [])]
+    .filter(Boolean).map((compte) => compte.toLowerCase()))]
+    .map((compte) => parCompte.get(compte) || { username: compte, accounts: [compte], full_name: '' });
+  const dejaVus = new Set(vus.map((candidat) => candidat.username.toLowerCase()));
+  const restants = candidats.filter((candidat) => !dejaVus.has(candidat.username.toLowerCase()));
+  const VUS = 'Vu dans ses dépôts';
+  const sections = [
+    [VUS, vus],
+    ['Même nom', restants.filter((candidat) => candidat.same_name)],
+    ['Les autres', restants.filter((candidat) => !candidat.same_name)],
+  ].filter(([, membres]) => membres.length);
+  if (sections.length === 0) {
     message("Personne d'autre n'est connu dans cette organisation.", 'alerte');
     return;
   }
-  const intitule = (candidat) => (candidat.full_name || '@' + candidat.username)
-    + ' (@' + candidat.accounts.join(', @') + ')';
-  const homonymes = candidats.filter((candidat) => candidat.same_name);
-  const autres = candidats.filter((candidat) => !candidat.same_name);
-  // Les homonymes passent d'abord : une suggestion, jamais une décision —
-  // deux personnes peuvent s'appeler pareil.
-  const choix = el('select', { classe: 'champ' },
-    homonymes.length
-      ? el('optgroup', { label: 'Même nom' }, homonymes.map((candidat) =>
-          el('option', { value: candidat.username, texte: intitule(candidat) })))
-      : null,
-    el('optgroup', { label: homonymes.length ? 'Les autres' : 'Utilisateurs' },
-      autres.map((candidat) =>
-        el('option', { value: candidat.username, texte: intitule(candidat) }))));
+
+  // Le compte retenu. Le bouton du dialogue n'est connu qu'à l'ouverture :
+  // « preparer » le confie, et il suit le choix ensuite. Rien n'est choisi
+  // d'avance, sauf ce qu'on a vu : la première ligne d'un annuaire n'a aucune
+  // raison d'être la bonne.
+  let choisi = vus.length ? vus[0].username : null;
+  let valider = null;
+  const recherche = el('input', { classe: 'champ', type: 'search',
+    placeholder: 'Filtrer : nom ou compte…' });
+  const liste = el('div', { classe: 'choix-places' });
+  // Les mots sous lesquels un compte se cherche : son nom et chacun de ses
+  // comptes, accents retirés.
+  const mots = new Map();
+  for (const [, membres] of sections) {
+    for (const candidat of membres) {
+      mots.set(candidat.username, aplati([candidat.full_name, ...candidat.accounts].join(' '))
+        .split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+    }
+  }
+
+  function ligneDeCandidat(candidat, vu) {
+    const details = ['@' + candidat.accounts.join(', @')];
+    if (vu) details.push('a commis dans ses dépôts');
+    else if (candidat.same_name) details.push('même nom');
+    return el('button', { classe: 'choix-place', type: 'button',
+      'data-compte': candidat.username, onclick: () => retenir(candidat.username) },
+      el('span', { classe: 'choix-infos' },
+        el('span', { classe: 'titre', texte: candidat.full_name || '@' + candidat.username }),
+        el('span', { classe: 'detail', texte: details.join(' · ') })));
+  }
+
+  function dessiner() {
+    // Chaque mot cherché doit en ouvrir un du candidat, plutôt que se trouver
+    // n'importe où dedans.
+    const termes = aplati(recherche.value.trim()).split(/\s+/).filter(Boolean);
+    vider(liste);
+    let rien = true;
+    for (const [titre, membres] of sections) {
+      const retenus = membres.filter((candidat) => termes.every((terme) =>
+        mots.get(candidat.username).some((mot) => mot.startsWith(terme))));
+      if (retenus.length === 0) continue;
+      rien = false;
+      liste.append(el('div', { classe: 'choix-section', texte: titre }));
+      for (const candidat of retenus) liste.append(ligneDeCandidat(candidat, titre === VUS));
+    }
+    if (rien) liste.append(el('div', { classe: 'boite-vide', texte: 'Aucun compte ne correspond.' }));
+    maj();
+  }
+
+  function maj() {
+    for (const ligne of liste.querySelectorAll('.choix-place')) {
+      ligne.classList.toggle('choisi', ligne.dataset.compte === choisi);
+    }
+    if (valider) valider.disabled = choisi === null;
+  }
+
+  function retenir(compte) {
+    choisi = compte;
+    maj();
+  }
+
+  recherche.addEventListener('input', dessiner);
+  dessiner();
+
   const ici = personne.full_name || '@' + personne.username;
-  const garderCeluiCi = el('input', { type: 'radio', name: 'reunion-garde', value: 'ici' });
-  const garderLAutre = el('input', { type: 'radio', name: 'reunion-garde', value: 'autre', checked: true });
+  const garderCeluiCi = el('input', { type: 'radio', name: 'reunion-garde', value: 'ici',
+    checked: garderLeSien });
+  const garderLAutre = el('input', { type: 'radio', name: 'reunion-garde', value: 'autre',
+    checked: !garderLeSien });
   const corps = el('div', {},
     el('p', {}, el('strong', { texte: ici }), ' travaille aussi sous un autre compte.'),
-    el('label', { classe: 'champ-bloc' },
-      el('span', { classe: 'etiquette', texte: 'Autre compte' }), choix,
+    el('div', { classe: 'champ-bloc' },
+      el('span', { classe: 'etiquette', texte: 'Autre compte' }), recherche, liste,
       el('span', { classe: 'aide', texte:
-        'Rien ne se déduit d’un nom : deux personnes peuvent s’appeler pareil, et '
-        + 'les réunir leur donnerait un seul dépôt pour deux.' })),
+        'Rien ne se déduit d’un nom ni d’un commit : deux personnes peuvent s’appeler '
+        + 'pareil, un ami peut aider, et les réunir leur donnerait un seul dépôt pour deux.' })),
     el('div', { classe: 'champ-bloc' },
       el('span', { classe: 'etiquette', texte: 'Le compte qui la désigne ensuite' }),
       el('label', { classe: 'case' }, garderLAutre,
         el('span', { texte: 'l’autre compte — son nom et son matricule l’emportent' })),
       el('label', { classe: 'case' }, garderCeluiCi,
         el('span', { texte: '@' + personne.username + ' — le sien l’emporte' }))));
-  if (!await demander('Réunir deux comptes', corps, 'Voir ce qui change')) return;
+  const suite = await demander('Réunir deux comptes', corps, 'Voir ce qui change',
+    (bouton) => { valider = bouton; maj(); });
+  if (!suite || !choisi) return;
 
-  const autre = choix.value;
+  const autre = choisi;
   const [compte, garde] = garderCeluiCi.checked
     ? [autre, personne.username] : [personne.username, autre];
   const chemin = `/api/users/${encode(compte)}/same-as`;

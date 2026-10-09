@@ -322,6 +322,31 @@ func TestUnCommitDEnseignantNeDatePasLaRemise(t *testing.T) {
 	}
 }
 
+// Un commit d'un compte que le dépôt ne vise pas se signale : c'est le plus
+// souvent l'étudiante sous un autre compte, et c'est à qui enseigne de le dire.
+// L'enseignant n'est étranger nulle part ; et sans savoir qui enseigne, rien
+// n'est dit plutôt que de le prendre pour un étranger.
+func TestUnCompteInattenduSeSignaleSansRienDeduire(t *testing.T) {
+	repos := depots("a26.5n6.01.tp1.emilie-cote")
+	remises := map[string]groups.Handin{
+		"a26.5n6.01.tp1.emilie-cote": remiseSignee(4, map[string]string{
+			"ecote":        instant("2026-09-30", "20:45"),
+			"vieux-compte": instant("2026-09-29", "10:00"),
+			"prof":         instant("2026-10-03", "16:00"),
+		}),
+	}
+	cours := groupe("a26", "5n6", "01", personnes("Émilie Côté", "ecote")).
+		Staffing(equipeEnseignante{"prof": true})
+	bilans := cours.Reviews("a26.5n6.01.tp1", repos, nil, remises)
+	if len(bilans[0].Strangers) != 1 || bilans[0].Strangers[0] != "vieux-compte" {
+		t.Errorf("étrangers = %v, attendu le seul compte inattendu", bilans[0].Strangers)
+	}
+	sans := groupe("a26", "5n6", "01", personnes("Émilie Côté", "ecote"))
+	if etrangers := sans.Reviews("a26.5n6.01.tp1", repos, nil, remises)[0].Strangers; len(etrangers) != 0 {
+		t.Errorf("sans savoir qui enseigne, %v sont dits étrangers", etrangers)
+	}
+}
+
 // Sans registre branché, rien ne dit qui enseigne : le dernier commit est tout
 // ce qu'on sait, et c'est lui qui date la remise.
 func TestSansRegistreLeDernierCommitDateLaRemise(t *testing.T) {

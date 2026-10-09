@@ -72,6 +72,45 @@ func TestUnReleveCouvreCeQuiLePrecede(t *testing.T) {
 	}
 }
 
+// Un compte qui a commis sans être attendu se nomme ; l'enseignant et les
+// comptes attendus, quelle que soit leur casse, n'en sont pas.
+func TestLesEtrangersSontCeuxQuOnNAttendaitPas(t *testing.T) {
+	remise := groups.Handin{Authors: map[string]int{
+		"ecote": 3, "vieux-compte": 2, "prof": 1, "ami": 1,
+	}}
+	prof := func(login string) bool { return login == "prof" }
+	etrangers := remise.Strangers([]string{"ECote"}, prof)
+	if len(etrangers) != 2 || etrangers[0] != "ami" || etrangers[1] != "vieux-compte" {
+		t.Errorf("étrangers = %v", etrangers)
+	}
+	if sans := remise.Strangers([]string{"ecote", "vieux-compte", "ami"}, prof); len(sans) != 0 {
+		t.Errorf("tout le monde est attendu, et pourtant : %v", sans)
+	}
+}
+
+// Ce qu'un écran montre comme relevé est ce qu'aucun envoi n'a dépassé : l'âge
+// du relevé n'y entre pas, et un dépôt absent de l'inventaire garde le sien.
+func TestCompleteGardeCeQuAucunEnvoiNADepasse(t *testing.T) {
+	ancien := groups.Handin{Commits: 3, Seen: "2026-09-01T08:00:00Z"}
+	recent := groups.Handin{Commits: 5, Seen: "2026-09-30T12:00:00Z"}
+	inventaire := []groups.RepoInfo{
+		{Name: "tp1-ecote", PushedAt: "2026-08-31T18:00:00Z"},
+		{Name: "TP1-JLPICARD", PushedAt: "2026-09-30T12:05:00Z"},
+	}
+	completes := groups.Complete(inventaire, map[string]groups.Handin{
+		"tp1-ecote": ancien, "tp1-jlpicard": recent, "tp1-adopte": ancien,
+	})
+	if _, garde := completes["tp1-ecote"]; !garde {
+		t.Error("un relevé d'un mois, que rien n'a dépassé, est écarté")
+	}
+	if _, garde := completes["tp1-jlpicard"]; garde {
+		t.Error("un relevé dépassé par un envoi est gardé")
+	}
+	if _, garde := completes["tp1-adopte"]; !garde {
+		t.Error("un dépôt absent de l'inventaire perd son relevé")
+	}
+}
+
 // Le dernier envoi d'un dépôt ignore ce que l'enseignant y a poussé, tant que
 // l'historique relevé le permet ; sinon, il reste celui que GitHub donne.
 func TestLActiviteIgnoreCeQueLEnseignantAPousse(t *testing.T) {

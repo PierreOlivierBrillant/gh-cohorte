@@ -330,9 +330,13 @@ func (s *Server) handleSameCandidates(writer http.ResponseWriter, request *http.
 		fail(writer, err)
 		return
 	}
+	// Les comptes vus dans ses dépôts passent en tête : le plus souvent, c'est
+	// elle-même sous un autre compte, et c'est précisément ce qu'on cherche.
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"username":   compte,
 		"candidates": users.Candidates(annuaire.rows, compte),
+		"seen": users.Seen(annuaire.rows, annuaire.set,
+			s.histoires(s.org(), annuaire.repos), compte),
 	})
 }
 
@@ -354,8 +358,11 @@ func (s *Server) handleJoin(writer http.ResponseWriter, request *http.Request) {
 		fail(writer, err)
 		return
 	}
-	reunion, err := users.PlanJoin(annuaire.rows, annuaire.set, s.deps.Viewer, org,
-		request.PathValue("account"), body.SameAs)
+	// Un compte vu dans l'historique d'un dépôt n'est pas une faute de frappe :
+	// la réunion l'accepte même s'il n'est d'aucun groupe ni du registre.
+	compte := request.PathValue("account")
+	lignes := users.Witness(annuaire.rows, s.histoires(org, annuaire.repos), compte, body.SameAs)
+	reunion, err := users.PlanJoin(lignes, annuaire.set, s.deps.Viewer, org, compte, body.SameAs)
 	if err != nil {
 		fail(writer, err)
 		return

@@ -151,6 +151,14 @@ type Review struct {
 	// porte la trace. Un dépôt d'équipe en nomme plusieurs ; un dépôt
 	// individuel, au plus une.
 	Silent []roster.Person `json:"silent,omitempty"`
+	// Strangers nomme les comptes qui ont commis dans le dépôt sans qu'il les
+	// vise ni qu'ils enseignent. Le plus souvent c'est la personne visée sous
+	// un autre compte — un courriel resté configuré sur un vieux compte, et
+	// GitHub attribue le commit à ce compte-là, quel que soit celui qui a
+	// poussé ; parfois c'est quelqu'un d'autre. Rien n'en est déduit : c'est à
+	// qui enseigne de réunir les deux comptes, ou non, et il faut d'abord
+	// qu'il le voie.
+	Strangers []string `json:"strangers,omitempty"`
 }
 
 // Missing dit qu'au moins une personne visée n'a rien remis.
@@ -199,11 +207,23 @@ func (c Classroom) Review(repoName string, remise groups.Handin, due time.Time,
 			bilan.Late = dernier.After(due)
 		}
 	}
-	for _, personne := range c.Targets(repoName, equipes) {
+	cibles := c.Targets(repoName, equipes)
+	for _, personne := range cibles {
 		if remise.By(personne.Accounts()) > 0 || remise.Signed(personne.FullName) {
 			continue
 		}
 		bilan.Silent = append(bilan.Silent, personne)
+	}
+	// Sans savoir qui enseigne, un étranger ne se distingue pas d'un
+	// enseignant : mieux vaut ne rien dire que prendre l'un pour l'autre. Un
+	// dépôt que rien ne vise n'a pas d'étrangers non plus : tout le monde y est
+	// inattendu, et cela ne dit rien.
+	if c.enseignants != nil && len(cibles) > 0 {
+		attendus := make([]string, 0, len(cibles))
+		for _, personne := range cibles {
+			attendus = append(attendus, personne.Accounts()...)
+		}
+		bilan.Strangers = remise.Strangers(attendus, c.enseignants.Teaches)
 	}
 	return bilan
 }

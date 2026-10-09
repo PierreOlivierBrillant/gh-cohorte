@@ -85,6 +85,9 @@ func TestDrapeauHandinsSignaleLeRetardEtLeSilence(t *testing.T) {
 		"en retard",
 		// Le dépôt que seul l'enseignant a garni nomme celui qui n'a rien remis.
 		"rien de",
+		// Et il nomme qui y a commis sans y être attendu : le registre ne
+		// déclare personne enseignant, « prof » y est donc un inconnu.
+		"commits de @prof",
 	)
 }
 

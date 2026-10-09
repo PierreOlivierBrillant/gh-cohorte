@@ -7,8 +7,10 @@ import (
 	"github.com/PierreOlivierBrillant/gh-milou/internal/groups"
 	"github.com/PierreOlivierBrillant/gh-milou/internal/identity"
 	"github.com/PierreOlivierBrillant/gh-milou/internal/naming"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/roster"
 	"github.com/PierreOlivierBrillant/gh-milou/internal/teams"
 	"github.com/PierreOlivierBrillant/gh-milou/internal/ui"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/users"
 	"github.com/PierreOlivierBrillant/gh-milou/internal/valid"
 )
 
@@ -60,13 +62,15 @@ func (m *manageSession) equipesDe(cours classroom.Classroom) []teams.Team {
 
 // bilans confronte les dépôts affichés à ce qu'on sait déjà de leurs
 // historiques. Rien n'est demandé à GitHub : c'est « remises » qui va chercher,
-// et la liste ne montre que ce qui a déjà été relevé.
+// et la liste ne montre que ce qui a déjà été relevé — et qu'aucun envoi n'a
+// dépassé depuis. C'est l'inventaire qui le dit, pas l'âge du relevé : la même
+// règle qu'au navigateur, décidée au même endroit.
 func (m *manageSession) bilans(group *groups.Group) map[string]classroom.Review {
 	noms := make([]string, 0, group.Len())
 	for _, repo := range group.Repos {
 		noms = append(noms, repo.Name)
 	}
-	remises := m.resolver.Handins(m.org, noms, identity.Cached, nil)
+	remises := groups.Complete(m.repos, m.resolver.Histories(m.org, noms))
 	if len(remises) == 0 {
 		return nil
 	}
@@ -235,28 +239,33 @@ func (m *manageSession) fixerEcheance(cours classroom.Classroom, nom, due string
 // et où en est la remise. Un dépôt qu'on n'a pas encore relevé ne prétend
 // rien : ses deux cases sont vides, et ce n'est pas la même chose qu'un dépôt
 // vide.
-//
-// L'état vient du domaine, et le mot qu'il porte est celui que le navigateur
-// montre. Ce qui s'y ajoute ici est le détail d'une équipe qui a remis sans que
-// tous ses membres y aient touché : l'état la dit remise, et il l'est.
 func resumeDeRemise(console *ui.Console, bilan classroom.Review,
 	etat classroom.HandinState) (string, string) {
 	if etat == classroom.Unread {
 		return console.Dim("—"), console.Dim("—")
 	}
-	commits := itoa(bilan.Commits)
+	return itoa(bilan.Commits), verdictDeRemise(console, bilan, etat) + etrangers(console, bilan)
+}
+
+// verdictDeRemise dit d'un mot où en est la remise.
+//
+// L'état vient du domaine, et le mot qu'il porte est celui que le navigateur
+// montre. Ce qui s'y ajoute ici est le détail d'une équipe qui a remis sans que
+// tous ses membres y aient touché : l'état la dit remise, et il l'est.
+func verdictDeRemise(console *ui.Console, bilan classroom.Review,
+	etat classroom.HandinState) string {
 	switch etat {
 	case classroom.Overdue:
-		return commits, console.Err(string(classroom.Overdue))
+		return console.Err(string(classroom.Overdue))
 	case classroom.Unaccepted:
-		return commits, console.Warn(string(classroom.Unaccepted))
+		return console.Warn(string(classroom.Unaccepted))
 	case classroom.Unsent:
 		// Nommer ceux qui se taisent ne dirait rien de plus que la colonne
 		// d'à côté, qui porte déjà leur nom.
 		if bilan.Commits == 0 && !bilan.Missing() {
-			return commits, console.Dim("aucun commit")
+			return console.Dim("aucun commit")
 		}
-		return commits, string(classroom.Unsent)
+		return string(classroom.Unsent)
 	}
 	if bilan.Missing() {
 		// Une équipe où l'un seulement se tait : le dépôt a reçu quelque chose,
@@ -265,9 +274,102 @@ func resumeDeRemise(console *ui.Console, bilan classroom.Review,
 		for _, personne := range bilan.Silent {
 			noms = append(noms, nommer(personne))
 		}
-		return commits, "rien de " + strings.Join(noms, ", ")
+		return "rien de " + strings.Join(noms, ", ")
 	}
-	return commits, string(classroom.Delivered)
+	return string(classroom.Delivered)
+}
+
+// etrangers nomme les comptes qui ont commis sans y être attendus : le plus
+// souvent l'étudiant sous un autre compte, que « Réunir » lui rattache.
+func etrangers(console *ui.Console, bilan classroom.Review) string {
+	if len(bilan.Strangers) == 0 {
+		return ""
+	}
+	return " · " + console.Warn("commits de @"+strings.Join(bilan.Strangers, ", @"))
+}
+
+// reunirEtranger réunit à son étudiant un compte qui a commis dans son dépôt
+// sans être le sien. C'est le cas courant d'un courriel resté configuré sur un
+// vieux compte : GitHub attribue les commits à ce compte-là, et l'étudiant
+// paraît muet dans son propre dépôt. Les candidats viennent du dernier relevé ;
+// la décision reste celle de qui enseigne, et elle s'écrit au registre.
+func (m *manageSession) reunirEtranger(group *groups.Group) error {
+	console := m.session.Console
+	cours, _, reconnu := m.travail(group)
+	if !reconnu {
+		console.Note("« %s » ne dit pas à quel groupe il appartient : rien ne dit qui "+
+			"chaque dépôt vise.", group.Prefix)
+		return nil
+	}
+	type paire struct {
+		repo, etranger string
+		personne       roster.Person
+	}
+	bilans := m.bilans(group)
+	equipes := m.equipesDe(cours)
+	paires := make([]paire, 0)
+	for _, repo := range group.Repos {
+		bilan, releve := bilans[repo.Name]
+		if !releve || len(bilan.Strangers) == 0 {
+			continue
+		}
+		// Seul un dépôt qui vise une personne dit à qui réunir le compte :
+		// dans un dépôt d'équipe, rien ne dit lequel des membres c'est.
+		cibles := cours.Targets(repo.Name, equipes)
+		if len(cibles) != 1 {
+			continue
+		}
+		for _, etranger := range bilan.Strangers {
+			paires = append(paires, paire{repo: repo.Name, etranger: etranger, personne: cibles[0]})
+		}
+	}
+	if len(paires) == 0 {
+		console.Note("Aucun compte inattendu dans les historiques relevés de « %s ». "+
+			"« Relever les commits et les remises » les lit.", group.Prefix)
+		return nil
+	}
+
+	parChoix := make(map[string]paire, len(paires))
+	options := make([]ui.Option, 0, len(paires)+1)
+	for _, item := range paires {
+		valeur := item.repo + "\x00" + item.etranger
+		parChoix[valeur] = item
+		options = append(options, ui.Option{Value: valeur,
+			Label: "@" + item.etranger + " → " + nommer(item.personne) + "  (" + item.repo + ")"})
+	}
+	options = append(options, ui.Option{Value: "annuler", Label: "Annuler"})
+	console.Note("Rien ne se déduit d'un commit : un ami qui aide commet aussi. Réunir " +
+		"deux comptes dit qu'ils sont une même personne.")
+	choix, err := m.session.Prompt.Choose("Compte à réunir", options, options[0].Value)
+	if err != nil || choix == "annuler" {
+		return err
+	}
+	item := parChoix[choix]
+
+	vue, err := m.session.orgView(m.org, false)
+	if err != nil {
+		return err
+	}
+	// Le compte n'est d'aucun groupe : c'est l'historique qui en témoigne.
+	lignes := users.Witness(vue.rows(), m.session.histoires(m.org, vue.repos), item.etranger)
+	reunion, err := users.PlanJoin(lignes, vue.set, m.session.Viewer, m.org,
+		item.etranger, item.personne.Username)
+	if err != nil {
+		console.Failure("%v", err)
+		return nil
+	}
+	m.session.printJoining(reunion)
+	confirme, err := m.session.Prompt.Confirm(
+		"Réunir @"+reunion.Account+" à @"+reunion.Principal+" ?", false)
+	if err != nil || !confirme {
+		return err
+	}
+	if m.session.applyJoin(m.org, reunion) == ExitOK {
+		// Le registre a changé : la liste le relit, et l'étudiant n'y est
+		// plus muet.
+		m.show(group)
+	}
+	return nil
 }
 
 // dueFromFlag applique la date cible donnée en ligne de commande, sans rien
