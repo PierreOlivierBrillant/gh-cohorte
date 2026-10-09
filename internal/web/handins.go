@@ -64,11 +64,18 @@ func (s *Server) handleSetDeadline(writer http.ResponseWriter, request *http.Req
 // remisesConnues rend ce qu'on sait déjà des historiques, sans rien demander à
 // GitHub. Les dépôts qu'on n'a pas encore relevés sont simplement absents : un
 // écran doit pouvoir distinguer « rien remis » de « pas encore regardé ».
-func (s *Server) remisesConnues(org string, noms []string) map[string]groups.Handin {
+//
+// C'est l'inventaire qui dit si un relevé vaut encore, pas son âge. Un
+// historique que rien n'a dépassé reste vrai des heures après, et le laisser
+// s'effacer de l'écran ferait croire qu'on n'a jamais regardé ; un historique
+// qu'un envoi a dépassé n'est plus montré, et la colonne dit alors de relever
+// plutôt que d'afficher un compte faux.
+func (s *Server) remisesConnues(org string, noms []string,
+	inventaire []groups.RepoInfo) map[string]groups.Handin {
 	if len(noms) == 0 {
 		return nil
 	}
-	return s.resolver(org).Handins(org, noms, identity.Cached, nil)
+	return groups.Complete(inventaire, s.resolver(org).Histories(org, noms))
 }
 
 // activite rend l'inventaire dont le dernier envoi ignore ce que les
@@ -78,11 +85,17 @@ func (s *Server) remisesConnues(org string, noms []string) map[string]groups.Han
 // lire l'inventaire tel que GitHub l'a rendu.
 func (s *Server) activite(org string, repos []groups.RepoInfo) []groups.RepoInfo {
 	set, _ := s.names(org)
+	return groups.Activity(repos, s.histoires(org, repos), set.Teaches)
+}
+
+// histoires rend les historiques déjà relevés des dépôts d'un inventaire, si
+// vieux soient-ils, sans rien demander à GitHub.
+func (s *Server) histoires(org string, repos []groups.RepoInfo) map[string]groups.Handin {
 	noms := make([]string, 0, len(repos))
 	for _, repo := range repos {
 		noms = append(noms, repo.Name)
 	}
-	return groups.Activity(repos, s.resolver(org).Histories(org, noms), set.Teaches)
+	return s.resolver(org).Histories(org, noms)
 }
 
 // jusqua lit ce que l'adresse demande : « refresh=1 » oublie ce qu'on savait,

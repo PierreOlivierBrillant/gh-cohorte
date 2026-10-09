@@ -188,7 +188,7 @@ func (s *Server) handleClassroom(writer http.ResponseWriter, request *http.Reque
 	// Les pastilles paraissent sans rien redemander à GitHub : ce qu'on a déjà
 	// relevé suffit à les allumer, et ce qu'on ignore se voit à « seen ».
 	fiche.Assignments = cours.WithHandins(travaux, repos, equipes,
-		s.remisesConnues(cours.Org, reposDuGroupe(cours, repos, travaux)))
+		s.remisesConnues(cours.Org, reposDuGroupe(cours, repos, travaux), repos))
 	fiche.Teams = len(equipes)
 	fiche.Source = source
 	writeJSON(writer, http.StatusOK, fiche)
@@ -864,6 +864,10 @@ type assignmentRepo struct {
 	Last    string          `json:"last,omitempty"`
 	Late    bool            `json:"late"`
 	Silent  []roster.Person `json:"silent,omitempty"`
+	// Strangers nomme les comptes qui ont commis ici sans y être attendus :
+	// la personne visée sous un autre compte, le plus souvent. La page propose
+	// de les lui réunir ; c'est à qui enseigne de décider.
+	Strangers []string `json:"strangers,omitempty"`
 	// State résume les champs ci-dessus d'un mot — « remis », « en retard »,
 	// « non accepté »… C'est ce qu'une pastille montre et ce sur quoi le
 	// filtre porte ; le décider ici plutôt qu'au navigateur est ce qui lui
@@ -959,7 +963,7 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 	// attendre, et le bouton « Remises » va chercher ce qui manque. Les accès
 	// suivent le même chemin — c'est ce que le préchargement prépare, et il n'y
 	// a pas de raison de faire cliquer pour montrer ce qu'on sait déjà.
-	remises := s.remisesConnues(cours.Org, tous)
+	remises := s.remisesConnues(cours.Org, tous, repos)
 	acces := s.resolver(cours.Org).Accesses(cours.Org, tous, identity.Cached, nil)
 	droit := cours.Settings(cours.ShortName(id)).Permission
 	echeance, _ := valid.ParseDue(cours.DueOf(id))
@@ -983,6 +987,7 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 			bilan = cours.Review(repo.Name, remise, echeance, equipes)
 			ligne.Seen, ligne.Commits = true, bilan.Commits
 			ligne.Last, ligne.Late, ligne.Silent = bilan.Last, bilan.Late, bilan.Silent
+			ligne.Strangers = bilan.Strangers
 		}
 		connu, inspecte := acces[repo.Name]
 		if inspecte {
@@ -1013,9 +1018,12 @@ func (s *Server) handleAssignment(writer http.ResponseWriter, request *http.Requ
 			nature = travail.Kind
 		}
 	}
+	// « may_decide » dit si la page peut proposer de réunir deux comptes depuis
+	// une ligne : c'est une décision d'enseignant, et la fiche le dit déjà.
+	set, _ := s.names(cours.Org)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"id": id, "name": cours.ShortName(id), "repos": lignes, "kind": nature,
-		"due": cours.DueOf(id),
+		"due": cours.DueOf(id), "may_decide": users.MayDecide(set, s.deps.Viewer),
 		// Le total dit combien le filtre a écarté ; « names » nomme tous les
 		// dépôts du travail, filtrés compris — ce qu'on cache à l'écran ne sort
 		// pas du travail pour autant.

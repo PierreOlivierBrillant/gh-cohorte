@@ -35,7 +35,10 @@ func (s *Session) sameFromFlags(org, account string) (fini bool, code int, err e
 		}
 		return false, s.applySplit(org, separation), nil
 	}
-	reunion, err := users.PlanJoin(vue.rows(), vue.set, s.Viewer, org, account, s.Options.SameAs)
+	// Un compte vu dans l'historique d'un dépôt n'est pas une faute de frappe :
+	// la réunion l'accepte même s'il n'est d'aucun groupe ni du registre.
+	lignes := users.Witness(vue.rows(), s.histoires(org, vue.repos), account, s.Options.SameAs)
+	reunion, err := users.PlanJoin(lignes, vue.set, s.Viewer, org, account, s.Options.SameAs)
 	if err != nil {
 		return true, ExitValidation, err
 	}

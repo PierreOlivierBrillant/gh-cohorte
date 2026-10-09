@@ -288,6 +288,16 @@ func (s *State) AcceptInvitations(fullName string) {
 	delete(s.Invitations, fullName)
 }
 
+// Touch date le dernier envoi d'un dépôt : ce qu'un étudiant vient de pousser,
+// après qu'on a relevé son historique par exemple.
+func (s *State) Touch(fullName, pushedAt string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if repo, found := s.Repos[fullName]; found {
+		repo.PushedAt = pushedAt
+	}
+}
+
 // CallCount compte les appels reçus dont le chemin contient le fragment donné.
 func (s *State) CallCount(fragment string) int {
 	s.mutex.Lock()

@@ -45,6 +45,7 @@ const Arret = 2 * time.Second
 type Reader interface {
 	Handins(org string, repos []string, jusqua identity.Reading,
 		onProgress func(done, total int, repo string)) map[string]groups.Handin
+	Histories(org string, repos []string) map[string]groups.Handin
 	Accesses(org string, repos []string, jusqua identity.Reading,
 		onProgress func(done, total int, repo string)) map[string]identity.Access
 }
@@ -115,14 +116,25 @@ func (w *Warmer) Warm(reader Reader, org string, cours []classroom.Classroom,
 
 	go func() {
 		defer w.fini.Done()
-		w.lire(reader, org, noms)
+		w.lire(reader, org, noms, repos)
 	}()
 }
 
 // lire enchaîne les deux lectures, lot par lot. Les historiques d'abord : ils
 // se périment le plus vite, et c'est la pastille qu'on vient voir.
-func (w *Warmer) lire(reader Reader, org string, noms []string) {
-	for _, lot := range lots(noms) {
+//
+// Un historique qu'un envoi a dépassé est relu d'office, si récent soit-il :
+// l'écran ne le montre plus, et la mémoire seule le croirait encore bon. Les
+// autres ne sont relus que s'ils manquent ou ont vieilli.
+func (w *Warmer) lire(reader Reader, org string, noms []string, repos []groups.RepoInfo) {
+	depasses, autres := partager(noms, repos, reader.Histories(org, noms))
+	for _, lot := range lots(depasses) {
+		if w.Stopped() {
+			return
+		}
+		reader.Handins(org, lot, identity.Refresh, nil)
+	}
+	for _, lot := range lots(autres) {
 		if w.Stopped() {
 			return
 		}
@@ -134,6 +146,23 @@ func (w *Warmer) lire(reader Reader, org string, noms []string) {
 		}
 		reader.Accesses(org, lot, identity.Fetch, nil)
 	}
+}
+
+// partager sépare les dépôts dont l'historique relevé a été dépassé par un
+// envoi de tous les autres — jamais relevés, ou relevés et encore complets.
+func partager(noms []string, repos []groups.RepoInfo,
+	histoires map[string]groups.Handin) (depasses, autres []string) {
+	completes := groups.Complete(repos, histoires)
+	for _, nom := range noms {
+		_, releve := histoires[nom]
+		_, complete := completes[nom]
+		if releve && !complete {
+			depasses = append(depasses, nom)
+			continue
+		}
+		autres = append(autres, nom)
+	}
+	return depasses, autres
 }
 
 // Stop abandonne les préchargements en cours : les lots qui restent ne partent

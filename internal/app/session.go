@@ -117,12 +117,17 @@ func (s *Session) registryOf(org string) *registry.Store {
 // continue de lire l'inventaire tel que GitHub l'a rendu.
 func (s *Session) activite(org string, repos []groups.RepoInfo) []groups.RepoInfo {
 	set, _ := s.names(org)
+	return groups.Activity(repos, s.histoires(org, repos), set.Teaches)
+}
+
+// histoires rend les historiques déjà relevés des dépôts d'un inventaire, si
+// vieux soient-ils, sans rien demander à GitHub.
+func (s *Session) histoires(org string, repos []groups.RepoInfo) map[string]groups.Handin {
 	noms := make([]string, 0, len(repos))
 	for _, repo := range repos {
 		noms = append(noms, repo.Name)
 	}
-	historiques := identity.New(s.Client, s.Cache, s.Options.Jobs).Histories(org, noms)
-	return groups.Activity(repos, historiques, set.Teaches)
+	return identity.New(s.Client, s.Cache, s.Options.Jobs).Histories(org, noms)
 }
 
 func (s *Session) names(org string) (*registry.Set, string) {

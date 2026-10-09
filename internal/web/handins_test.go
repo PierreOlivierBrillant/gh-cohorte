@@ -1,11 +1,18 @@
 package web_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/PierreOlivierBrillant/gh-milou/internal/cache"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/classroom"
 	"github.com/PierreOlivierBrillant/gh-milou/internal/fakegh"
+	"github.com/PierreOlivierBrillant/gh-milou/internal/web"
 )
 
 // travailAvecHistoriques monte un groupe de deux étudiantes, chacune avec son
@@ -152,6 +159,121 @@ func TestReleveDesRemisesSignaleLeRetardEtLeSilence(t *testing.T) {
 	}
 	if silencieux[0].(map[string]any)["username"] != "jlpicard" {
 		t.Errorf("silent = %#v", silencieux[0])
+	}
+}
+
+// relance rouvre l'interface sur la même mémoire, dont chaque entrée est
+// reculée de « par » : c'est le poste qu'on rallume après une pause, sans que
+// personne ait rien demandé à GitHub entre-temps.
+func (h *harnais) relance(par time.Duration, cours ...classroom.Classroom) *harnais {
+	h.t.Helper()
+	dossier := filepath.Join(filepath.Dir(h.Groupes), "cache")
+	chemin := filepath.Join(dossier, "cache.json")
+	contenu, err := os.ReadFile(chemin)
+	if err != nil {
+		h.t.Fatalf("mémoire : %v", err)
+	}
+	var entrees map[string]struct {
+		At    float64         `json:"at"`
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(contenu, &entrees); err != nil {
+		h.t.Fatalf("mémoire illisible : %v", err)
+	}
+	for cle, entree := range entrees {
+		entree.At -= par.Seconds()
+		entrees[cle] = entree
+	}
+	vieillie, _ := json.Marshal(entrees)
+	if err := os.WriteFile(chemin, vieillie, 0o600); err != nil {
+		h.t.Fatalf("mémoire : %v", err)
+	}
+	return nouveauAvec(h.t, h.State, func(deps *web.Deps) {
+		deps.Cache = cache.NewIn(dossier, true)
+		store := classroom.Open(classroom.PathNextTo(deps.ConfigFile))
+		for _, item := range cours {
+			if _, err := store.Save(item); err != nil {
+				h.t.Fatalf("déclaration : %v", err)
+			}
+		}
+	})
+}
+
+// Un relevé ne s'efface pas de l'écran parce qu'une heure a passé : tant que
+// rien n'a été poussé depuis, il dit encore la vérité, et le poste qu'on
+// rallume deux heures plus tard le montre sans rien redemander.
+func TestUnReleveQueRienNADepasseSeMontreEncoreDesHeuresApres(t *testing.T) {
+	h := travailAvecHistoriques(t)
+	h.travail(http.MethodPost, "/api/classrooms/a26.5n6.01/assignments/tp1/handins", nil)
+	lectures := h.State.CallCount("/contributors")
+
+	apres := h.relance(2*time.Hour,
+		cohorte("a26", "5n6", "01", "Émilie Côté", "ecote", "Jean-Luc Picard", "jlpicard"))
+	var detail struct {
+		Repos []struct {
+			Name    string `json:"name"`
+			Seen    bool   `json:"seen"`
+			Commits int    `json:"commits"`
+			State   string `json:"state"`
+		} `json:"repos"`
+	}
+	apres.json(http.MethodGet, "/api/classrooms/a26.5n6.01/assignments/tp1", nil, &detail)
+	if len(detail.Repos) != 2 {
+		t.Fatalf("dépôts : %+v", detail.Repos)
+	}
+	for _, repo := range detail.Repos {
+		if !repo.Seen || repo.State == "non relevé" {
+			t.Errorf("%s : relevé il y a deux heures, et pourtant « %s » (%+v)",
+				repo.Name, repo.State, repo)
+		}
+	}
+	if encore := h.State.CallCount("/contributors"); encore != lectures {
+		t.Errorf("%d historique(s) relus pour montrer ce qu'on savait", encore-lectures)
+	}
+
+	// Les pastilles de la liste des travaux lisent la même mémoire.
+	var fiche struct {
+		Assignments []struct {
+			Seen int `json:"seen"`
+		} `json:"assignments"`
+	}
+	apres.json(http.MethodGet, "/api/classrooms/a26.5n6.01", nil, &fiche)
+	if len(fiche.Assignments) != 1 || fiche.Assignments[0].Seen != 2 {
+		t.Errorf("travaux : %+v", fiche.Assignments)
+	}
+}
+
+// Un relevé vaut tant qu'aucun envoi ne l'a dépassé, et c'est l'inventaire qui
+// le dit : un dépôt qui a reçu quelque chose depuis redevient « non relevé »
+// plutôt que de montrer un compte faux, et les autres gardent le leur.
+func TestUnEnvoiPosterieurAuReleveLeRendANouveauNonReleve(t *testing.T) {
+	h := travailAvecHistoriques(t)
+	h.travail(http.MethodPost, "/api/classrooms/a26.5n6.01/assignments/tp1/handins", nil)
+
+	// Émilie pousse deux minutes après le relevé : au-delà de la marge que le
+	// relevé accorde aux horloges.
+	h.State.Touch("acme/a26.5n6.01.tp1.emilie-cote",
+		time.Now().Add(2*time.Minute).UTC().Format(time.RFC3339))
+
+	var detail struct {
+		Repos []struct {
+			Name  string `json:"name"`
+			Seen  bool   `json:"seen"`
+			State string `json:"state"`
+		} `json:"repos"`
+	}
+	h.json(http.MethodGet, "/api/classrooms/a26.5n6.01/assignments/tp1?refresh=1", nil, &detail)
+	for _, repo := range detail.Repos {
+		switch repo.Name {
+		case "a26.5n6.01.tp1.emilie-cote":
+			if repo.Seen || repo.State != "non relevé" {
+				t.Errorf("un dépôt poussé depuis le relevé paraît encore relevé : %+v", repo)
+			}
+		case "a26.5n6.01.tp1.jean-luc-picard":
+			if !repo.Seen {
+				t.Errorf("un dépôt que rien n'a dépassé a perdu son relevé : %+v", repo)
+			}
+		}
 	}
 }
 

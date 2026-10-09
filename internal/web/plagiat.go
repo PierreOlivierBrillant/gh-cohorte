@@ -332,7 +332,7 @@ func (s *Server) plagiatTargets(cours classroom.Classroom, id string,
 	for _, cible := range cibles {
 		noms = append(noms, cible.Repo)
 	}
-	remises := s.remisesConnues(cours.Org, noms)
+	remises := s.remisesConnues(cours.Org, noms, repos)
 
 	gardees := make([]corpus.Target, 0, len(cibles))
 	for _, cible := range cibles {

@@ -39,6 +39,7 @@ var manageMenu = ui.Options(
 	"pull", "Mettre à jour des clones existants",
 	"supprimer", "Supprimer un dépôt",
 	"remises", "Relever les commits et les remises",
+	"reunir", "Réunir à son étudiant un compte vu dans son dépôt",
 	"plagiat", "Comparer les copies entre elles",
 	"envoi", "Envoyer les copies anonymisées à un collègue",
 	"publier", "Publier l'index d'empreintes de ce travail",
@@ -1703,6 +1704,8 @@ func (m *manageSession) dispatch(action string, group *groups.Group) error {
 		return m.deleteRepo(group)
 	case "remises":
 		return m.remises(group)
+	case "reunir":
+		return m.reunirEtranger(group)
 	case "plagiat":
 		return m.plagiat(group)
 	case "envoi":
